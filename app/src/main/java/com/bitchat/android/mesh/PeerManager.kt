@@ -15,16 +15,17 @@ data class PeerInfo(
     var isConnected: Boolean,
     var isDirectConnection: Boolean,
     var noisePublicKey: ByteArray?,
-    var signingPublicKey: ByteArray?,      // NEW: Ed25519 public key for verification
-    var isVerifiedNickname: Boolean,       // NEW: Verification status flag
+    var signingPublicKey: ByteArray?,      // Ed25519 public key for verification
+    var isVerifiedNickname: Boolean,       // Verification status flag
+    var solanaAddress: String? = null,     // Solana wallet address (Base58) from ANNOUNCE
     var lastSeen: Long  // Using Long instead of Date for simplicity
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
-        
+
         other as PeerInfo
-        
+
         if (id != other.id) return false
         if (nickname != other.nickname) return false
         if (isConnected != other.isConnected) return false
@@ -38,11 +39,12 @@ data class PeerInfo(
             if (!signingPublicKey.contentEquals(other.signingPublicKey)) return false
         } else if (other.signingPublicKey != null) return false
         if (isVerifiedNickname != other.isVerifiedNickname) return false
+        if (solanaAddress != other.solanaAddress) return false
         if (lastSeen != other.lastSeen) return false
-        
+
         return true
     }
-    
+
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + nickname.hashCode()
@@ -51,6 +53,7 @@ data class PeerInfo(
         result = 31 * result + (noisePublicKey?.contentHashCode() ?: 0)
         result = 31 * result + (signingPublicKey?.contentHashCode() ?: 0)
         result = 31 * result + isVerifiedNickname.hashCode()
+        result = 31 * result + (solanaAddress?.hashCode() ?: 0)
         result = 31 * result + lastSeen.hashCode()
         return result
     }
@@ -104,14 +107,15 @@ class PeerManager {
         nickname: String,
         noisePublicKey: ByteArray,
         signingPublicKey: ByteArray,
-        isVerified: Boolean
+        isVerified: Boolean,
+        solanaAddress: String? = null
     ): Boolean {
         if (peerID == "unknown") return false
-        
+
         val now = System.currentTimeMillis()
         val existingPeer = peers[peerID]
         val isNewPeer = existingPeer == null
-        
+
         // Update or create peer info
         val peerInfo = PeerInfo(
             id = peerID,
@@ -121,6 +125,7 @@ class PeerManager {
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
             isVerifiedNickname = isVerified,
+            solanaAddress = solanaAddress ?: existingPeer?.solanaAddress,
             lastSeen = now
         )
         

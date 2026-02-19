@@ -2,14 +2,13 @@ package com.bitchat.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowUpward
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -18,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import com.bitchat.android.R
@@ -31,6 +29,8 @@ import com.bitchat.android.nostr.LocationNotesManager
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.Calendar
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * Location Notes Sheet - EXACT iOS UI match for bitchat
@@ -46,11 +46,10 @@ fun LocationNotesSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
     
     // iOS color scheme
-    val backgroundColor = if (isDark) Color.Black else Color.White
-    val accentGreen = if (isDark) Color.Green else Color(0xFF008000) // dark: green, light: dark green (0, 0.5, 0)
+    val backgroundColor = Color.Black
+    val accentGreen = BitchatColors.AccentGreen // dark: green, light: dark green (0, 0.5, 0)
     
     // Managers
     val notesManager = remember { LocationNotesManager.getInstance() }
@@ -94,7 +93,7 @@ fun LocationNotesSheet(
         modifier = modifier,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = backgroundColor,
-        contentColor = if (isDark) Color.White else Color.Black
+        contentColor = Color.White
     ) {
         Column(
             modifier = Modifier
@@ -226,7 +225,7 @@ private fun LocationNotesHeader(
                     geohash,
                     count
                 ),
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontSize = 18.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -240,7 +239,7 @@ private fun LocationNotesHeader(
             ) {
                 Text(
                     text = "✕",
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -255,7 +254,7 @@ private fun LocationNotesHeader(
             if (name.isNotEmpty()) {
                 Text(
                     text = name,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = 12.sp,
                     color = accentGreen
                 )
@@ -266,7 +265,7 @@ private fun LocationNotesHeader(
         // Description
         Text(
             text = stringResource(R.string.location_notes_description),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -276,8 +275,8 @@ private fun LocationNotesHeader(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.location_notes_relays_unavailable),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontFamily = CourierPrimeFamily,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
@@ -307,7 +306,7 @@ private fun NoteRow(note: LocationNotesManager.Note) {
         ) {
             Text(
                 text = "@$baseName",
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -316,8 +315,8 @@ private fun NoteRow(note: LocationNotesManager.Note) {
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = ts,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             }
@@ -328,7 +327,7 @@ private fun NoteRow(note: LocationNotesManager.Note) {
         // Second row: content
         Text(
             text = note.content,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -347,7 +346,7 @@ private fun NoRelaysRow(onRetry: () -> Unit) {
     ) {
         Text(
             text = stringResource(R.string.location_notes_no_relays_title),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
@@ -355,14 +354,14 @@ private fun NoRelaysRow(onRetry: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.location_notes_no_relays_desc),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.retry),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onRetry)
@@ -389,7 +388,7 @@ private fun LoadingRow() {
         Spacer(modifier = Modifier.width(10.dp))
         Text(
             text = stringResource(R.string.loading_location_notes),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -408,7 +407,7 @@ private fun EmptyRow() {
     ) {
         Text(
             text = stringResource(R.string.location_notes_empty_title),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
@@ -416,7 +415,7 @@ private fun EmptyRow() {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.location_notes_empty_desc),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -444,7 +443,7 @@ private fun ErrorRow(message: String, onDismiss: () -> Unit) {
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = message,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -452,7 +451,7 @@ private fun ErrorRow(message: String, onDismiss: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.dismiss),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onDismiss)
@@ -472,7 +471,6 @@ private fun LocationNotesInputSection(
     backgroundColor: Color,
     onSend: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
     val colorScheme = MaterialTheme.colorScheme
     
     Row(
@@ -492,7 +490,7 @@ private fun LocationNotesInputSection(
                 onValueChange = onDraftChange,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = colorScheme.primary,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = CourierPrimeFamily
                 ),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(colorScheme.primary),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -509,7 +507,7 @@ private fun LocationNotesInputSection(
                 Text(
                     text = stringResource(R.string.location_notes_input_placeholder),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = CourierPrimeFamily
                     ),
                     color = colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.fillMaxWidth()
@@ -537,15 +535,13 @@ private fun LocationNotesInputSection(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.ArrowUpward,
+                    painter = rememberPixelPainter(PixelIcons.ArrowUp),
                     contentDescription = stringResource(R.string.send_message),
                     modifier = Modifier.size(20.dp),
                     tint = if (!sendButtonEnabled) {
                         colorScheme.onSurface.copy(alpha = 0.5f)
-                    } else if (isDark) {
-                        Color.Black // Black arrow on green in dark theme
                     } else {
-                        Color.White // White arrow on green in light theme
+                        Color.Black // Black arrow on green in dark theme
                     }
                 )
             }

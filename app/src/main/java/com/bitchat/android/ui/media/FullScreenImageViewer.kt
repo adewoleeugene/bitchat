@@ -10,9 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.window.Dialog
@@ -101,7 +101,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             text = stringResource(R.string.image_counter, (pagerState.currentPage ?: 0) + 1, imagePaths.size),
                             color = Color.White,
                             fontSize = 14.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            fontFamily = CourierPrimeFamily
                         )
                     }
                 }
@@ -120,7 +120,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             .clickable { saveToDownloads(context, imagePaths[pagerState.currentPage].toString()) },
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.material3.Icon(Icons.Filled.Download, stringResource(R.string.cd_save_current_image), tint = Color.White)
+                        androidx.compose.material3.Icon(painter = rememberPixelPainter(PixelIcons.Download), contentDescription = stringResource(R.string.cd_save_current_image), tint = Color.White)
                     }
                     Spacer(Modifier.width(12.dp))
                     Box(
@@ -130,7 +130,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             .clickable { onClose() },
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.material3.Icon(Icons.Filled.Close, stringResource(R.string.cd_close), tint = Color.White)
+                        androidx.compose.material3.Icon(painter = rememberPixelPainter(PixelIcons.Close), contentDescription = stringResource(R.string.cd_close), tint = Color.White)
                     }
                 }
             }

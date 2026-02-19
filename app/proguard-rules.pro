@@ -23,3 +23,22 @@
 -keepnames class org.torproject.jni.**
 -dontwarn info.guardianproject.arti.**
 -dontwarn org.torproject.jni.**
+
+# Room database entities
+-keep class com.bitchat.android.data.local.entities.** { *; }
+-keep class com.bitchat.android.data.local.** { *; }
+
+# Solana module
+-keep class com.bitchat.android.solana.** { *; }
+
+# EdDSA crypto
+-keep class net.i2p.crypto.eddsa.** { *; }
+-dontwarn net.i2p.crypto.eddsa.**
+
+# BIP39 mnemonic (cash.z.ecc)
+-keep class cash.z.ecc.android.bip39.** { *; }
+-dontwarn cash.z.ecc.android.bip39.**
+
+# QR Code
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**

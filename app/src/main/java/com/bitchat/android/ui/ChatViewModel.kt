@@ -6,13 +6,16 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.viewModelScope
+import com.bitchat.android.di.SolanaEntryPoint
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
 import com.bitchat.android.protocol.BitchatPacket
+import dagger.hilt.android.EntryPointAccessors
 
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.bitchat.android.util.NotificationIntervalManager
 import kotlinx.coroutines.delay
@@ -29,6 +32,8 @@ class ChatViewModel(
     val meshService: BluetoothMeshService
 ) : AndroidViewModel(application), BluetoothMeshDelegate {
     private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
+    private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
+    private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -138,6 +143,16 @@ class ChatViewModel(
     val teleportedGeo: LiveData<Set<String>> = state.teleportedGeo
     val geohashParticipantCounts: LiveData<Map<String, Int>> = state.geohashParticipantCounts
 
+    // Feed state
+    val selectedTab: LiveData<String> = state.selectedTab
+    val feedPosts: LiveData<List<com.bitchat.android.data.local.entities.FeedPostEntity>> = state.feedPosts
+    val expandedPostId: LiveData<String?> = state.expandedPostId
+    val feedReactions: LiveData<Map<String, List<com.bitchat.android.data.local.entities.FeedReactionEntity>>> = state.feedReactions
+    val feedReplies: LiveData<Map<String, List<com.bitchat.android.data.local.entities.FeedReplyEntity>>> = state.feedReplies
+    val showNewPostComposer: LiveData<Boolean> = state.showNewPostComposer
+
+    private var feedService: com.bitchat.android.feed.FeedService? = null
+
     init {
         // Note: Mesh service delegate is now set by MainActivity
         loadAndInitialize()
@@ -220,8 +235,109 @@ class ChatViewModel(
         // Note: Mesh service is now started by MainActivity
 
         // BLE receives are inserted by MessageHandler path; no VoiceNoteBus for Tor in this branch.
+
+        // Wire up Solana services to CommandProcessor via Hilt EntryPoint
+        try {
+            val solanaEntryPoint = EntryPointAccessors.fromApplication(
+                getApplication(), SolanaEntryPoint::class.java
+            )
+            commandProcessor.walletService = solanaEntryPoint.solanaWalletService()
+            commandProcessor.paymentManager = solanaEntryPoint.solanaPaymentManager()
+            commandProcessor.tokenGateService = solanaEntryPoint.tokenGateService()
+
+            // Wire up token gate service to channel manager for join validation
+            channelManager.tokenGateService = solanaEntryPoint.tokenGateService()
+
+            // Set local Solana address on mesh service for identity announcements
+            meshService.solanaAddress = solanaEntryPoint.solanaWalletService().getPublicKeyBase58()
+
+            // Wire up Solana relay handler for mesh transaction relay
+            val relayHandler = solanaEntryPoint.solanaRelayHandler()
+            meshService.solanaRelayHandler = relayHandler
+            relayHandler.onSendRelayReceipt = { receipt ->
+                meshService.broadcastSolanaRelayReceipt(receipt)
+            }
+            relayHandler.onRelayEvent = { event ->
+                val msg = BitchatMessage(
+                    sender = "system",
+                    content = "solana relay: $event",
+                    timestamp = java.util.Date(),
+                    isRelay = false
+                )
+                messageManager.addMessage(msg)
+            }
+
+            // Wire mesh relay fallback into payment manager
+            val paymentManager = solanaEntryPoint.solanaPaymentManager()
+            solanaPaymentManager = paymentManager
+            paymentManager.onRequestMeshRelay = { request ->
+                // Track the outgoing request so we can match the receipt when it arrives
+                relayHandler.trackOutgoingRequest(request.requestId)
+                meshService.broadcastSolanaRelayRequest(request)
+            }
+
+            // Wire 2-step blockhash handshake for truly offline signing
+            paymentManager.onRequestBlockhashIntent = { intent ->
+                meshService.broadcastSolanaIntentRequest(intent)
+            }
+            relayHandler.onSendBlockhashResponse = { response ->
+                meshService.broadcastSolanaBlockhashResponse(response)
+            }
+            meshService.onBlockhashResponseReceived = { response ->
+                viewModelScope.launch(Dispatchers.IO) {
+                    paymentManager.handleBlockhashResponse(response)
+                }
+            }
+
+            // Wire payment manager status events to system messages in chat
+            paymentManager.onStatusEvent = { event ->
+                val msg = BitchatMessage(
+                    sender = "system",
+                    content = "solana: $event",
+                    timestamp = java.util.Date(),
+                    isRelay = false
+                )
+                messageManager.addMessage(msg)
+            }
+
+            // Wire up message notarization service
+            notarizationService = solanaEntryPoint.messageNotarizationService()
+
+            // Observe transaction status changes and show updates in chat
+            observeTransactionStatus(solanaEntryPoint)
+        } catch (e: Exception) {
+            Log.w(TAG, "Solana services not available: ${e.message}")
+        }
+
+        // Wire up Feed service via Hilt EntryPoint
+        try {
+            val feedEntryPoint = EntryPointAccessors.fromApplication(
+                getApplication(), com.bitchat.android.di.FeedEntryPoint::class.java
+            )
+            feedService = feedEntryPoint.feedService()
+            meshService.feedService = feedService
+
+            feedService?.onBroadcastFeedPost = { payload ->
+                meshService.broadcastFeedPost(payload)
+            }
+            feedService?.onBroadcastFeedReaction = { payload ->
+                meshService.broadcastFeedReaction(payload)
+            }
+            feedService?.onBroadcastFeedReply = { payload ->
+                meshService.broadcastFeedReply(payload)
+            }
+
+            // Observe feed posts from Room
+            viewModelScope.launch {
+                feedService?.observePosts()?.collect { posts ->
+                    state.postFeedPosts(posts)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Feed service not available: ${e.message}")
+        }
     }
-    
+
     override fun onCleared() {
         super.onCleared()
         // Note: Mesh service lifecycle is now managed by MainActivity
@@ -415,13 +531,13 @@ class ChatViewModel(
     
     // MARK: - Message Sending
     
-    fun sendMessage(content: String) {
-        if (content.isEmpty()) return
-        
+    fun sendMessage(content: String): CommandResult? {
+        if (content.isEmpty()) return null
+
         // Check for commands
         if (content.startsWith("/")) {
             val selectedLocationForCommand = state.selectedLocationChannel.value
-            commandProcessor.processCommand(content, meshService, meshService.myPeerID, { messageContent, mentions, channel ->
+            return commandProcessor.processCommand(content, meshService, meshService.myPeerID, { messageContent, mentions, channel ->
                 if (selectedLocationForCommand is com.bitchat.android.geohash.ChannelID.Location) {
                     // Route command-generated public messages via Nostr in geohash channels
                     geohashViewModel.sendGeohashMessage(
@@ -435,7 +551,6 @@ class ChatViewModel(
                     meshService.sendMessage(messageContent, mentions, channel)
                 }
             }, this)
-            return
         }
         
         val mentions = messageManager.parseMentions(content, meshService.getPeerNicknames().values.toSet(), state.getNicknameValue())
@@ -530,10 +645,11 @@ class ChatViewModel(
                 }
             }
         }
+        return null
     }
 
     // MARK: - Utility Functions
-    
+
     fun getPeerIDForNickname(nickname: String): String? {
         return meshService.getPeerNicknames().entries.find { it.value == nickname }?.key
     }
@@ -711,7 +827,7 @@ class ChatViewModel(
         commandProcessor.updateCommandSuggestions(input)
     }
     
-    fun selectCommandSuggestion(suggestion: CommandSuggestion): String {
+    fun selectCommandSuggestion(suggestion: CommandSuggestion): CommandResult {
         return commandProcessor.selectCommandSuggestion(suggestion)
     }
     
@@ -733,6 +849,10 @@ class ChatViewModel(
     
     override fun didUpdatePeerList(peers: List<String>) {
         meshDelegateHandler.didUpdatePeerList(peers)
+        // When new peers connect, try to broadcast any pending Solana transactions via mesh relay
+        if (peers.isNotEmpty()) {
+            solanaPaymentManager?.tryBroadcastPending()
+        }
     }
     
     override fun didReceiveChannelLeave(channel: String, fromPeer: String) {
@@ -900,6 +1020,210 @@ class ChatViewModel(
         geohashViewModel.blockUserInGeohash(targetNickname)
     }
 
+    /**
+     * Look up a peer's Solana address by nickname.
+     */
+    fun getPeerSolanaAddress(nickname: String): String? {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return null
+        return meshService.getPeerInfo(peerID)?.solanaAddress
+    }
+
+    /**
+     * Get all peers that have a known Solana address.
+     * Returns list of (nickname, solanaAddress) pairs.
+     */
+    fun getPeersWithSolanaAddresses(): List<Pair<String, String>> {
+        val nicknames = meshService.getPeerNicknames()
+        return nicknames.mapNotNull { (peerID, nickname) ->
+            val addr = meshService.getPeerInfo(peerID)?.solanaAddress
+            if (addr != null) Pair(nickname, addr) else null
+        }
+    }
+
+    // MARK: - Message Notarization
+
+    /**
+     * Notarize a message on the Solana blockchain.
+     * Returns the SHA-256 hash on success.
+     */
+    fun notarizeMessage(message: BitchatMessage) {
+        val service = notarizationService ?: run {
+            messageManager.addMessage(BitchatMessage(
+                sender = "system",
+                content = "wallet required for notarization",
+                timestamp = java.util.Date(),
+                isRelay = false
+            ))
+            return
+        }
+        viewModelScope.launch {
+            val result = service.queueNotarization(message)
+            result.onSuccess { hash ->
+                messageManager.addMessage(BitchatMessage(
+                    sender = "system",
+                    content = "message queued for notarization\nhash: ${hash.take(16)}...",
+                    timestamp = java.util.Date(),
+                    isRelay = false
+                ))
+            }
+            result.onFailure { error ->
+                messageManager.addMessage(BitchatMessage(
+                    sender = "system",
+                    content = "notarization failed: ${error.message}",
+                    timestamp = java.util.Date(),
+                    isRelay = false
+                ))
+            }
+        }
+    }
+
+    /**
+     * Check if a message has been notarized and get the proof.
+     */
+    suspend fun getNotarizationProof(messageId: String): com.bitchat.android.data.local.entities.MessageNotarizationEntity? {
+        return notarizationService?.getProof(messageId)
+    }
+
+    // MARK: - Social Feed
+
+    fun selectTab(tab: String) {
+        state.setSelectedTab(tab)
+    }
+
+    fun createFeedPost(content: String, imageBytes: ByteArray?) {
+        val service = feedService ?: return
+        viewModelScope.launch {
+            service.createPost(
+                content, imageBytes,
+                meshService.myPeerID,
+                state.getNicknameValue() ?: meshService.myPeerID,
+                getApplication()
+            )
+        }
+    }
+
+    fun toggleFeedReaction(postId: String, emoji: String) {
+        val service = feedService ?: return
+        viewModelScope.launch {
+            service.toggleReaction(
+                postId, emoji,
+                meshService.myPeerID,
+                state.getNicknameValue() ?: meshService.myPeerID
+            )
+            refreshReactionsForPost(postId)
+        }
+    }
+
+    fun createFeedReply(parentPostId: String, content: String) {
+        val service = feedService ?: return
+        viewModelScope.launch {
+            service.createReply(
+                parentPostId, content,
+                meshService.myPeerID,
+                state.getNicknameValue() ?: meshService.myPeerID
+            )
+            refreshRepliesForPost(parentPostId)
+        }
+    }
+
+    fun expandPost(postId: String?) {
+        state.setExpandedPostId(postId)
+        if (postId != null) {
+            viewModelScope.launch {
+                refreshReactionsForPost(postId)
+                refreshRepliesForPost(postId)
+            }
+        }
+    }
+
+    fun showNewPostComposer() { state.setShowNewPostComposer(true) }
+    fun hideNewPostComposer() { state.setShowNewPostComposer(false) }
+
+    private suspend fun refreshReactionsForPost(postId: String) {
+        try {
+            val service = feedService ?: return
+            val reactions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                service.observeReactions(postId)
+            }
+            reactions.collect { reactionList ->
+                val current = state.getFeedReactionsValue().toMutableMap()
+                current[postId] = reactionList
+                state.setFeedReactions(current)
+            }
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun refreshRepliesForPost(postId: String) {
+        try {
+            val service = feedService ?: return
+            val replies = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                service.observeReplies(postId)
+            }
+            replies.collect { replyList ->
+                val current = state.getFeedRepliesValue().toMutableMap()
+                current[postId] = replyList
+                state.setFeedReplies(current)
+            }
+        } catch (_: Exception) { }
+    }
+
+    // MARK: - Solana Transaction Status Observer
+
+    /**
+     * Track confirmed/failed transaction IDs to avoid duplicate system messages.
+     */
+    private val notifiedTransactionIds = mutableSetOf<String>()
+
+    private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
+        val paymentManager = entryPoint.solanaPaymentManager()
+        viewModelScope.launch {
+            paymentManager.observeRecentTransactions().collect { transactions ->
+                for (tx in transactions) {
+                    val key = "${tx.id}:${tx.status}"
+                    if (notifiedTransactionIds.contains(key)) continue
+
+                    val amountSol = paymentManager.lamportsToSolDisplay(tx.amountLamports)
+                    val shortRecipient = if (tx.recipientPublicKey.length > 12) {
+                        "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
+                    } else tx.recipientPublicKey
+
+                    val statusMessage = when (tx.status) {
+                        com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
+                            notifiedTransactionIds.add(key)
+                            "payment: $amountSol SOL to $shortRecipient — requesting blockhash from mesh peer..."
+                        }
+                        com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
+                            notifiedTransactionIds.add(key)
+                            "payment: $amountSol SOL to $shortRecipient — broadcasting via relay peer..."
+                        }
+                        com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
+                            notifiedTransactionIds.add(key)
+                            "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                        }
+                        com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
+                            notifiedTransactionIds.add(key)
+                            "payment failed: $amountSol SOL to $shortRecipient" +
+                                if (!tx.errorMessage.isNullOrEmpty()) " - ${tx.errorMessage}" else ""
+                        }
+                        else -> null
+                    }
+
+                    if (statusMessage != null) {
+                        val systemMsg = BitchatMessage(
+                            sender = "system",
+                            content = statusMessage,
+                            timestamp = java.util.Date(),
+                            isRelay = false
+                        )
+                        messageManager.addMessage(systemMsg)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Navigation Management
     
     fun showAppInfo() {
@@ -960,16 +1284,12 @@ class ChatViewModel(
     /**
      * Get consistent color for a mesh peer by ID (iOS-compatible)
      */
-    fun colorForMeshPeer(peerID: String, isDark: Boolean): androidx.compose.ui.graphics.Color {
-        // Try to get stable Noise key, fallback to peer ID
+    fun colorForMeshPeer(peerID: String): androidx.compose.ui.graphics.Color {
         val seed = "noise:${peerID.lowercase()}"
-        return colorForPeerSeed(seed, isDark).copy()
+        return colorForPeerSeed(seed).copy()
     }
 
-    /**
-     * Get consistent color for a Nostr pubkey (iOS-compatible)
-     */
-    fun colorForNostrPubkey(pubkeyHex: String, isDark: Boolean): androidx.compose.ui.graphics.Color {
-        return geohashViewModel.colorForNostrPubkey(pubkeyHex, isDark)
+    fun colorForNostrPubkey(pubkeyHex: String): androidx.compose.ui.graphics.Color {
+        return geohashViewModel.colorForNostrPubkey(pubkeyHex)
     }
 }

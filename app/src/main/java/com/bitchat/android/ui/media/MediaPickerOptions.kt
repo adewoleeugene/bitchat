@@ -9,9 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Description
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -28,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
+import com.bitchat.android.ui.theme.BitchatColors
 
 /**
  * Media picker that offers image and file options
@@ -47,14 +47,14 @@ fun MediaPickerOptions(
             modifier = Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(4.dp))
-                .background(color = Color.Gray.copy(alpha = 0.5f))
+                .background(color = BitchatColors.TextSecondary.copy(alpha = 0.5f))
                 .clickable {
                     showOptions = true
                 },
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Filled.Add,
+                painter = rememberPixelPainter(PixelIcons.Add),
                 contentDescription = stringResource(R.string.cd_pick_media),
                 tint = Color.Black,
                 modifier = Modifier.size(20.dp)
@@ -94,7 +94,7 @@ fun MediaPickerOptions(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Add,
+                            painter = rememberPixelPainter(PixelIcons.Add),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(16.dp)
@@ -122,7 +122,7 @@ fun MediaPickerOptions(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Description,
+                            painter = rememberPixelPainter(PixelIcons.File),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.size(16.dp)

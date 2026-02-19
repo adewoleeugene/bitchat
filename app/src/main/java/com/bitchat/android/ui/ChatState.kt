@@ -4,6 +4,9 @@ import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
+import com.bitchat.android.data.local.entities.FeedPostEntity
+import com.bitchat.android.data.local.entities.FeedReactionEntity
+import com.bitchat.android.data.local.entities.FeedReplyEntity
 import com.bitchat.android.model.BitchatMessage
 
 /**
@@ -16,6 +19,12 @@ data class CommandSuggestion(
     val aliases: List<String> = emptyList(),
     val syntax: String? = null,
     val description: String
+)
+
+data class CommandResult(
+    val prefillText: String? = null,
+    val cursorPosition: Int? = null,
+    val hintText: String? = null
 )
 
 /**
@@ -325,5 +334,37 @@ class ChatState {
     fun setGeohashParticipantCounts(counts: Map<String, Int>) {
         _geohashParticipantCounts.value = counts
     }
+
+    // Feed state
+    private val _selectedTab = MutableLiveData<String>("chat")
+    val selectedTab: LiveData<String> = _selectedTab
+
+    private val _feedPosts = MutableLiveData<List<FeedPostEntity>>(emptyList())
+    val feedPosts: LiveData<List<FeedPostEntity>> = _feedPosts
+
+    private val _expandedPostId = MutableLiveData<String?>(null)
+    val expandedPostId: LiveData<String?> = _expandedPostId
+
+    private val _feedReactions = MutableLiveData<Map<String, List<FeedReactionEntity>>>(emptyMap())
+    val feedReactions: LiveData<Map<String, List<FeedReactionEntity>>> = _feedReactions
+
+    private val _feedReplies = MutableLiveData<Map<String, List<FeedReplyEntity>>>(emptyMap())
+    val feedReplies: LiveData<Map<String, List<FeedReplyEntity>>> = _feedReplies
+
+    private val _showNewPostComposer = MutableLiveData<Boolean>(false)
+    val showNewPostComposer: LiveData<Boolean> = _showNewPostComposer
+
+    fun getSelectedTabValue() = _selectedTab.value ?: "chat"
+    fun setSelectedTab(tab: String) { _selectedTab.value = tab }
+    fun getFeedPostsValue() = _feedPosts.value ?: emptyList()
+    fun postFeedPosts(posts: List<FeedPostEntity>) { _feedPosts.postValue(posts) }
+    fun setFeedPosts(posts: List<FeedPostEntity>) { _feedPosts.value = posts }
+    fun setExpandedPostId(postId: String?) { _expandedPostId.value = postId }
+    fun getExpandedPostIdValue() = _expandedPostId.value
+    fun setFeedReactions(reactions: Map<String, List<FeedReactionEntity>>) { _feedReactions.value = reactions }
+    fun getFeedReactionsValue() = _feedReactions.value ?: emptyMap()
+    fun setFeedReplies(replies: Map<String, List<FeedReplyEntity>>) { _feedReplies.value = replies }
+    fun getFeedRepliesValue() = _feedReplies.value ?: emptyMap()
+    fun setShowNewPostComposer(show: Boolean) { _showNewPostComposer.value = show }
 
 }

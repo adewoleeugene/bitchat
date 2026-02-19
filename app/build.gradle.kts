@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
 }
 
 android {
@@ -66,29 +68,29 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.appcompat)
-    
+
     // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.bundles.compose)
-    
+
     // Lifecycle
     implementation(libs.bundles.lifecycle)
-    
+
     // Navigation
     implementation(libs.androidx.navigation.compose)
-    
+
     // Permissions
     implementation(libs.accompanist.permissions)
-    
+
     // Cryptography
     implementation(libs.bundles.cryptography)
-    
+
     // JSON
     implementation(libs.gson)
-    
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
-    
+
     // Bluetooth
     implementation(libs.nordic.ble)
 
@@ -103,10 +105,26 @@ dependencies {
 
     // Security preferences
     implementation(libs.androidx.security.crypto)
-    
+
     // EXIF orientation handling for images
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-    
+
+    // Hilt Dependency Injection
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.hilt.navigation.compose)
+
+    // Room Database
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
+    // Solana crypto (Ed25519, BIP39 mnemonic, Base58)
+    implementation(libs.bundles.solana)
+
+    // QR Code generation
+    implementation(libs.bundles.qrcode)
+
     // Testing
     testImplementation(libs.bundles.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))

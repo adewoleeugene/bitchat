@@ -2,18 +2,16 @@ package com.bitchat.android.ui
 
 import android.util.Log
 import androidx.compose.foundation.*
+import com.bitchat.android.ui.theme.BitchatColors
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.LocationOn
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,6 +20,7 @@ import java.util.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * GeohashPeopleList - iOS-compatible component for displaying geohash participants
@@ -61,7 +60,7 @@ fun GeohashPeopleList(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.LocationOn,
+                painter = rememberPixelPainter(PixelIcons.LocationPin),
                 contentDescription = null,
                 modifier = Modifier.size(12.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.6f)
@@ -70,7 +69,7 @@ fun GeohashPeopleList(
             Text(
                 text = stringResource(R.string.geohash_people_header),
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontWeight = FontWeight.Bold
                 ),
                 color = colorScheme.onSurface.copy(alpha = 0.6f)
@@ -82,7 +81,7 @@ fun GeohashPeopleList(
             Text(
                 text = stringResource(R.string.nobody_around),
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = BASE_FONT_SIZE.sp
                 ),
                 color = colorScheme.onSurface.copy(alpha = 0.5f),
@@ -183,28 +182,28 @@ private fun GeohashPersonItem(
         if (hasUnreadDM) {
             // Unread DM indicator (orange envelope)
             Icon(
-                imageVector = Icons.Filled.Email,
+                painter = rememberPixelPainter(PixelIcons.Email),
                 contentDescription = stringResource(R.string.cd_unread_message),
                 modifier = Modifier.size(12.dp),
-                tint = Color(0xFFFF9500) // iOS orange
+                tint = BitchatColors.SelfMessage
             )
         } else {
             // Face icon with teleportation state
             val (iconName, iconColor) = when {
-                isMe && isMyTeleported -> "face.dashed" to Color(0xFFFF9500) // Orange for teleported me
-                isTeleported -> "face.dashed" to colorScheme.onSurface // Regular color for teleported others
-                isMe -> "face.smiling" to Color(0xFFFF9500) // Orange for me
+                isMe && isMyTeleported -> "face.dashed" to BitchatColors.SelfMessage
+                isTeleported -> "face.dashed" to colorScheme.onSurface
+                isMe -> "face.smiling" to BitchatColors.SelfMessage
                 else -> "face.smiling" to colorScheme.onSurface // Regular color for others
             }
             
-            // Use appropriate Material icon (closest match to iOS SF Symbols)
-            val icon = when (iconName) {
-                "face.dashed" -> Icons.Outlined.Explore
-                else -> Icons.Outlined.LocationOn
+            // Use appropriate pixel icon (closest match to iOS SF Symbols)
+            val pixelIcon = when (iconName) {
+                "face.dashed" -> PixelIcons.Explore
+                else -> PixelIcons.LocationPin
             }
-            
+
             Icon(
-                imageVector = icon,
+                painter = rememberPixelPainter(pixelIcon),
                 contentDescription = if (isTeleported || isMyTeleported) "Teleported user" else "User",
                 modifier = Modifier.size(12.dp),
                 tint = iconColor.copy(alpha = if (iconName == "face.dashed") 0.6f else 1.0f) // Make dashed faces slightly transparent
@@ -219,9 +218,8 @@ private fun GeohashPersonItem(
         val suffix = if (showHashSuffix) suffixRaw else ""
         
         // Get consistent peer color (matches iOS color assignment exactly)
-        val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-        val assignedColor = viewModel.colorForNostrPubkey(person.id, isDark)
-        val baseColor = if (isMe) Color(0xFFFF9500) else assignedColor
+        val assignedColor = viewModel.colorForNostrPubkey(person.id)
+        val baseColor = if (isMe) BitchatColors.SelfMessage else assignedColor
         
         Row(
             modifier = Modifier.weight(1f),
@@ -231,7 +229,7 @@ private fun GeohashPersonItem(
             Text(
                 text = baseName,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = BASE_FONT_SIZE.sp,
                     fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal
                 ),
@@ -245,7 +243,7 @@ private fun GeohashPersonItem(
                 Text(
                     text = suffix,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontSize = BASE_FONT_SIZE.sp
                     ),
                     color = baseColor.copy(alpha = 0.6f)
@@ -257,7 +255,7 @@ private fun GeohashPersonItem(
                 Text(
                     text = stringResource(R.string.you_suffix),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontSize = BASE_FONT_SIZE.sp
                     ),
                     color = baseColor

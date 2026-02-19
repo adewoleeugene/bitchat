@@ -14,10 +14,8 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Remove
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +28,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -42,6 +39,8 @@ import androidx.core.view.updateLayoutParams
 import com.bitchat.android.geohash.Geohash
 import com.bitchat.android.geohash.LocationChannelManager
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 class GeohashPickerActivity : OrientationAwareActivity() {
@@ -93,8 +92,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
 
                 // iOS system-like colors used across app
                 val colorScheme = MaterialTheme.colorScheme
-                val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-                val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D)
+                val standardGreen = BitchatColors.AccentGreen
 
                 Scaffold { padding ->
                     Box(Modifier.fillMaxSize()) {
@@ -179,7 +177,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                 text = stringResource(R.string.pan_zoom_instruction),
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = CourierPrimeFamily,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
@@ -204,7 +202,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                 Text(
                                     text = if (currentGeohash.isNotEmpty()) "#${currentGeohash}" else "select location",
                                     fontSize = BASE_FONT_SIZE.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = CourierPrimeFamily,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier
@@ -229,7 +227,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.cd_decrease_precision))
+                                        Icon(painter = rememberPixelPainter(PixelIcons.Remove), contentDescription = stringResource(R.string.cd_decrease_precision))
                                     }
                                 }
 
@@ -245,7 +243,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cd_increase_precision))
+                                        Icon(painter = rememberPixelPainter(PixelIcons.Add), contentDescription = stringResource(R.string.cd_increase_precision))
                                     }
                                 }
 
@@ -265,12 +263,12 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.cd_select_geohash))
+                                        Icon(painter = rememberPixelPainter(PixelIcons.Check), contentDescription = stringResource(R.string.cd_select_geohash))
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             text = stringResource(R.string.select),
                                             fontSize = (BASE_FONT_SIZE - 2).sp,
-                                            fontFamily = FontFamily.Monospace
+                                            fontFamily = CourierPrimeFamily
                                         )
                                     }
                                 }

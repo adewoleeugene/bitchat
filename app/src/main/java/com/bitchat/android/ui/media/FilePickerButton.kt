@@ -4,13 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Attachment
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -45,10 +44,10 @@ fun FilePickerButton(
         modifier = modifier.size(32.dp)
     ) {
         Icon(
-            imageVector = Icons.Filled.Attachment,
+            painter = rememberPixelPainter(PixelIcons.Attachment),
             contentDescription = stringResource(R.string.cd_pick_file),
             tint = Color.Gray,
-            modifier = Modifier.size(20.dp).rotate(90f)
+            modifier = Modifier.size(20.dp)
         )
     }
 }

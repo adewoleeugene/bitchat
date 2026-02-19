@@ -3,17 +3,14 @@ package com.bitchat.android.ui
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.ui.graphics.vector.ImageVector
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.mesh.BluetoothMeshService
 import androidx.compose.material3.ColorScheme
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
+import com.bitchat.android.ui.theme.BitchatColors
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -27,11 +24,11 @@ import java.util.*
  */
 fun getRSSIColor(rssi: Int): Color {
     return when {
-        rssi >= -50 -> Color(0xFF00FF00) // Bright green
-        rssi >= -60 -> Color(0xFF80FF00) // Green-yellow
-        rssi >= -70 -> Color(0xFFFFFF00) // Yellow
-        rssi >= -80 -> Color(0xFFFF8000) // Orange
-        else -> Color(0xFFFF4444) // Red
+        rssi >= -50 -> BitchatColors.StatusSuccess
+        rssi >= -60 -> BitchatColors.StatusSuccess.copy(alpha = 0.8f)
+        rssi >= -70 -> BitchatColors.StatusWarning
+        rssi >= -80 -> BitchatColors.SelfMessage
+        else -> BitchatColors.StatusError
     }
 }
 
@@ -47,44 +44,50 @@ fun formatMessageAsAnnotatedString(
     timeFormatter: SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 ): AnnotatedString {
     val builder = AnnotatedString.Builder()
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    
+
     // Determine if this message was sent by self
-    val isSelf = message.senderPeerID == meshService.myPeerID || 
+    val isSelf = message.senderPeerID == meshService.myPeerID ||
                  message.sender == currentUserNickname ||
                  message.sender.startsWith("$currentUserNickname#")
-    
+
     if (message.sender != "system") {
-        // Get base color for this peer (iOS-style color assignment)
+        // Get base color for this peer
         val baseColor = if (isSelf) {
-            Color(0xFFFF9500) // Orange for self (iOS orange)
+            BitchatColors.SelfMessage
         } else {
-            getPeerColor(message, isDark)
+            getPeerColor(message)
         }
-        
+
         // Split sender into base name and hashtag suffix
         val (baseName, suffix) = splitSuffix(message.sender)
-        
+
+        // Content color: slightly dimmer than nickname for visual hierarchy
+        val contentColor = if (isSelf) {
+            baseColor.copy(alpha = 0.85f)
+        } else {
+            baseColor.copy(alpha = 0.85f)
+        }
+
         // Sender prefix "<@"
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         builder.append("<@")
         builder.pop()
-        
-        // Base name (clickable)
+
+        // Base name (clickable, bold)
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         val nicknameStart = builder.length
         val truncatedBase = truncateNickname(baseName)
         builder.append(truncatedBase)
         val nicknameEnd = builder.length
-        
+
         // Add click annotation for nickname (store canonical sender name with hash if available)
         if (!isSelf) {
             builder.addStringAnnotation(
@@ -95,64 +98,63 @@ fun formatMessageAsAnnotatedString(
             )
         }
         builder.pop()
-        
-        // Hashtag suffix in lighter color (iOS style)
+
+        // Hashtag suffix in lighter color
         if (suffix.isNotEmpty()) {
             builder.pushStyle(SpanStyle(
-                color = baseColor.copy(alpha = 0.6f),
+                color = baseColor.copy(alpha = 0.5f),
                 fontSize = BASE_FONT_SIZE.sp,
-                fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+                fontWeight = FontWeight.Normal
             ))
             builder.append(suffix)
             builder.pop()
         }
-        
+
         // Sender suffix "> "
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         builder.append("> ")
         builder.pop()
-        
-        // Message content with iOS-style hashtag and mention highlighting
-        appendIOSFormattedContent(builder, message.content, message.mentions, currentUserNickname, baseColor, isSelf, isDark)
-        
-        // iOS-style timestamp at the END (smaller, grey)
-        // Timestamp (and optional PoW badge)
+
+        // Message content with hashtag and mention highlighting
+        appendIOSFormattedContent(builder, message.content, message.mentions, currentUserNickname, contentColor, isSelf)
+
+        // Timestamp at the END (smaller, tertiary text)
         builder.pushStyle(SpanStyle(
-            color = Color.Gray.copy(alpha = 0.7f),
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            color = BitchatColors.TextTertiary.copy(alpha = 0.8f),
+            fontSize = (BASE_FONT_SIZE - 3).sp
         ))
         builder.append(" [${timeFormatter.format(message.timestamp)}]")
-        // If message has valid PoW difficulty, append bits immediately after timestamp with minimal spacing
+        // If message has valid PoW difficulty, append bits immediately after timestamp
         message.powDifficulty?.let { bits ->
             if (bits > 0) {
                 builder.append(" ⛨${bits}b")
             }
         }
         builder.pop()
-        
+
     } else {
-        // System message - iOS style
+        // System message — italic, dimmer
         builder.pushStyle(SpanStyle(
-            color = Color.Gray,
+            color = BitchatColors.TextTertiary,
             fontSize = (BASE_FONT_SIZE - 2).sp,
             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
         ))
         builder.append("* ${message.content} *")
         builder.pop()
-        
+
         // Timestamp for system messages too
         builder.pushStyle(SpanStyle(
-            color = Color.Gray.copy(alpha = 0.5f),
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            color = BitchatColors.TextTertiary.copy(alpha = 0.5f),
+            fontSize = (BASE_FONT_SIZE - 3).sp
         ))
         builder.append(" [${timeFormatter.format(message.timestamp)}]")
         builder.pop()
     }
-    
+
     return builder.toAnnotatedString()
 }
 
@@ -167,21 +169,20 @@ fun formatMessageHeaderAnnotatedString(
     timeFormatter: SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 ): AnnotatedString {
     val builder = AnnotatedString.Builder()
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
 
     val isSelf = message.senderPeerID == meshService.myPeerID ||
             message.sender == currentUserNickname ||
             message.sender.startsWith("$currentUserNickname#")
 
     if (message.sender != "system") {
-        val baseColor = if (isSelf) Color(0xFFFF9500) else getPeerColor(message, isDark)
+        val baseColor = if (isSelf) BitchatColors.SelfMessage else getPeerColor(message)
         val (baseName, suffix) = splitSuffix(message.sender)
 
         // "<@"
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         builder.append("<@")
         builder.pop()
@@ -190,7 +191,7 @@ fun formatMessageHeaderAnnotatedString(
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         val nicknameStart = builder.length
         builder.append(truncateNickname(baseName))
@@ -208,9 +209,9 @@ fun formatMessageHeaderAnnotatedString(
         // Hashtag suffix
         if (suffix.isNotEmpty()) {
             builder.pushStyle(SpanStyle(
-                color = baseColor.copy(alpha = 0.6f),
+                color = baseColor.copy(alpha = 0.5f),
                 fontSize = BASE_FONT_SIZE.sp,
-                fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+                fontWeight = FontWeight.Normal
             ))
             builder.append(suffix)
             builder.pop()
@@ -220,15 +221,15 @@ fun formatMessageHeaderAnnotatedString(
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.Bold
         ))
         builder.append(">")
         builder.pop()
 
-        // Timestamp and optional PoW bits, matching normal message appearance
+        // Timestamp and optional PoW bits
         builder.pushStyle(SpanStyle(
-            color = Color.Gray.copy(alpha = 0.7f),
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            color = BitchatColors.TextTertiary.copy(alpha = 0.8f),
+            fontSize = (BASE_FONT_SIZE - 3).sp
         ))
         builder.append("  [${timeFormatter.format(message.timestamp)}]")
         message.powDifficulty?.let { bits ->
@@ -236,17 +237,17 @@ fun formatMessageHeaderAnnotatedString(
         }
         builder.pop()
     } else {
-        // System message header (should rarely apply to voice)
+        // System message header
         builder.pushStyle(SpanStyle(
-            color = Color.Gray,
+            color = BitchatColors.TextTertiary,
             fontSize = (BASE_FONT_SIZE - 2).sp,
             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
         ))
         builder.append("* ${message.content} *")
         builder.pop()
         builder.pushStyle(SpanStyle(
-            color = Color.Gray.copy(alpha = 0.5f),
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            color = BitchatColors.TextTertiary.copy(alpha = 0.5f),
+            fontSize = (BASE_FONT_SIZE - 3).sp
         ))
         builder.append(" [${timeFormatter.format(message.timestamp)}]")
         builder.pop()
@@ -256,54 +257,52 @@ fun formatMessageHeaderAnnotatedString(
 }
 
 /**
- * iOS-style peer color assignment using djb2 hash algorithm
+ * Peer color assignment using djb2 hash algorithm
  * Avoids orange (~30°) reserved for self messages
  */
-fun getPeerColor(message: BitchatMessage, isDark: Boolean): Color {
+fun getPeerColor(message: BitchatMessage): Color {
     // Create seed from peer identifier (prioritizing stable keys)
     val seed = when {
         message.senderPeerID?.startsWith("nostr:") == true || message.senderPeerID?.startsWith("nostr_") == true -> {
-            // For Nostr peers, use the full key if available, otherwise the peer ID
             "nostr:${message.senderPeerID.lowercase()}"
         }
         message.senderPeerID?.length == 16 -> {
-            // For ephemeral peer IDs, try to get stable Noise key, fallback to peer ID  
             "noise:${message.senderPeerID.lowercase()}"
         }
         message.senderPeerID?.length == 64 -> {
-            // This is already a stable Noise key
             "noise:${message.senderPeerID.lowercase()}"
         }
         else -> {
-            // Fallback to sender name
             message.sender.lowercase()
         }
     }
-    
-    return colorForPeerSeed(seed, isDark)
+
+    return colorForPeerSeed(seed)
 }
 
 /**
  * Generate consistent peer color using djb2 hash (matches iOS algorithm exactly)
+ * Always dark-mode optimized: moderate saturation, high brightness for #1A1A1A bg
  */
-fun colorForPeerSeed(seed: String, isDark: Boolean): Color {
+fun colorForPeerSeed(seed: String): Color {
     // djb2 hash algorithm (matches iOS implementation)
     var hash = 5381UL
     for (byte in seed.toByteArray()) {
         hash = ((hash shl 5) + hash) + byte.toUByte().toULong()
     }
-    
+
     var hue = (hash % 360UL).toDouble() / 360.0
-    
+
     // Avoid orange (~30°) reserved for self (matches iOS logic)
     val orange = 30.0 / 360.0
     if (kotlin.math.abs(hue - orange) < 0.05) {
         hue = (hue + 0.12) % 1.0
     }
-    
-    val saturation = if (isDark) 0.50 else 0.70
-    val brightness = if (isDark) 0.85 else 0.35
-    
+
+    // Dark-only: moderate saturation, high brightness for contrast on #1A1A1A
+    val saturation = 0.50
+    val brightness = 0.85
+
     return Color.hsv(
         hue = (hue * 360).toFloat(),
         saturation = saturation.toFloat(),
@@ -316,37 +315,133 @@ fun colorForPeerSeed(seed: String, isDark: Boolean): Color {
  */
 fun splitSuffix(name: String): Pair<String, String> {
     if (name.length < 5) return Pair(name, "")
-    
+
     val suffix = name.takeLast(5)
-    if (suffix.startsWith("#") && suffix.drop(1).all { 
-        it.isDigit() || it.lowercaseChar() in 'a'..'f' 
+    if (suffix.startsWith("#") && suffix.drop(1).all {
+        it.isDigit() || it.lowercaseChar() in 'a'..'f'
     }) {
         val base = name.dropLast(5)
         return Pair(base, suffix)
     }
-    
+
     return Pair(name, "")
 }
 
 /**
- * iOS-style content formatting with proper hashtag and mention handling
+ * Format only the nickname portion for display above a message bubble.
+ * Returns "@nickname#abcd" with peer color, bold, clickable annotation.
  */
-private fun appendIOSFormattedContent(
+fun formatNicknameAnnotatedString(
+    message: BitchatMessage,
+    currentUserNickname: String,
+    meshService: BluetoothMeshService
+): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    val isSelf = message.senderPeerID == meshService.myPeerID ||
+                 message.sender == currentUserNickname ||
+                 message.sender.startsWith("$currentUserNickname#")
+
+    if (message.sender == "system") return builder.toAnnotatedString()
+
+    val baseColor = if (isSelf) BitchatColors.SelfMessage else getPeerColor(message)
+    val (baseName, suffix) = splitSuffix(message.sender)
+
+    // "@" prefix
+    builder.pushStyle(SpanStyle(
+        color = baseColor,
+        fontSize = (BASE_FONT_SIZE - 2).sp,
+        fontWeight = FontWeight.Bold
+    ))
+    builder.append("@")
+    builder.pop()
+
+    // Base name (clickable for peers)
+    builder.pushStyle(SpanStyle(
+        color = baseColor,
+        fontSize = (BASE_FONT_SIZE - 2).sp,
+        fontWeight = FontWeight.Bold
+    ))
+    val nicknameStart = builder.length
+    builder.append(truncateNickname(baseName))
+    val nicknameEnd = builder.length
+    if (!isSelf) {
+        builder.addStringAnnotation(
+            tag = "nickname_click",
+            annotation = (message.originalSender ?: message.sender),
+            start = nicknameStart,
+            end = nicknameEnd
+        )
+    }
+    builder.pop()
+
+    // Hashtag suffix
+    if (suffix.isNotEmpty()) {
+        builder.pushStyle(SpanStyle(
+            color = baseColor.copy(alpha = 0.5f),
+            fontSize = (BASE_FONT_SIZE - 2).sp,
+            fontWeight = FontWeight.Normal
+        ))
+        builder.append(suffix)
+        builder.pop()
+    }
+
+    return builder.toAnnotatedString()
+}
+
+/**
+ * Format only the message content + timestamp for display inside a bubble.
+ * No nickname prefix — just the content text with hashtag/mention/URL/geohash highlighting.
+ */
+fun formatContentAnnotatedString(
+    message: BitchatMessage,
+    currentUserNickname: String,
+    meshService: BluetoothMeshService,
+    colorScheme: ColorScheme,
+    timeFormatter: SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    val isSelf = message.senderPeerID == meshService.myPeerID ||
+                 message.sender == currentUserNickname ||
+                 message.sender.startsWith("$currentUserNickname#")
+
+    val baseColor = if (isSelf) BitchatColors.SelfMessage else getPeerColor(message)
+    val contentColor = baseColor.copy(alpha = 0.85f)
+
+    // Content with highlighting
+    appendIOSFormattedContent(builder, message.content, message.mentions, currentUserNickname, contentColor, isSelf)
+
+    // Timestamp
+    builder.pushStyle(SpanStyle(
+        color = BitchatColors.TextTertiary.copy(alpha = 0.8f),
+        fontSize = (BASE_FONT_SIZE - 3).sp
+    ))
+    builder.append(" [${timeFormatter.format(message.timestamp)}]")
+    message.powDifficulty?.let { bits ->
+        if (bits > 0) builder.append(" ⛨${bits}b")
+    }
+    builder.pop()
+
+    return builder.toAnnotatedString()
+}
+
+/**
+ * Content formatting with proper hashtag and mention handling
+ */
+internal fun appendIOSFormattedContent(
     builder: AnnotatedString.Builder,
     content: String,
     mentions: List<String>?,
     currentUserNickname: String,
     baseColor: Color,
-    isSelf: Boolean,
-    isDark: Boolean
+    isSelf: Boolean
 ) {
-    // iOS-style patterns: allow optional '#abcd' suffix in mentions
+    // Patterns: allow optional '#abcd' suffix in mentions
     val hashtagPattern = "#([a-zA-Z0-9_]+)".toRegex()
     val mentionPattern = "@([\\p{L}0-9_]+(?:#[a-fA-F0-9]{4})?)".toRegex()
-    
+
     val hashtagMatches = hashtagPattern.findAll(content).toList()
     val mentionMatches = mentionPattern.findAll(content).toList()
-    
+
     // Combine and sort matches, but exclude hashtags that overlap with mentions
     val mentionRanges = mentionMatches.map { it.range }
     fun overlapsMention(range: IntRange): Boolean {
@@ -354,23 +449,22 @@ private fun appendIOSFormattedContent(
             range.first < mentionRange.last && range.last > mentionRange.first
         }
     }
-    
+
     val allMatches = mutableListOf<Pair<IntRange, String>>()
-    
+
     // Add hashtag matches that don't overlap with mentions
     for (match in hashtagMatches) {
         if (!overlapsMention(match.range)) {
             allMatches.add(match.range to "hashtag")
         }
     }
-    
+
     // Add all mention matches
     for (match in mentionMatches) {
-        allMatches.add(match.range to "mention") 
+        allMatches.add(match.range to "mention")
     }
 
-    // Add standalone geohash matches (e.g., "#9q") that are not part of another word
-    // We use MessageSpecialParser to find exact ranges; then merge with existing ranges avoiding overlaps
+    // Add standalone geohash matches
     val geoMatches = MessageSpecialParser.findStandaloneGeohashes(content)
     for (gm in geoMatches) {
         val range = gm.start until gm.endExclusive
@@ -379,7 +473,7 @@ private fun appendIOSFormattedContent(
         }
     }
 
-    // Add URL matches (http/https/www/bare domains). Exclude overlaps with mentions.
+    // Add URL matches
     val urlMatches = MessageSpecialParser.findUrls(content)
     for (um in urlMatches) {
         val range = um.start until um.endExclusive
@@ -388,7 +482,7 @@ private fun appendIOSFormattedContent(
         }
     }
 
-    // Remove generic hashtag matches that overlap with detected geohash ranges to avoid duplicate rendering
+    // Remove generic hashtag matches that overlap with detected geohash ranges
     fun rangesOverlap(a: IntRange, b: IntRange): Boolean {
         return a.first < b.last && a.last > b.first
     }
@@ -398,18 +492,17 @@ private fun appendIOSFormattedContent(
         val iterator = allMatches.listIterator()
         while (iterator.hasNext()) {
             val (range, type) = iterator.next()
-            // Remove generic hashtags that overlap with geohashes, and geohashes that overlap with URLs
             val overlapsGeo = geoRanges.any { rangesOverlap(range, it) }
             val overlapsUrl = urlRanges.any { rangesOverlap(range, it) }
             if ((type == "hashtag" && overlapsGeo) || (type == "geohash" && overlapsUrl)) iterator.remove()
         }
     }
-    
+
     allMatches.sortBy { it.first.first }
-    
+
     var lastEnd = 0
     val isMentioned = mentions?.contains(currentUserNickname) == true
-    
+
     for ((range, type) in allMatches) {
         // Add text before match
         if (lastEnd < range.first) {
@@ -418,11 +511,10 @@ private fun appendIOSFormattedContent(
                 builder.pushStyle(SpanStyle(
                     color = baseColor,
                     fontSize = BASE_FONT_SIZE.sp,
-                    fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Normal
+                    fontWeight = FontWeight.Normal
                 ))
                 if (isMentioned) {
-                    // Make entire message bold if user is mentioned
-                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Normal))
                     builder.append(beforeText)
                     builder.pop()
                 } else {
@@ -431,57 +523,55 @@ private fun appendIOSFormattedContent(
                 builder.pop()
             }
         }
-        
+
         // Add styled match
         val matchText = content.substring(range.first, range.last + 1)
         when (type) {
             "mention" -> {
-                // iOS-style mention with hashtag suffix support
                 val mentionWithoutAt = matchText.removePrefix("@")
                 val (mBase, mSuffix) = splitSuffix(mentionWithoutAt)
-                
+
                 // Check if this mention targets current user
                 val isMentionToMe = mBase == currentUserNickname
-                val mentionColor = if (isMentionToMe) Color(0xFFFF9500) else baseColor
-                
+                val mentionColor = if (isMentionToMe) BitchatColors.MentionHighlight else baseColor
+
                 // "@" symbol
                 builder.pushStyle(SpanStyle(
                     color = mentionColor,
                     fontSize = BASE_FONT_SIZE.sp,
-                    fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold
+                    fontWeight = FontWeight.Normal
                 ))
                 builder.append("@")
                 builder.pop()
-                
-                // Base name (truncate for rendering)
+
+                // Base name
                 builder.pushStyle(SpanStyle(
                     color = mentionColor,
                     fontSize = BASE_FONT_SIZE.sp,
-                    fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold
+                    fontWeight = FontWeight.Normal
                 ))
                 builder.append(truncateNickname(mBase))
                 builder.pop()
-                
+
                 // Hashtag suffix in lighter color
                 if (mSuffix.isNotEmpty()) {
                     builder.pushStyle(SpanStyle(
                         color = mentionColor.copy(alpha = 0.6f),
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold
+                        fontWeight = FontWeight.Normal
                     ))
                     builder.append(mSuffix)
                     builder.pop()
                 }
             }
             "hashtag" -> {
-                // Render general hashtags like normal content
                 builder.pushStyle(SpanStyle(
                     color = baseColor,
                     fontSize = BASE_FONT_SIZE.sp,
-                    fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Normal
+                    fontWeight = FontWeight.Normal
                 ))
                 if (isMentioned) {
-                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Normal))
                     builder.append(matchText)
                     builder.pop()
                 } else {
@@ -491,11 +581,10 @@ private fun appendIOSFormattedContent(
             }
             else -> {
                 if (type == "geohash") {
-                    // Style geohash in blue, underlined, and add click annotation
                     builder.pushStyle(SpanStyle(
-                        color = Color(0xFF007AFF),
+                        color = BitchatColors.LinkColor,
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold,
+                        fontWeight = FontWeight.Normal,
                         textDecoration = TextDecoration.Underline
                     ))
                     val start = builder.length
@@ -510,11 +599,10 @@ private fun appendIOSFormattedContent(
                     )
                     builder.pop()
                 } else if (type == "url") {
-                    // Style URL in blue, underlined, and add click annotation with the raw text
                     builder.pushStyle(SpanStyle(
-                        color = Color(0xFF007AFF),
+                        color = BitchatColors.LinkColor,
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold,
+                        fontWeight = FontWeight.Normal,
                         textDecoration = TextDecoration.Underline
                     ))
                     val start = builder.length
@@ -528,31 +616,30 @@ private fun appendIOSFormattedContent(
                     )
                     builder.pop()
                 } else {
-                    // Fallback: treat as normal text
                     builder.pushStyle(SpanStyle(
                         color = baseColor,
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Normal
+                        fontWeight = FontWeight.Normal
                     ))
                     builder.append(matchText)
                     builder.pop()
                 }
             }
         }
-        
+
         lastEnd = range.last + 1
     }
-    
+
     // Add remaining text
     if (lastEnd < content.length) {
         val remainingText = content.substring(lastEnd)
         builder.pushStyle(SpanStyle(
             color = baseColor,
             fontSize = BASE_FONT_SIZE.sp,
-            fontWeight = if (isSelf) FontWeight.Bold else FontWeight.Normal
+            fontWeight = FontWeight.Normal
         ))
         if (isMentioned) {
-            builder.pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+            builder.pushStyle(SpanStyle(fontWeight = FontWeight.Normal))
             builder.append(remainingText)
             builder.pop()
         } else {

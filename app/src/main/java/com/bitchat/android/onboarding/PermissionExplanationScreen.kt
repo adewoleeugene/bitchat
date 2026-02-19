@@ -4,28 +4,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Power
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Warning
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * Permission explanation screen shown before requesting permissions
@@ -69,7 +62,7 @@ fun PermissionExplanationScreen(
                     Text(
                         text = stringResource(R.string.app_name),
                         style = MaterialTheme.typography.headlineLarge.copy(
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = CourierPrimeFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 32.sp
                         ),
@@ -80,7 +73,7 @@ fun PermissionExplanationScreen(
                 Text(
                     text = stringResource(R.string.about_tagline),
                     fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     color = colorScheme.onBackground.copy(alpha = 0.7f)
                 )
             }
@@ -100,7 +93,7 @@ fun PermissionExplanationScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Security,
+                            painter = rememberPixelPainter(PixelIcons.Shield),
                             contentDescription = stringResource(R.string.cd_privacy_protected),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -118,7 +111,7 @@ fun PermissionExplanationScreen(
                             Text(
                                 text = stringResource(R.string.privacy_bullets),
                                 style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = CourierPrimeFamily,
                                 color = colorScheme.onBackground.copy(alpha = 0.8f)
                             )
                         }
@@ -165,7 +158,7 @@ fun PermissionExplanationScreen(
                 Text(
                     text = stringResource(R.string.grant_permissions),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     modifier = Modifier.padding(vertical = 4.dp)
@@ -187,7 +180,7 @@ private fun PermissionCategoryCard(
             .padding(vertical = 8.dp)
     ) {
         Icon(
-            imageVector = getPermissionIcon(category.type),
+            painter = rememberPixelPainter(getPermissionIcon(category.type)),
             contentDescription = category.type.nameValue,
             tint = colorScheme.primary,
             modifier = Modifier
@@ -217,17 +210,17 @@ private fun PermissionCategoryCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Warning,
+                        painter = rememberPixelPainter(PixelIcons.Warning),
                         contentDescription = stringResource(R.string.cd_warning),
-                        tint = Color(0xFFFF9800),
+                        tint = BitchatColors.StatusWarning,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
                         text = stringResource(R.string.location_tracking_warning),
                         style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = CourierPrimeFamily,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFFFF9800)
+                            color = BitchatColors.StatusWarning
                         )
                     )
                 }
@@ -236,13 +229,13 @@ private fun PermissionCategoryCard(
     }
 }
 
-private fun getPermissionIcon(permissionType: PermissionType): ImageVector {
+private fun getPermissionIcon(permissionType: PermissionType): Array<IntArray> {
     return when (permissionType) {
-        PermissionType.NEARBY_DEVICES -> Icons.Filled.Bluetooth
-        PermissionType.PRECISE_LOCATION -> Icons.Filled.LocationOn
-        PermissionType.MICROPHONE -> Icons.Filled.Mic
-        PermissionType.NOTIFICATIONS -> Icons.Filled.Notifications
-        PermissionType.BATTERY_OPTIMIZATION -> Icons.Filled.Power
-        PermissionType.OTHER -> Icons.Filled.Settings
+        PermissionType.NEARBY_DEVICES -> PixelIcons.Bluetooth
+        PermissionType.PRECISE_LOCATION -> PixelIcons.LocationPin
+        PermissionType.MICROPHONE -> PixelIcons.Mic
+        PermissionType.NOTIFICATIONS -> PixelIcons.Bell
+        PermissionType.BATTERY_OPTIMIZATION -> PixelIcons.Power
+        PermissionType.OTHER -> PixelIcons.Settings
     }
 }

@@ -276,22 +276,21 @@ class LocationChannelManager private constructor(private val context: Context) {
                 lastKnownLocation = lastLocation;
             }
             
-            // Use last known location if we have one
+            // Use last known location immediately as a fallback so UI isn't empty
             if (lastKnownLocation != null) {
                 Log.d(TAG, "Using last known location: ${lastKnownLocation.latitude}, ${lastKnownLocation.longitude}")
                 lastLocation = lastKnownLocation
-                _isLoadingLocation.postValue(false) // Make sure loading state is off
+                _isLoadingLocation.postValue(false)
                 computeChannels(lastKnownLocation)
                 reverseGeocodeIfNeeded(lastKnownLocation)
             } else {
                 Log.d(TAG, "No last known location available")
-                // Set loading state to true so UI can show a spinner
                 _isLoadingLocation.postValue(true)
-                
-                // Request a fresh location only when we don't have a last known location
-                Log.d(TAG, "Requesting fresh location...")
-                requestFreshLocation()
             }
+
+            // Always request a fresh location to pick up device movement
+            Log.d(TAG, "Requesting fresh location to update...")
+            requestFreshLocation()
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception requesting location: ${e.message}")
             _isLoadingLocation.postValue(false) // Turn off loading state on error
@@ -325,10 +324,12 @@ class LocationChannelManager private constructor(private val context: Context) {
             _isLoadingLocation.postValue(false) // Turn off loading state if no permission
             return
         }
-        
+
         try {
-            // Set loading state to true to indicate we're actively trying to get a location
-            _isLoadingLocation.postValue(true)
+            // Only show loading if we don't already have a location to display
+            if (lastLocation == null) {
+                _isLoadingLocation.postValue(true)
+            }
             
             // Try common providers in order of preference
             val providers = listOf(

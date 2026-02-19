@@ -6,8 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,13 +26,14 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.text.font.FontFamily
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
 import androidx.compose.material3.ColorScheme
 import java.text.SimpleDateFormat
 import java.util.*
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 @Composable
 fun ImageMessageItem(
@@ -46,36 +47,39 @@ fun ImageMessageItem(
     onMessageLongPress: ((BitchatMessage) -> Unit)?,
     onCancelTransfer: ((BitchatMessage) -> Unit)?,
     onImageClick: ((String, List<String>, Int) -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true
 ) {
     val path = message.content.trim()
     Column(modifier = modifier.fillMaxWidth()) {
-        val headerText = com.bitchat.android.ui.formatMessageHeaderAnnotatedString(
-            message = message,
-            currentUserNickname = currentUserNickname,
-            meshService = meshService,
-            colorScheme = colorScheme,
-            timeFormatter = timeFormatter
-        )
-        val haptic = LocalHapticFeedback.current
-        var headerLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-        Text(
-            text = headerText,
-            fontFamily = FontFamily.Monospace,
-            color = colorScheme.onSurface,
-            modifier = Modifier.pointerInput(message.id) {
-                detectTapGestures(onTap = { pos ->
-                    val layout = headerLayout ?: return@detectTapGestures
-                    val offset = layout.getOffsetForPosition(pos)
-                    val ann = headerText.getStringAnnotations("nickname_click", offset, offset)
-                    if (ann.isNotEmpty() && onNicknameClick != null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNicknameClick.invoke(ann.first().item)
-                    }
-                }, onLongPress = { onMessageLongPress?.invoke(message) })
-            },
-            onTextLayout = { headerLayout = it }
-        )
+        if (showHeader) {
+            val headerText = com.bitchat.android.ui.formatMessageHeaderAnnotatedString(
+                message = message,
+                currentUserNickname = currentUserNickname,
+                meshService = meshService,
+                colorScheme = colorScheme,
+                timeFormatter = timeFormatter
+            )
+            val haptic = LocalHapticFeedback.current
+            var headerLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+            Text(
+                text = headerText,
+                fontFamily = CourierPrimeFamily,
+                color = colorScheme.onSurface,
+                modifier = Modifier.pointerInput(message.id) {
+                    detectTapGestures(onTap = { pos ->
+                        val layout = headerLayout ?: return@detectTapGestures
+                        val offset = layout.getOffsetForPosition(pos)
+                        val ann = headerText.getStringAnnotations("nickname_click", offset, offset)
+                        if (ann.isNotEmpty() && onNicknameClick != null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onNicknameClick.invoke(ann.first().item)
+                        }
+                    }, onLongPress = { onMessageLongPress?.invoke(message) })
+                },
+                onTextLayout = { headerLayout = it }
+            )
+        }
 
         val context = LocalContext.current
         val bmp = remember(path) { try { android.graphics.BitmapFactory.decodeFile(path) } catch (_: Exception) { null } }
@@ -135,17 +139,17 @@ fun ImageMessageItem(
                                 .align(Alignment.TopEnd)
                                 .padding(4.dp)
                                 .size(22.dp)
-                                .background(Color.Gray.copy(alpha = 0.6f), CircleShape)
+                                .background(BitchatColors.TextSecondary.copy(alpha = 0.6f), CircleShape)
                                 .clickable { onCancelTransfer?.invoke(message) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(imageVector = Icons.Filled.Close, contentDescription = stringResource(com.bitchat.android.R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(14.dp))
+                            Icon(painter = rememberPixelPainter(PixelIcons.Close), contentDescription = stringResource(com.bitchat.android.R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(14.dp))
                         }
                     }
                 }
             }
         } else {
-            Text(text = stringResource(com.bitchat.android.R.string.image_unavailable), fontFamily = FontFamily.Monospace, color = Color.Gray)
+            Text(text = stringResource(com.bitchat.android.R.string.image_unavailable), fontFamily = CourierPrimeFamily, color = BitchatColors.TextSecondary)
         }
     }
 }

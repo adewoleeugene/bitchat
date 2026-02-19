@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
+import com.bitchat.android.ui.theme.BitchatColors
 
 /**
  * Real-time scrolling waveform for recording: maintains a dense sliding window of bars.
@@ -25,8 +26,8 @@ fun RealtimeScrollingWaveform(
     modifier: Modifier = Modifier,
     amplitudeNorm: Float,
     bars: Int = 240,
-    barColor: Color = Color(0xFF00FF7F),
-    baseColor: Color = Color(0xFF444444)
+    barColor: Color = BitchatColors.AccentGreen,
+    baseColor: Color = BitchatColors.Border
 ) {
     val latestAmp by rememberUpdatedState(amplitudeNorm)
     val samples: SnapshotStateList<Float> = remember {

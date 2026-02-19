@@ -7,7 +7,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -18,6 +17,10 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import kotlinx.coroutines.launch
 import com.bitchat.android.model.BitchatMessage
+import androidx.compose.foundation.BorderStroke
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * User Action Sheet for selecting actions on a specific user (slap, hug, block)
@@ -43,11 +46,10 @@ fun ChatUserSheet(
     
     // iOS system colors (matches LocationChannelsSheet exactly)
     val colorScheme = MaterialTheme.colorScheme
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // iOS green
-    val standardBlue = Color(0xFF007AFF) // iOS blue
-    val standardRed = Color(0xFFFF3B30) // iOS red
-    val standardGrey = if (isDark) Color(0xFF8E8E93) else Color(0xFF6D6D70) // iOS grey
+    val standardGreen = BitchatColors.AccentGreen // iOS green
+    val standardBlue = BitchatColors.MeshChannel // iOS blue
+    val standardRed = BitchatColors.Destructive // iOS red
+    val standardGrey = BitchatColors.TextSecondary // iOS grey
     
     if (isPresented) {
         ModalBottomSheet(
@@ -65,7 +67,7 @@ fun ChatUserSheet(
                 Text(
                     text = stringResource(R.string.at_nickname, targetNickname),
                     fontSize = 18.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -73,10 +75,49 @@ fun ChatUserSheet(
                 Text(
                     text = if (selectedMessage != null) stringResource(R.string.choose_action_message_or_user) else stringResource(R.string.choose_action_user),
                     fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
-                
+
+                // Solana address (if peer has one)
+                val peerSolanaAddress = remember(targetNickname) {
+                    viewModel.getPeerSolanaAddress(targetNickname)
+                }
+                if (peerSolanaAddress != null) {
+                    val truncatedAddress = if (peerSolanaAddress.length > 12) {
+                        "${peerSolanaAddress.take(6)}...${peerSolanaAddress.takeLast(4)}"
+                    } else peerSolanaAddress
+                    Surface(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(peerSolanaAddress))
+                        },
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SOL: $truncatedAddress",
+                                fontSize = 12.sp,
+                                fontFamily = CourierPrimeFamily,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = "copy",
+                                fontSize = 12.sp,
+                                fontFamily = CourierPrimeFamily,
+                                color = standardBlue
+                            )
+                        }
+                    }
+                }
+
                 // Action list (iOS-style plain list)
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth()
@@ -94,6 +135,22 @@ fun ChatUserSheet(
                                     onDismiss()
                                 }
                             )
+                        }
+
+                        // Notarize action - post message hash to Solana blockchain
+                        if (message.type == com.bitchat.android.model.BitchatMessageType.Message) {
+                            item {
+                                val standardOrange = BitchatColors.SelfMessage // iOS orange
+                                UserActionRow(
+                                    title = "Notarize",
+                                    subtitle = "Post message hash to Solana blockchain",
+                                    titleColor = standardOrange,
+                                    onClick = {
+                                        viewModel.notarizeMessage(message)
+                                        onDismiss()
+                                    }
+                                )
+                            }
                         }
                     }
                     
@@ -154,15 +211,16 @@ fun ChatUserSheet(
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        containerColor = BitchatColors.ButtonGhostBg,
                         contentColor = MaterialTheme.colorScheme.onSurface
                     ),
+                    shape = BitchatShapes.Button,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = stringResource(R.string.cancel_lower),
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = CourierPrimeFamily
                     )
                 }
             }
@@ -177,12 +235,13 @@ private fun UserActionRow(
     titleColor: Color,
     onClick: () -> Unit
 ) {
-    // iOS-style list row (plain button, no card background)
+    // iOS-style list row with tinted background
     Surface(
         onClick = onClick,
-        color = Color.Transparent,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth()
+        color = titleColor.copy(alpha = 0.08f),
+        shape = BitchatShapes.Large,
+        border = BorderStroke(1.dp, titleColor.copy(alpha = 0.15f)),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
     ) {
         Column(
             modifier = Modifier
@@ -193,7 +252,7 @@ private fun UserActionRow(
             Text(
                 text = title,
                 fontSize = BASE_FONT_SIZE.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontWeight = FontWeight.Medium,
                 color = titleColor
             )
@@ -201,7 +260,7 @@ private fun UserActionRow(
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }

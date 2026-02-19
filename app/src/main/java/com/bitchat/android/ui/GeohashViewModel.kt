@@ -232,9 +232,9 @@ class GeohashViewModel(
 
     fun displayNameForNostrPubkeyUI(pubkeyHex: String): String = repo.displayNameForNostrPubkeyUI(pubkeyHex)
 
-    fun colorForNostrPubkey(pubkeyHex: String, isDark: Boolean): androidx.compose.ui.graphics.Color {
+    fun colorForNostrPubkey(pubkeyHex: String): androidx.compose.ui.graphics.Color {
         val seed = "nostr:${pubkeyHex.lowercase()}"
-        return colorForPeerSeed(seed, isDark).copy()
+        return colorForPeerSeed(seed).copy()
     }
 
     private fun switchLocationChannel(channel: com.bitchat.android.geohash.ChannelID?) {

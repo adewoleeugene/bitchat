@@ -1,14 +1,12 @@
 package com.bitchat.android.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
- 
-
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,11 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,10 +31,8 @@ import com.bitchat.android.model.DeliveryStatus
 import com.bitchat.android.mesh.BluetoothMeshService
 import java.text.SimpleDateFormat
 import java.util.*
-import com.bitchat.android.ui.media.VoiceNotePlayer
-import androidx.compose.material3.Icon
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
@@ -45,6 +40,10 @@ import com.bitchat.android.ui.media.FileMessageItem
 import com.bitchat.android.model.BitchatMessageType
 import com.bitchat.android.R
 import androidx.compose.ui.res.stringResource
+import com.bitchat.android.ui.theme.BASE_FONT_SIZE
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 
 // VoiceNotePlayer moved to com.bitchat.android.ui.media.VoiceNotePlayer
@@ -112,8 +111,8 @@ fun MessagesList(
     
     LazyColumn(
         state = listState,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = modifier,
         reverseLayout = true
     ) {
@@ -149,21 +148,53 @@ fun MessageItem(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-    
+
+    val isSelf = message.senderPeerID == meshService.myPeerID ||
+            message.sender == currentUserNickname ||
+            message.sender.startsWith("$currentUserNickname#")
+    val isSystem = message.sender == "system"
+
+    // System messages: centered, no bubble
+    if (isSystem) {
+        SystemMessageItem(
+            message = message,
+            timeFormatter = timeFormatter,
+            onMessageLongPress = onMessageLongPress
+        )
+        return
+    }
+
+    val peerColor = if (isSelf) BitchatColors.SelfMessage else getPeerColor(message)
+    val bubbleBg = if (isSelf) BitchatColors.MessageBubbleSelf else BitchatColors.MessageBubblePeer
+    val borderColor = peerColor.copy(alpha = 0.35f)
+
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 1.dp),
+        horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.Top
-            ) {
-                // Provide a small end padding for own private messages so overlay doesn't cover text
-                val endPad = if (message.isPrivate && message.sender == currentUserNickname) 16.dp else 0.dp
-                // Create a custom layout that combines selectable text with clickable nickname areas
-                MessageTextWithClickableNicknames(
+        // Nickname chip above the bubble
+        NicknameChip(
+            message = message,
+            currentUserNickname = currentUserNickname,
+            meshService = meshService,
+            onNicknameClick = onNicknameClick,
+            onMessageLongPress = onMessageLongPress
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Bordered content box
+        Box(
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .border(1.dp, borderColor, BitchatShapes.MessageBubble)
+                .background(bubbleBg, BitchatShapes.MessageBubble)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Column {
+                BubbleContent(
                     message = message,
                     messages = messages,
                     currentUserNickname = currentUserNickname,
@@ -173,188 +204,185 @@ fun MessageItem(
                     onNicknameClick = onNicknameClick,
                     onMessageLongPress = onMessageLongPress,
                     onCancelTransfer = onCancelTransfer,
-                    onImageClick = onImageClick,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = endPad)
+                    onImageClick = onImageClick
                 )
             }
+        }
 
-            // Delivery status for private messages (overlay, non-displacing)
-            if (message.isPrivate && message.sender == currentUserNickname) {
-                message.deliveryStatus?.let { status ->
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 2.dp)
-                    ) {
-                        DeliveryStatusIcon(status = status)
-                    }
-                }
+        // Delivery status below bubble for private self messages
+        if (message.isPrivate && isSelf) {
+            message.deliveryStatus?.let { status ->
+                Spacer(modifier = Modifier.height(2.dp))
+                DeliveryStatusIcon(status = status)
             }
         }
-        
-        // Link previews removed; links are now highlighted inline and clickable within the message text
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-    private fun MessageTextWithClickableNicknames(
-        message: BitchatMessage,
-        messages: List<BitchatMessage>,
-        currentUserNickname: String,
-        meshService: BluetoothMeshService,
-        colorScheme: ColorScheme,
-        timeFormatter: SimpleDateFormat,
-        onNicknameClick: ((String) -> Unit)?,
-        onMessageLongPress: ((BitchatMessage) -> Unit)?,
-        onCancelTransfer: ((BitchatMessage) -> Unit)?,
-        onImageClick: ((String, List<String>, Int) -> Unit)?,
-        modifier: Modifier = Modifier
+private fun SystemMessageItem(
+    message: BitchatMessage,
+    timeFormatter: SimpleDateFormat,
+    onMessageLongPress: ((BitchatMessage) -> Unit)?
+) {
+    val haptic = LocalHapticFeedback.current
+    val annotatedText = buildAnnotatedString {
+        pushStyle(SpanStyle(
+            color = BitchatColors.TextTertiary,
+            fontSize = (BASE_FONT_SIZE - 2).sp,
+            fontStyle = FontStyle.Italic
+        ))
+        append("* ${message.content} *")
+        pop()
+        pushStyle(SpanStyle(
+            color = BitchatColors.TextTertiary.copy(alpha = 0.5f),
+            fontSize = (BASE_FONT_SIZE - 3).sp
+        ))
+        append(" [${timeFormatter.format(message.timestamp)}]")
+        pop()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        contentAlignment = Alignment.Center
     ) {
-    // Image special rendering
-    if (message.type == BitchatMessageType.Image) {
-        com.bitchat.android.ui.media.ImageMessageItem(
-            message = message,
-            messages = messages,
-            currentUserNickname = currentUserNickname,
-            meshService = meshService,
-            colorScheme = colorScheme,
-            timeFormatter = timeFormatter,
-            onNicknameClick = onNicknameClick,
-            onMessageLongPress = onMessageLongPress,
-            onCancelTransfer = onCancelTransfer,
-            onImageClick = onImageClick,
-            modifier = modifier
-        )
-        return
-    }
-
-    // Voice note special rendering
-    if (message.type == BitchatMessageType.Audio) {
-        com.bitchat.android.ui.media.AudioMessageItem(
-            message = message,
-            currentUserNickname = currentUserNickname,
-            meshService = meshService,
-            colorScheme = colorScheme,
-            timeFormatter = timeFormatter,
-            onNicknameClick = onNicknameClick,
-            onMessageLongPress = onMessageLongPress,
-            onCancelTransfer = onCancelTransfer,
-            modifier = modifier
-        )
-        return
-    }
-
-    // File special rendering
-    if (message.type == BitchatMessageType.File) {
-        val path = message.content.trim()
-        // Derive sending progress if applicable
-        val (overrideProgress, _) = when (val st = message.deliveryStatus) {
-            is com.bitchat.android.model.DeliveryStatus.PartiallyDelivered -> {
-                if (st.total > 0 && st.reached < st.total) {
-                    (st.reached.toFloat() / st.total.toFloat()) to Color(0xFF1E88E5) // blue while sending
-                } else null to null
+        Text(
+            text = annotatedText,
+            fontFamily = CourierPrimeFamily,
+            modifier = Modifier.pointerInput(message.id) {
+                detectTapGestures(
+                    onLongPress = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onMessageLongPress?.invoke(message)
+                    }
+                )
             }
-            else -> null to null
+        )
+    }
+}
+
+@Composable
+private fun NicknameChip(
+    message: BitchatMessage,
+    currentUserNickname: String,
+    meshService: BluetoothMeshService,
+    onNicknameClick: ((String) -> Unit)?,
+    onMessageLongPress: ((BitchatMessage) -> Unit)?
+) {
+    val nicknameText = formatNicknameAnnotatedString(
+        message = message,
+        currentUserNickname = currentUserNickname,
+        meshService = meshService
+    )
+    if (nicknameText.isEmpty()) return
+
+    val haptic = LocalHapticFeedback.current
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = nicknameText,
+        fontFamily = CourierPrimeFamily,
+        modifier = Modifier.pointerInput(message.id) {
+            detectTapGestures(
+                onTap = { pos ->
+                    val l = layout ?: return@detectTapGestures
+                    val offset = l.getOffsetForPosition(pos)
+                    val ann = nicknameText.getStringAnnotations("nickname_click", offset, offset)
+                    if (ann.isNotEmpty() && onNicknameClick != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNicknameClick.invoke(ann.first().item)
+                    }
+                },
+                onLongPress = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onMessageLongPress?.invoke(message)
+                }
+            )
+        },
+        onTextLayout = { layout = it }
+    )
+}
+
+@Composable
+private fun BubbleContent(
+    message: BitchatMessage,
+    messages: List<BitchatMessage>,
+    currentUserNickname: String,
+    meshService: BluetoothMeshService,
+    colorScheme: ColorScheme,
+    timeFormatter: SimpleDateFormat,
+    onNicknameClick: ((String) -> Unit)?,
+    onMessageLongPress: ((BitchatMessage) -> Unit)?,
+    onCancelTransfer: ((BitchatMessage) -> Unit)?,
+    onImageClick: ((String, List<String>, Int) -> Unit)?
+) {
+    when (message.type) {
+        BitchatMessageType.Image -> {
+            com.bitchat.android.ui.media.ImageMessageItem(
+                message = message,
+                messages = messages,
+                currentUserNickname = currentUserNickname,
+                meshService = meshService,
+                colorScheme = colorScheme,
+                timeFormatter = timeFormatter,
+                onNicknameClick = onNicknameClick,
+                onMessageLongPress = onMessageLongPress,
+                onCancelTransfer = onCancelTransfer,
+                onImageClick = onImageClick,
+                showHeader = false
+            )
         }
-        Column(modifier = modifier.fillMaxWidth()) {
-            // Header: nickname + timestamp line above the file, identical styling to text messages
-            val headerText = formatMessageHeaderAnnotatedString(
+        BitchatMessageType.Audio -> {
+            com.bitchat.android.ui.media.AudioMessageItem(
                 message = message,
                 currentUserNickname = currentUserNickname,
                 meshService = meshService,
                 colorScheme = colorScheme,
-                timeFormatter = timeFormatter
+                timeFormatter = timeFormatter,
+                onNicknameClick = onNicknameClick,
+                onMessageLongPress = onMessageLongPress,
+                onCancelTransfer = onCancelTransfer,
+                showHeader = false
             )
-            val haptic = LocalHapticFeedback.current
-            var headerLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-            Text(
-                text = headerText,
-                fontFamily = FontFamily.Monospace,
-                color = colorScheme.onSurface,
-                modifier = Modifier.pointerInput(message.id) {
-                    detectTapGestures(onTap = { pos ->
-                        val layout = headerLayout ?: return@detectTapGestures
-                        val offset = layout.getOffsetForPosition(pos)
-                        val ann = headerText.getStringAnnotations("nickname_click", offset, offset)
-                        if (ann.isNotEmpty() && onNicknameClick != null) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onNicknameClick.invoke(ann.first().item)
-                        }
-                    }, onLongPress = { onMessageLongPress?.invoke(message) })
-                },
-                onTextLayout = { headerLayout = it }
-            )
-
-            // Try to load the file packet from the path
-            val packet = try {
-                val file = java.io.File(path)
-                if (file.exists()) {
-                    // Create a temporary BitchatFilePacket for display
-                    // In a real implementation, this would be stored with the packet metadata
-                    com.bitchat.android.model.BitchatFilePacket(
-                        fileName = file.name,
-                        fileSize = file.length(),
-                        mimeType = com.bitchat.android.features.file.FileUtils.getMimeTypeFromExtension(file.name),
-                        content = file.readBytes()
-                    )
-                } else null
-            } catch (e: Exception) {
-                null
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                Box {
-                    if (packet != null) {
-                        if (overrideProgress != null) {
-                            // Show sending animation while in-flight
-                            com.bitchat.android.ui.media.FileSendingAnimation(
-                                fileName = packet.fileName,
-                                progress = overrideProgress,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
-                            // Static file display with open/save dialog
-                            FileMessageItem(
-                                packet = packet,
-                                onFileClick = {
-                                    // handled inside FileMessageItem via dialog
-                                }
-                            )
-                        }
-
-                        // Cancel button overlay during sending
-                        val showCancel = message.sender == currentUserNickname && (message.deliveryStatus is DeliveryStatus.PartiallyDelivered)
-                        if (showCancel) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(4.dp)
-                                    .size(22.dp)
-                                    .background(Color.Gray.copy(alpha = 0.6f), CircleShape)
-                                    .clickable { onCancelTransfer?.invoke(message) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(imageVector = Icons.Filled.Close, contentDescription = stringResource(R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    } else {
-                        Text(text = stringResource(R.string.file_unavailable), fontFamily = FontFamily.Monospace, color = Color.Gray)
-                    }
-                }
-            }
         }
-        return
+        BitchatMessageType.File -> {
+            BubbleFileContent(
+                message = message,
+                currentUserNickname = currentUserNickname,
+                onCancelTransfer = onCancelTransfer
+            )
+        }
+        else -> {
+            BubbleTextContent(
+                message = message,
+                messages = messages,
+                currentUserNickname = currentUserNickname,
+                meshService = meshService,
+                colorScheme = colorScheme,
+                timeFormatter = timeFormatter,
+                onNicknameClick = onNicknameClick,
+                onMessageLongPress = onMessageLongPress,
+                onImageClick = onImageClick
+            )
+        }
     }
+}
 
-    // Check if this message should be animated during PoW mining
+@Composable
+private fun BubbleTextContent(
+    message: BitchatMessage,
+    messages: List<BitchatMessage>,
+    currentUserNickname: String,
+    meshService: BluetoothMeshService,
+    colorScheme: ColorScheme,
+    timeFormatter: SimpleDateFormat,
+    onNicknameClick: ((String) -> Unit)?,
+    onMessageLongPress: ((BitchatMessage) -> Unit)?,
+    onImageClick: ((String, List<String>, Int) -> Unit)?
+) {
     val shouldAnimate = shouldAnimateMessage(message.id)
-    
-    // If animation is needed, use the matrix animation component for content only
+
     if (shouldAnimate) {
-        // Display message with matrix animation for content
         MessageWithMatrixAnimation(
             message = message,
             messages = messages,
@@ -364,60 +392,37 @@ fun MessageItem(
             timeFormatter = timeFormatter,
             onNicknameClick = onNicknameClick,
             onMessageLongPress = onMessageLongPress,
-            onImageClick = onImageClick,
-            modifier = modifier
+            onImageClick = onImageClick
         )
     } else {
-        // Normal message display
-        val annotatedText = formatMessageAsAnnotatedString(
+        val contentText = formatContentAnnotatedString(
             message = message,
             currentUserNickname = currentUserNickname,
             meshService = meshService,
             colorScheme = colorScheme,
             timeFormatter = timeFormatter
         )
-        
-        // Check if this message was sent by self to avoid click interactions on own nickname
-        val isSelf = message.senderPeerID == meshService.myPeerID || 
+
+        val isSelf = message.senderPeerID == meshService.myPeerID ||
                      message.sender == currentUserNickname ||
                      message.sender.startsWith("$currentUserNickname#")
-        
+
         val haptic = LocalHapticFeedback.current
         val context = LocalContext.current
         var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
         Text(
-            text = annotatedText,
-            modifier = modifier.pointerInput(message) {
+            text = contentText,
+            modifier = Modifier.pointerInput(message) {
                 detectTapGestures(
                     onTap = { position ->
                         val layout = textLayoutResult ?: return@detectTapGestures
                         val offset = layout.getOffsetForPosition(position)
-                        // Nickname click only when not self
-                        if (!isSelf && onNicknameClick != null) {
-                            val nicknameAnnotations = annotatedText.getStringAnnotations(
-                                tag = "nickname_click",
-                                start = offset,
-                                end = offset
-                            )
-                            if (nicknameAnnotations.isNotEmpty()) {
-                                val nickname = nicknameAnnotations.first().item
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onNicknameClick.invoke(nickname)
-                                return@detectTapGestures
-                            }
-                        }
-                        // Geohash teleport (all messages)
-                        val geohashAnnotations = annotatedText.getStringAnnotations(
-                            tag = "geohash_click",
-                            start = offset,
-                            end = offset
-                        )
+                        // Geohash teleport
+                        val geohashAnnotations = contentText.getStringAnnotations("geohash_click", offset, offset)
                         if (geohashAnnotations.isNotEmpty()) {
                             val geohash = geohashAnnotations.first().item
                             try {
-                                val locationManager = com.bitchat.android.geohash.LocationChannelManager.getInstance(
-                                    context
-                                )
+                                val locationManager = com.bitchat.android.geohash.LocationChannelManager.getInstance(context)
                                 val level = when (geohash.length) {
                                     in 0..2 -> com.bitchat.android.geohash.GeohashChannelLevel.REGION
                                     in 3..4 -> com.bitchat.android.geohash.GeohashChannelLevel.PROVINCE
@@ -432,12 +437,8 @@ fun MessageItem(
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             return@detectTapGestures
                         }
-                        // URL open (all messages)
-                        val urlAnnotations = annotatedText.getStringAnnotations(
-                            tag = "url_click",
-                            start = offset,
-                            end = offset
-                        )
+                        // URL open
+                        val urlAnnotations = contentText.getStringAnnotations("url_click", offset, offset)
                         if (urlAnnotations.isNotEmpty()) {
                             val raw = urlAnnotations.first().item
                             val resolved = if (raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true)) raw else "https://$raw"
@@ -456,16 +457,77 @@ fun MessageItem(
                     }
                 )
             },
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             softWrap = true,
             overflow = TextOverflow.Visible,
-            style = androidx.compose.ui.text.TextStyle(
-                color = colorScheme.onSurface
-            ),
+            style = androidx.compose.ui.text.TextStyle(color = colorScheme.onSurface),
             onTextLayout = { result -> textLayoutResult = result }
         )
     }
 }
+
+@Composable
+private fun BubbleFileContent(
+    message: BitchatMessage,
+    currentUserNickname: String,
+    onCancelTransfer: ((BitchatMessage) -> Unit)?
+) {
+    val path = message.content.trim()
+    val (overrideProgress, _) = when (val st = message.deliveryStatus) {
+        is DeliveryStatus.PartiallyDelivered -> {
+            if (st.total > 0 && st.reached < st.total) {
+                (st.reached.toFloat() / st.total.toFloat()) to BitchatColors.StatusInfo
+            } else null to null
+        }
+        else -> null to null
+    }
+
+    val packet = try {
+        val file = java.io.File(path)
+        if (file.exists()) {
+            com.bitchat.android.model.BitchatFilePacket(
+                fileName = file.name,
+                fileSize = file.length(),
+                mimeType = com.bitchat.android.features.file.FileUtils.getMimeTypeFromExtension(file.name),
+                content = file.readBytes()
+            )
+        } else null
+    } catch (_: Exception) { null }
+
+    Box {
+        if (packet != null) {
+            if (overrideProgress != null) {
+                com.bitchat.android.ui.media.FileSendingAnimation(
+                    fileName = packet.fileName,
+                    progress = overrideProgress,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                FileMessageItem(
+                    packet = packet,
+                    onFileClick = { }
+                )
+            }
+            val showCancel = message.sender == currentUserNickname && (message.deliveryStatus is DeliveryStatus.PartiallyDelivered)
+            if (showCancel) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .background(BitchatColors.TextSecondary.copy(alpha = 0.6f), CircleShape)
+                        .clickable { onCancelTransfer?.invoke(message) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(painter = rememberPixelPainter(PixelIcons.Close), contentDescription = stringResource(R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+        } else {
+            Text(text = stringResource(R.string.file_unavailable), fontFamily = CourierPrimeFamily, color = BitchatColors.TextSecondary)
+        }
+    }
+}
+
 
 @Composable
 fun DeliveryStatusIcon(status: DeliveryStatus) {
@@ -475,7 +537,7 @@ fun DeliveryStatusIcon(status: DeliveryStatus) {
         is DeliveryStatus.Sending -> {
             Text(
                 text = stringResource(R.string.status_sending),
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary.copy(alpha = 0.6f)
             )
         }
@@ -483,7 +545,7 @@ fun DeliveryStatusIcon(status: DeliveryStatus) {
             // Use a subtle hollow marker for Sent; single check is reserved for Delivered (iOS parity)
             Text(
                 text = stringResource(R.string.status_pending),
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary.copy(alpha = 0.6f)
             )
         }
@@ -491,30 +553,30 @@ fun DeliveryStatusIcon(status: DeliveryStatus) {
             // Single check for Delivered (matches iOS expectations)
             Text(
                 text = stringResource(R.string.status_sent),
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary.copy(alpha = 0.8f)
             )
         }
         is DeliveryStatus.Read -> {
             Text(
                 text = stringResource(R.string.status_delivered),
-                fontSize = 10.sp,
-                color = Color(0xFF007AFF), // Blue
+                fontSize = 12.sp,
+                color = BitchatColors.LinkColor,
                 fontWeight = FontWeight.Bold
             )
         }
         is DeliveryStatus.Failed -> {
             Text(
                 text = stringResource(R.string.status_failed),
-                fontSize = 10.sp,
-                color = Color.Red.copy(alpha = 0.8f)
+                fontSize = 12.sp,
+                color = BitchatColors.StatusError.copy(alpha = 0.8f)
             )
         }
         is DeliveryStatus.PartiallyDelivered -> {
             // Show a single subdued check without numeric label
             Text(
                 text = stringResource(R.string.status_sent),
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary.copy(alpha = 0.6f)
             )
         }

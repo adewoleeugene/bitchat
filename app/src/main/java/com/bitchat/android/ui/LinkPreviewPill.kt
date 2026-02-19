@@ -7,8 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Link
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -17,13 +17,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import java.net.URL
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * LinkPreviewPill - A compact link preview component that matches the iOS design
@@ -43,11 +44,10 @@ fun LinkPreviewPill(
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
     
     // iOS-style colors
-    val textColor = if (isDark) Color.Green else Color(red = 0f, green = 0.5f, blue = 0f)
-    val backgroundColor = if (isDark) Color.Gray.copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.08f)
+    val textColor = BitchatColors.AccentGreen
+    val backgroundColor = BitchatColors.TextSecondary.copy(alpha = 0.15f)
     val borderColor = textColor.copy(alpha = 0.3f)
     
     // Parse URL for host extraction
@@ -94,7 +94,7 @@ fun LinkPreviewPill(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Link,
+                        painter = rememberPixelPainter(PixelIcons.Link),
                         contentDescription = stringResource(com.bitchat.android.R.string.cd_link),
                         modifier = Modifier.size(24.dp),
                         tint = Color.Blue
@@ -110,7 +110,7 @@ fun LinkPreviewPill(
                 // Title - matches iOS styling
                 Text(
                     text = displayTitle,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = BASE_FONT_SIZE.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = textColor,
@@ -121,8 +121,8 @@ fun LinkPreviewPill(
                 // Host - matches iOS styling
                 Text(
                     text = displayHost,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 12.sp,
                     color = textColor.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

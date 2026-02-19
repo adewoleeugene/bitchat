@@ -7,10 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Camera
-import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.PhotoCamera
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -85,7 +83,7 @@ fun ImagePickerButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = Icons.Filled.PhotoCamera,
+            painter = rememberPixelPainter(PixelIcons.Camera),
             contentDescription = stringResource(com.bitchat.android.R.string.pick_image),
             tint = Color.Gray,
             modifier = Modifier.size(20.dp)

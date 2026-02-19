@@ -12,7 +12,8 @@ import com.bitchat.android.util.*
 data class IdentityAnnouncement(
     val nickname: String,
     val noisePublicKey: ByteArray,    // Noise static public key (Curve25519.KeyAgreement)
-    val signingPublicKey: ByteArray   // Ed25519 public key for signing
+    val signingPublicKey: ByteArray,  // Ed25519 public key for signing
+    val solanaAddress: String? = null // Optional Solana wallet address (Base58)
 ) : Parcelable {
 
     /**
@@ -21,8 +22,9 @@ data class IdentityAnnouncement(
     private enum class TLVType(val value: UByte) {
         NICKNAME(0x01u),
         NOISE_PUBLIC_KEY(0x02u),
-        SIGNING_PUBLIC_KEY(0x03u);  // NEW: Ed25519 signing public key
-        
+        SIGNING_PUBLIC_KEY(0x03u),
+        SOLANA_ADDRESS(0x05u);       // Solana wallet address (Base58 string)
+
         companion object {
             fun fromValue(value: UByte): TLVType? {
                 return values().find { it.value == value }
@@ -57,7 +59,17 @@ data class IdentityAnnouncement(
         result.add(TLVType.SIGNING_PUBLIC_KEY.value.toByte())
         result.add(signingPublicKey.size.toByte())
         result.addAll(signingPublicKey.toList())
-        
+
+        // TLV for Solana address (optional)
+        solanaAddress?.let { addr ->
+            val addrData = addr.toByteArray(Charsets.UTF_8)
+            if (addrData.size <= 255) {
+                result.add(TLVType.SOLANA_ADDRESS.value.toByte())
+                result.add(addrData.size.toByte())
+                result.addAll(addrData.toList())
+            }
+        }
+
         return result.toByteArray()
     }
     
@@ -73,24 +85,25 @@ data class IdentityAnnouncement(
             var nickname: String? = null
             var noisePublicKey: ByteArray? = null
             var signingPublicKey: ByteArray? = null
-            
+            var solanaAddress: String? = null
+
             while (offset + 2 <= dataCopy.size) {
                 // Read TLV type
                 val typeValue = dataCopy[offset].toUByte()
                 val type = TLVType.fromValue(typeValue)
                 offset += 1
-                
+
                 // Read TLV length
                 val length = dataCopy[offset].toUByte().toInt()
                 offset += 1
-                
+
                 // Check bounds
                 if (offset + length > dataCopy.size) return null
-                
+
                 // Read TLV value
                 val value = dataCopy.sliceArray(offset until offset + length)
                 offset += length
-                
+
                 // Process known TLV types, skip unknown ones for forward compatibility
                 when (type) {
                     TLVType.NICKNAME -> {
@@ -102,16 +115,19 @@ data class IdentityAnnouncement(
                     TLVType.SIGNING_PUBLIC_KEY -> {
                         signingPublicKey = value
                     }
+                    TLVType.SOLANA_ADDRESS -> {
+                        solanaAddress = String(value, Charsets.UTF_8)
+                    }
                     null -> {
                         // Unknown TLV; skip (tolerant decoder for forward compatibility)
                         continue
                     }
                 }
             }
-            
-            // All three fields are required
+
+            // All three core fields are required; solanaAddress is optional
             return if (nickname != null && noisePublicKey != null && signingPublicKey != null) {
-                IdentityAnnouncement(nickname, noisePublicKey, signingPublicKey)
+                IdentityAnnouncement(nickname, noisePublicKey, signingPublicKey, solanaAddress)
             } else {
                 null
             }
@@ -128,18 +144,21 @@ data class IdentityAnnouncement(
         if (nickname != other.nickname) return false
         if (!noisePublicKey.contentEquals(other.noisePublicKey)) return false
         if (!signingPublicKey.contentEquals(other.signingPublicKey)) return false
-        
+        if (solanaAddress != other.solanaAddress) return false
+
         return true
     }
-    
+
     override fun hashCode(): Int {
         var result = nickname.hashCode()
         result = 31 * result + noisePublicKey.contentHashCode()
         result = 31 * result + signingPublicKey.contentHashCode()
+        result = 31 * result + (solanaAddress?.hashCode() ?: 0)
         return result
     }
-    
+
     override fun toString(): String {
-        return "IdentityAnnouncement(nickname='$nickname', noisePublicKey=${noisePublicKey.joinToString("") { "%02x".format(it) }.take(16)}..., signingPublicKey=${signingPublicKey.joinToString("") { "%02x".format(it) }.take(16)}...)"
+        val solSuffix = solanaAddress?.let { ", solana=${it.take(8)}..." } ?: ""
+        return "IdentityAnnouncement(nickname='$nickname', noisePublicKey=${noisePublicKey.joinToString("") { "%02x".format(it) }.take(16)}..., signingPublicKey=${signingPublicKey.joinToString("") { "%02x".format(it) }.take(16)}...$solSuffix)"
     }
 }

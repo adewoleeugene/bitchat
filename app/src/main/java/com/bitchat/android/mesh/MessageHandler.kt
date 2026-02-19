@@ -260,14 +260,15 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val nickname = announcement.nickname
         val noisePublicKey = announcement.noisePublicKey
         val signingPublicKey = announcement.signingPublicKey
-        
+
         // Update peer info with verification status through new method
         val isFirstAnnounce = delegate?.updatePeerInfo(
             peerID = peerID,
             nickname = nickname,
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
-            isVerified = true
+            isVerified = true,
+            solanaAddress = announcement.solanaAddress
         ) ?: false
 
         // Update peer ID binding with noise public key for identity management
@@ -583,7 +584,7 @@ interface MessageHandlerDelegate {
     fun getNetworkSize(): Int
     fun getMyNickname(): String?
     fun getPeerInfo(peerID: String): PeerInfo?
-    fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean): Boolean
+    fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String? = null): Boolean
     
     // Packet operations
     fun sendPacket(packet: BitchatPacket)

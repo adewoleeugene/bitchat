@@ -5,9 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,12 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bitchat.android.R
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * Screen shown when checking battery optimization status or requesting battery optimization disable
@@ -105,7 +104,7 @@ private fun BatteryOptimizationEnabledContent(
                     Text(
                         text = stringResource(R.string.app_name),
                     style = MaterialTheme.typography.headlineLarge.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 32.sp
                     ),
@@ -115,7 +114,7 @@ private fun BatteryOptimizationEnabledContent(
                     Text(
                         text = stringResource(R.string.battery_optimization_detected_title),
                     fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     color = colorScheme.onBackground.copy(alpha = 0.7f)
                 )
             }
@@ -135,7 +134,7 @@ private fun BatteryOptimizationEnabledContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Power,
+                            painter = rememberPixelPainter(PixelIcons.Power),
                             contentDescription = stringResource(R.string.cd_battery_optimization),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -175,7 +174,7 @@ private fun BatteryOptimizationEnabledContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.CheckCircle,
+                            painter = rememberPixelPainter(PixelIcons.Check),
                             contentDescription = stringResource(R.string.cd_benefits),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -225,7 +224,7 @@ private fun BatteryOptimizationEnabledContent(
                     Text(
                         text = stringResource(R.string.disable_battery_optimization),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -243,7 +242,7 @@ private fun BatteryOptimizationEnabledContent(
                         Text(
                             text = stringResource(R.string.check_again),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = CourierPrimeFamily
                         )
                     )
                 }
@@ -259,7 +258,7 @@ private fun BatteryOptimizationEnabledContent(
                         Text(
                             text = stringResource(R.string.battery_optimization_skip),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = CourierPrimeFamily
                         )
                     )
                 }
@@ -284,7 +283,7 @@ private fun BatteryOptimizationCheckingContent(
             Text(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.headlineLarge.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 32.sp
                 ),
@@ -294,7 +293,7 @@ private fun BatteryOptimizationCheckingContent(
                 Text(
                     text = stringResource(R.string.battery_optimization_disabled_title),
                 fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 color = colorScheme.onBackground.copy(alpha = 0.7f)
             )
         }
@@ -311,7 +310,7 @@ private fun BatteryOptimizationCheckingContent(
         )
         
         Icon(
-            imageVector = Icons.Filled.BatteryStd,
+            painter = rememberPixelPainter(PixelIcons.Battery),
             contentDescription = stringResource(R.string.cd_checking_battery_optimization),
             modifier = Modifier
                 .size(64.dp)
@@ -322,7 +321,7 @@ private fun BatteryOptimizationCheckingContent(
             Text(
                 text = stringResource(R.string.battery_optimization_success_message),
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 color = colorScheme.onBackground.copy(alpha = 0.8f)
             ),
             textAlign = TextAlign.Center
@@ -347,7 +346,7 @@ private fun BatteryOptimizationNotSupportedContent(
             Text(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.headlineLarge.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 32.sp
                 ),
@@ -357,13 +356,13 @@ private fun BatteryOptimizationNotSupportedContent(
             Text(
                 text = stringResource(R.string.battery_optimization_not_required),
                 fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 color = colorScheme.onBackground.copy(alpha = 0.7f)
             )
         }
         
         Icon(
-            imageVector = Icons.Filled.CheckCircle,
+            painter = rememberPixelPainter(PixelIcons.Check),
             contentDescription = stringResource(R.string.cd_not_supported_battery_optimization),
             modifier = Modifier.size(64.dp),
             tint = colorScheme.primary
@@ -372,7 +371,7 @@ private fun BatteryOptimizationNotSupportedContent(
         Text(
             text = stringResource(R.string.battery_optimization_not_supported_message),
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 color = colorScheme.onBackground.copy(alpha = 0.8f)
             ),
             textAlign = TextAlign.Center
@@ -388,7 +387,7 @@ private fun BatteryOptimizationNotSupportedContent(
                 Text(
                     text = stringResource(R.string.continue_btn),
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontWeight = FontWeight.Bold
                 )
             )

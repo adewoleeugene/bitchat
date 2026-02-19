@@ -11,6 +11,15 @@ import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
 import com.bitchat.android.protocol.SpecialRecipients
 import com.bitchat.android.model.RequestSyncPacket
+import com.bitchat.android.feed.FeedPostPayload
+import com.bitchat.android.feed.FeedReactionPayload
+import com.bitchat.android.feed.FeedReplyPayload
+import com.bitchat.android.feed.FeedService
+import com.bitchat.android.solana.SolanaBlockhashResponse
+import com.bitchat.android.solana.SolanaRelayHandler
+import com.bitchat.android.solana.SolanaRelayReceipt
+import com.bitchat.android.solana.SolanaRelayRequest
+import com.bitchat.android.solana.SolanaTransferIntent
 import com.bitchat.android.sync.GossipSyncManager
 import com.bitchat.android.util.toHexString
 import kotlinx.coroutines.*
@@ -58,7 +67,19 @@ class BluetoothMeshService(private val context: Context) {
     
     // Delegate for message callbacks (maintains same interface)
     var delegate: BluetoothMeshDelegate? = null
-    
+
+    // Solana relay handler for mesh transaction relay (set from ChatViewModel)
+    var solanaRelayHandler: SolanaRelayHandler? = null
+
+    // Callback for blockhash responses received from online peers (set from ChatViewModel)
+    var onBlockhashResponseReceived: ((SolanaBlockhashResponse) -> Unit)? = null
+
+    // Feed service for social feed (set from ChatViewModel)
+    var feedService: FeedService? = null
+
+    // Solana wallet address to include in ANNOUNCE packets (set from ChatViewModel)
+    var solanaAddress: String? = null
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -241,8 +262,8 @@ class BluetoothMeshService(private val context: Context) {
                 return peerManager.getPeerInfo(peerID)
             }
             
-            override fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean): Boolean {
-                return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified)
+            override fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String?): Boolean {
+                return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
             }
             
             // Packet operations
@@ -480,8 +501,96 @@ class BluetoothMeshService(private val context: Context) {
                 val req = RequestSyncPacket.decode(routed.packet.payload) ?: return
                 gossipSyncManager.handleRequestSync(fromPeer, req)
             }
+
+            override fun handleSolanaTxRelay(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val request = SolanaRelayRequest.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_TX_RELAY payload from $fromPeer")
+                    return
+                }
+                val handler = solanaRelayHandler
+                if (handler == null) {
+                    Log.d(TAG, "No Solana relay handler configured, ignoring relay request")
+                    return
+                }
+                handler.handleRelayRequest(request, fromPeer, context)
+            }
+
+            override fun handleSolanaTxReceipt(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val receipt = SolanaRelayReceipt.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_TX_RECEIPT payload from $fromPeer")
+                    return
+                }
+                val handler = solanaRelayHandler
+                if (handler == null) {
+                    Log.d(TAG, "No Solana relay handler configured, ignoring relay receipt")
+                    return
+                }
+                handler.handleRelayReceipt(receipt)
+            }
+
+            override fun handleSolanaIntentRequest(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val intent = SolanaTransferIntent.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_TX_INTENT payload from $fromPeer")
+                    return
+                }
+                val handler = solanaRelayHandler
+                if (handler == null) {
+                    Log.d(TAG, "No Solana relay handler configured, ignoring intent request")
+                    return
+                }
+                handler.handleIntentRequest(intent, fromPeer, context)
+            }
+
+            override fun handleSolanaBlockhashResponse(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val response = SolanaBlockhashResponse.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_BLOCKHASH_RESPONSE payload from $fromPeer")
+                    return
+                }
+                onBlockhashResponseReceived?.invoke(response)
+                    ?: Log.d(TAG, "No blockhash response handler configured, ignoring")
+            }
+
+            override fun handleFeedPost(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val payload = FeedPostPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode FEED_POST payload from $fromPeer")
+                    return
+                }
+                val service = feedService ?: return
+                serviceScope.launch {
+                    service.handleIncomingPost(payload, fromPeer, context)
+                }
+            }
+
+            override fun handleFeedReaction(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val payload = FeedReactionPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode FEED_REACTION payload from $fromPeer")
+                    return
+                }
+                val service = feedService ?: return
+                serviceScope.launch {
+                    service.handleIncomingReaction(payload, fromPeer)
+                }
+            }
+
+            override fun handleFeedReply(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val payload = FeedReplyPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode FEED_REPLY payload from $fromPeer")
+                    return
+                }
+                val service = feedService ?: return
+                serviceScope.launch {
+                    service.handleIncomingReply(payload, fromPeer)
+                }
+            }
         }
-        
+
         // BluetoothConnectionManager delegates
         connectionManager.delegate = object : BluetoothConnectionManagerDelegate {
             override fun onPacketReceived(packet: BitchatPacket, peerID: String, device: android.bluetooth.BluetoothDevice?) {
@@ -877,7 +986,7 @@ class BluetoothMeshService(private val context: Context) {
             }
             
             // Create iOS-compatible IdentityAnnouncement with TLV encoding
-            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey)
+            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
             val tlvPayload = announcement.encode()
             if (tlvPayload == null) {
                 Log.e(TAG, "Failed to encode announcement as TLV")
@@ -926,25 +1035,25 @@ class BluetoothMeshService(private val context: Context) {
         }
         
         // Create iOS-compatible IdentityAnnouncement with TLV encoding
-        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey)
+        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
         val tlvPayload = announcement.encode()
         if (tlvPayload == null) {
             Log.e(TAG, "Failed to encode peer announcement as TLV")
             return
         }
-        
+
         val packet = BitchatPacket(
             type = MessageType.ANNOUNCE.value,
             ttl = MAX_TTL,
             senderID = myPeerID,
             payload = tlvPayload
         )
-        
+
         // Sign the packet using our signing key (exactly like iOS)
         val signedPacket = encryptionService.signData(packet.toBinaryDataForSigning()!!)?.let { signature ->
             packet.copy(signature = signature)
         } ?: packet
-        
+
         connectionManager.broadcastPacket(RoutedPacket(signedPacket))
         peerManager.markPeerAsAnnouncedTo(peerID)
         Log.d(TAG, "Sent iOS-compatible signed TLV peer announce to $peerID (${tlvPayload.size} bytes)")
@@ -1024,9 +1133,10 @@ class BluetoothMeshService(private val context: Context) {
         nickname: String,
         noisePublicKey: ByteArray,
         signingPublicKey: ByteArray,
-        isVerified: Boolean
+        isVerified: Boolean,
+        solanaAddress: String? = null
     ): Boolean {
-        return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified)
+        return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
     }
     
     /**
@@ -1147,8 +1257,127 @@ class BluetoothMeshService(private val context: Context) {
         }
     }
     
+    // MARK: - Solana Mesh Relay
+
+    /**
+     * Build and broadcast a Solana relay request packet through the mesh.
+     * Called when an offline user wants their signed transaction relayed.
+     */
+    fun broadcastSolanaRelayRequest(request: SolanaRelayRequest) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_TX_RELAY.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = request.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_TX_RELAY request ${request.requestId.take(8)}...")
+        }
+    }
+
+    /**
+     * Build and broadcast a Solana relay receipt packet through the mesh.
+     * Called by the relay handler after broadcasting a transaction.
+     */
+    fun broadcastSolanaRelayReceipt(receipt: SolanaRelayReceipt) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_TX_RECEIPT.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = receipt.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_TX_RECEIPT for ${receipt.requestId.take(8)}... status=${receipt.status}")
+        }
+    }
+
+    /**
+     * Broadcast a Solana transfer intent through the mesh (2-step handshake step 1).
+     * Sent by offline user to request a fresh blockhash from an online peer.
+     */
+    fun broadcastSolanaIntentRequest(intent: SolanaTransferIntent) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_TX_INTENT.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = intent.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_TX_INTENT ${intent.intentId.take(8)}...")
+        }
+    }
+
+    /**
+     * Broadcast a Solana blockhash response through the mesh (2-step handshake step 2).
+     * Sent by online peer back to the offline user with a fresh blockhash.
+     */
+    fun broadcastSolanaBlockhashResponse(response: SolanaBlockhashResponse) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_BLOCKHASH_RESPONSE.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = response.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_BLOCKHASH_RESPONSE for ${response.intentId.take(8)}...")
+        }
+    }
+
+    // MARK: - Social Feed Broadcast
+
+    fun broadcastFeedPost(payload: FeedPostPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.FEED_POST.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+            Log.d(TAG, "Broadcast FEED_POST ${payload.postId.take(8)}...")
+        }
+    }
+
+    fun broadcastFeedReaction(payload: FeedReactionPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.FEED_REACTION.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        }
+    }
+
+    fun broadcastFeedReply(payload: FeedReplyPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.FEED_REPLY.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        }
+    }
+
     // MARK: - Panic Mode Support
-    
+
     /**
      * Clear all internal mesh service data (for panic mode)
      */

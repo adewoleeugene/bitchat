@@ -3,7 +3,6 @@ package com.bitchat.android.ui
 
 // [Goose] Installing FileShareDispatcher handler in ChatScreen to forward file sends to ViewModel
 
-
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -14,8 +13,9 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.ui.draw.clip
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.ui.media.FullScreenImageViewer
+import com.bitchat.android.ui.theme.BitchatColors
 
 /**
  * Main ChatScreen - REFACTORED to use component-based architecture
@@ -59,6 +60,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val showAppInfo by viewModel.showAppInfo.observeAsState(false)
 
     var messageText by remember { mutableStateOf(TextFieldValue("")) }
+    var commandHint by remember { mutableStateOf<String?>(null) }
     var showPasswordPrompt by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var passwordInput by remember { mutableStateOf("") }
@@ -72,6 +74,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var initialViewerIndex by remember { mutableStateOf(0) }
     var forceScrollToBottom by remember { mutableStateOf(false) }
     var isScrolledUp by remember { mutableStateOf(false) }
+    var showWalletScreen by remember { mutableStateOf(false) }
+    val selectedTab by viewModel.selectedTab.observeAsState("chat")
+    val showNewPostComposer by viewModel.showNewPostComposer.observeAsState(false)
 
     // Show password dialog when needed
     LaunchedEffect(showPasswordPrompt) {
@@ -128,115 +133,138 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     .height(headerHeight)
             )
 
-            // Messages area - takes up available space, will compress when keyboard appears
-            MessagesList(
-                messages = displayMessages,
-                currentUserNickname = nickname,
-                meshService = viewModel.meshService,
-                modifier = Modifier.weight(1f),
-                forceScrollToBottom = forceScrollToBottom,
-                onScrolledUpChanged = { isUp -> isScrolledUp = isUp },
-                onNicknameClick = { fullSenderName ->
-                    // Single click - mention user in text input
-                    val currentText = messageText.text
-                    
-                    // Extract base nickname and hash suffix from full sender name
-                    val (baseName, hashSuffix) = splitSuffix(fullSenderName)
-                    
-                    // Check if we're in a geohash channel to include hash suffix
-                    val selectedLocationChannel = viewModel.selectedLocationChannel.value
-                    val mentionText = if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location && hashSuffix.isNotEmpty()) {
-                        // In geohash chat - include the hash suffix from the full display name
-                        "@$baseName$hashSuffix"
-                    } else {
-                        // Regular chat - just the base nickname
-                        "@$baseName"
-                    }
-                    
-                    val newText = when {
-                        currentText.isEmpty() -> "$mentionText "
-                        currentText.endsWith(" ") -> "$currentText$mentionText "
-                        else -> "$currentText $mentionText "
-                    }
-                    
-                    messageText = TextFieldValue(
-                        text = newText,
-                        selection = TextRange(newText.length)
-                    )
-                },
-                onMessageLongPress = { message ->
-                    // Message long press - open user action sheet with message context
-                    // Extract base nickname from message sender (contains all necessary info)
-                    val (baseName, _) = splitSuffix(message.sender)
-                    selectedUserForSheet = baseName
-                    selectedMessageForSheet = message
-                    showUserSheet = true
-                },
-                onCancelTransfer = { msg ->
-                    viewModel.cancelMediaSend(msg.id)
-                },
-                onImageClick = { currentPath, allImagePaths, initialIndex ->
-                    viewerImagePaths = allImagePaths
-                    initialViewerIndex = initialIndex
-                    showFullScreenImageViewer = true
-                }
-            )
-            // Input area - stays at bottom
-        // Bridge file share from lower-level input to ViewModel
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        com.bitchat.android.ui.events.FileShareDispatcher.setHandler { peer, channel, path ->
-            viewModel.sendFileNote(peer, channel, path)
-        }
-    }
-
-    ChatInputSection(
-        messageText = messageText,
-        onMessageTextChange = { newText: TextFieldValue ->
-            messageText = newText
-            viewModel.updateCommandSuggestions(newText.text)
-            viewModel.updateMentionSuggestions(newText.text)
-        },
-        onSend = {
-            if (messageText.text.trim().isNotEmpty()) {
-                viewModel.sendMessage(messageText.text.trim())
-                messageText = TextFieldValue("")
-                forceScrollToBottom = !forceScrollToBottom // Toggle to trigger scroll
-            }
-        },
-        onSendVoiceNote = { peer, onionOrChannel, path ->
-            viewModel.sendVoiceNote(peer, onionOrChannel, path)
-        },
-        onSendImageNote = { peer, onionOrChannel, path ->
-            viewModel.sendImageNote(peer, onionOrChannel, path)
-        },
-        onSendFileNote = { peer, onionOrChannel, path ->
-            viewModel.sendFileNote(peer, onionOrChannel, path)
-        },
-        
-        showCommandSuggestions = showCommandSuggestions,
-        commandSuggestions = commandSuggestions,
-        showMentionSuggestions = showMentionSuggestions,
-        mentionSuggestions = mentionSuggestions,
-        onCommandSuggestionClick = { suggestion: CommandSuggestion ->
-                    val commandText = viewModel.selectCommandSuggestion(suggestion)
-                    messageText = TextFieldValue(
-                        text = commandText,
-                        selection = TextRange(commandText.length)
-                    )
-                },
-                onMentionSuggestionClick = { mention: String ->
-                    val mentionText = viewModel.selectMentionSuggestion(mention, messageText.text)
-                    messageText = TextFieldValue(
-                        text = mentionText,
-                        selection = TextRange(mentionText.length)
-                    )
-                },
+            // Tab bar: Chat/Feed toggle + mesh/channel name
+            ChatTabBar(
+                selectedTab = selectedTab,
+                onTabChange = { viewModel.selectTab(it) },
                 selectedPrivatePeer = selectedPrivatePeer,
                 currentChannel = currentChannel,
-                nickname = nickname,
-                colorScheme = colorScheme,
-                showMediaButtons = showMediaButtons
+                selectedLocationChannel = selectedLocationChannel,
+                onContextClick = { showLocationChannelsSheet = true }
             )
+
+            if (selectedTab == "feed") {
+                // Feed view
+                com.bitchat.android.ui.feed.FeedTimeline(
+                    viewModel = viewModel,
+                    modifier = Modifier.weight(1f)
+                )
+                com.bitchat.android.ui.feed.FeedInputBar(
+                    onNewPost = { viewModel.showNewPostComposer() }
+                )
+            } else {
+                // Chat view - Messages area
+                MessagesList(
+                    messages = displayMessages,
+                    currentUserNickname = nickname,
+                    meshService = viewModel.meshService,
+                    modifier = Modifier.weight(1f),
+                    forceScrollToBottom = forceScrollToBottom,
+                    onScrolledUpChanged = { isUp -> isScrolledUp = isUp },
+                    onNicknameClick = { fullSenderName ->
+                        val currentText = messageText.text
+                        val (baseName, hashSuffix) = splitSuffix(fullSenderName)
+                        val selectedLocationChannel = viewModel.selectedLocationChannel.value
+                        val mentionText = if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location && hashSuffix.isNotEmpty()) {
+                            "@$baseName$hashSuffix"
+                        } else {
+                            "@$baseName"
+                        }
+                        val newText = when {
+                            currentText.isEmpty() -> "$mentionText "
+                            currentText.endsWith(" ") -> "$currentText$mentionText "
+                            else -> "$currentText $mentionText "
+                        }
+                        messageText = TextFieldValue(
+                            text = newText,
+                            selection = TextRange(newText.length)
+                        )
+                    },
+                    onMessageLongPress = { message ->
+                        val (baseName, _) = splitSuffix(message.sender)
+                        selectedUserForSheet = baseName
+                        selectedMessageForSheet = message
+                        showUserSheet = true
+                    },
+                    onCancelTransfer = { msg ->
+                        viewModel.cancelMediaSend(msg.id)
+                    },
+                    onImageClick = { currentPath, allImagePaths, initialIndex ->
+                        viewerImagePaths = allImagePaths
+                        initialViewerIndex = initialIndex
+                        showFullScreenImageViewer = true
+                    }
+                )
+                // Input area - stays at bottom
+                // Bridge file share from lower-level input to ViewModel
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    com.bitchat.android.ui.events.FileShareDispatcher.setHandler { peer, channel, path ->
+                        viewModel.sendFileNote(peer, channel, path)
+                    }
+                }
+
+                ChatInputSection(
+                    messageText = messageText,
+                    onMessageTextChange = { newText: TextFieldValue ->
+                        messageText = newText
+                        viewModel.updateCommandSuggestions(newText.text)
+                        viewModel.updateMentionSuggestions(newText.text)
+                        if (!newText.text.startsWith("/")) commandHint = null
+                    },
+                    onSend = {
+                        if (messageText.text.trim().isNotEmpty()) {
+                            val result = viewModel.sendMessage(messageText.text.trim())
+                            if (result?.prefillText != null) {
+                                val text = result.prefillText
+                                messageText = TextFieldValue(
+                                    text = text,
+                                    selection = TextRange(result.cursorPosition ?: text.length)
+                                )
+                                commandHint = result.hintText
+                            } else {
+                                messageText = TextFieldValue("")
+                                commandHint = null
+                            }
+                            forceScrollToBottom = !forceScrollToBottom
+                        }
+                    },
+                    onSendVoiceNote = { peer, onionOrChannel, path ->
+                        viewModel.sendVoiceNote(peer, onionOrChannel, path)
+                    },
+                    onSendImageNote = { peer, onionOrChannel, path ->
+                        viewModel.sendImageNote(peer, onionOrChannel, path)
+                    },
+                    onSendFileNote = { peer, onionOrChannel, path ->
+                        viewModel.sendFileNote(peer, onionOrChannel, path)
+                    },
+                    commandHint = commandHint,
+                    showCommandSuggestions = showCommandSuggestions,
+                    commandSuggestions = commandSuggestions,
+                    showMentionSuggestions = showMentionSuggestions,
+                    mentionSuggestions = mentionSuggestions,
+                    onCommandSuggestionClick = { suggestion: CommandSuggestion ->
+                        val result = viewModel.selectCommandSuggestion(suggestion)
+                        val text = result.prefillText ?: "${suggestion.command} "
+                        messageText = TextFieldValue(
+                            text = text,
+                            selection = TextRange(result.cursorPosition ?: text.length)
+                        )
+                        commandHint = result.hintText
+                    },
+                    onMentionSuggestionClick = { mention: String ->
+                        val mentionText = viewModel.selectMentionSuggestion(mention, messageText.text)
+                        messageText = TextFieldValue(
+                            text = mentionText,
+                            selection = TextRange(mentionText.length)
+                        )
+                    },
+                    selectedPrivatePeer = selectedPrivatePeer,
+                    currentChannel = currentChannel,
+                    nickname = nickname,
+                    colorScheme = colorScheme,
+                    showMediaButtons = showMediaButtons
+                )
+            }
         }
 
         // Floating header - positioned absolutely at top, ignores keyboard
@@ -251,7 +279,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onShowAppInfo = { viewModel.showAppInfo() },
             onPanicClear = { viewModel.panicClearAllData() },
             onLocationChannelsClick = { showLocationChannelsSheet = true },
-            onLocationNotesClick = { showLocationNotesSheet = true }
+            onLocationNotesClick = { showLocationNotesSheet = true },
+            onShowWallet = { showWalletScreen = true }
         )
 
         // Divider under header - positioned after status bar + header height
@@ -300,13 +329,13 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 color = colorScheme.background,
                 tonalElevation = 3.dp,
                 shadowElevation = 6.dp,
-                border = BorderStroke(2.dp, Color(0xFF00C851))
+                border = BorderStroke(2.dp, BitchatColors.StatusSuccess)
             ) {
                 IconButton(onClick = { forceScrollToBottom = !forceScrollToBottom }) {
                     Icon(
-                        imageVector = Icons.Filled.ArrowDownward,
+                        painter = rememberPixelPainter(PixelIcons.ArrowDown),
                         contentDescription = stringResource(com.bitchat.android.R.string.cd_scroll_to_bottom),
-                        tint = Color(0xFF00C851)
+                        tint = BitchatColors.StatusSuccess
                     )
                 }
             }
@@ -338,6 +367,17 @@ fun ChatScreen(viewModel: ChatViewModel) {
             imagePaths = viewerImagePaths,
             initialIndex = initialViewerIndex,
             onClose = { showFullScreenImageViewer = false }
+        )
+    }
+
+    // New Post Composer
+    if (showNewPostComposer) {
+        com.bitchat.android.ui.feed.NewPostComposer(
+            onPost = { content, imageBytes ->
+                viewModel.createFeedPost(content, imageBytes)
+                viewModel.hideNewPostComposer()
+            },
+            onDismiss = { viewModel.hideNewPostComposer() }
         )
     }
 
@@ -373,8 +413,17 @@ fun ChatScreen(viewModel: ChatViewModel) {
         },
         selectedUserForSheet = selectedUserForSheet,
         selectedMessageForSheet = selectedMessageForSheet,
-        viewModel = viewModel
+        viewModel = viewModel,
+        onShowWallet = { showWalletScreen = true }
     )
+
+    // Wallet screen (full screen overlay)
+    if (showWalletScreen) {
+        com.bitchat.android.solana.WalletScreen(
+            onBack = { showWalletScreen = false },
+            getPeersWithSolana = { viewModel.getPeersWithSolanaAddresses() }
+        )
+    }
 }
 
 @Composable
@@ -385,6 +434,7 @@ private fun ChatInputSection(
     onSendVoiceNote: (String?, String?, String) -> Unit,
     onSendImageNote: (String?, String?, String) -> Unit,
     onSendFileNote: (String?, String?, String) -> Unit,
+    commandHint: String?,
     showCommandSuggestions: Boolean,
     commandSuggestions: List<CommandSuggestion>,
     showMentionSuggestions: Boolean,
@@ -399,10 +449,10 @@ private fun ChatInputSection(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = colorScheme.background
+        color = BitchatColors.BackgroundLayer1
     ) {
         Column {
-            HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.3f))
+            HorizontalDivider(color = BitchatColors.InputFieldBorder)
             // Command suggestions box
             if (showCommandSuggestions && commandSuggestions.isNotEmpty()) {
                 CommandSuggestionsBox(
@@ -421,6 +471,18 @@ private fun ChatInputSection(
                 )
                 HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.2f))
             }
+            // Command hint bar (step guidance)
+            if (commandHint != null) {
+                Text(
+                    text = commandHint,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BitchatColors.AccentGreen.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = BitchatColors.AccentGreen
+                )
+            }
             MessageInput(
                 value = messageText,
                 onValueChange = onMessageTextChange,
@@ -437,6 +499,120 @@ private fun ChatInputSection(
         }
     }
 }
+@Composable
+private fun ChatTabBar(
+    selectedTab: String = "chat",
+    onTabChange: (String) -> Unit = {},
+    selectedPrivatePeer: String?,
+    currentChannel: String?,
+    selectedLocationChannel: com.bitchat.android.geohash.ChannelID?,
+    onContextClick: () -> Unit = {}
+) {
+    // Determine the current context label
+    val contextLabel = when {
+        selectedPrivatePeer != null -> {
+            val (baseName, _) = splitSuffix(selectedPrivatePeer)
+            "DM: @$baseName"
+        }
+        currentChannel != null -> "#$currentChannel"
+        selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location -> {
+            "#${selectedLocationChannel.channel.geohash}"
+        }
+        else -> "#mesh"
+    }
+
+    val contextColor = when {
+        selectedPrivatePeer != null -> BitchatColors.SelfMessage
+        currentChannel != null -> BitchatColors.MeshChannel
+        selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location -> BitchatColors.LocationChannel
+        else -> BitchatColors.MeshChannel
+    }
+
+    val borderColor = BitchatColors.Border
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End
+    ) {
+        // Left: mesh/channel context label (tap to open location channels)
+        Text(
+            text = contextLabel,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            ),
+            color = contextColor,
+            maxLines = 1,
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onContextClick() }
+        )
+
+        // Right: Chat/Feed segmented control
+        val pillShape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
+        val selectedBg = BitchatColors.AccentGreen.copy(alpha = 0.15f)
+        val selectedTextColor = BitchatColors.AccentGreen
+        val unselectedTextColor = BitchatColors.TextTertiary
+        Row(
+            modifier = Modifier
+                .border(
+                    width = 1.dp,
+                    color = selectedTextColor.copy(alpha = 0.4f),
+                    shape = pillShape
+                )
+                .clip(pillShape),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Chat tab
+            Box(
+                modifier = Modifier
+                    .background(if (selectedTab == "chat") selectedBg else Color.Transparent)
+                    .clickable { onTabChange("chat") }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Chat",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                        fontWeight = if (selectedTab == "chat") androidx.compose.ui.text.font.FontWeight.Bold
+                            else androidx.compose.ui.text.font.FontWeight.Normal
+                    ),
+                    color = if (selectedTab == "chat") selectedTextColor else unselectedTextColor
+                )
+            }
+            // Divider between tabs
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(20.dp)
+                    .background(borderColor)
+            )
+            // Feed tab
+            Box(
+                modifier = Modifier
+                    .background(if (selectedTab == "feed") selectedBg else Color.Transparent)
+                    .clickable { onTabChange("feed") }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Feed",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                        fontWeight = if (selectedTab == "feed") androidx.compose.ui.text.font.FontWeight.Bold
+                            else androidx.compose.ui.text.font.FontWeight.Normal
+                    ),
+                    color = if (selectedTab == "feed") selectedTextColor else unselectedTextColor
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatFloatingHeader(
@@ -450,7 +626,8 @@ private fun ChatFloatingHeader(
     onShowAppInfo: () -> Unit,
     onPanicClear: () -> Unit,
     onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onLocationNotesClick: () -> Unit,
+    onShowWallet: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
@@ -483,7 +660,8 @@ private fun ChatFloatingHeader(
                         // Ensure location is loaded before showing sheet
                         locationManager.refreshChannels()
                         onLocationNotesClick()
-                    }
+                    },
+                    onShowWallet = onShowWallet
                 )
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -513,7 +691,8 @@ private fun ChatDialogs(
     onUserSheetDismiss: () -> Unit,
     selectedUserForSheet: String,
     selectedMessageForSheet: BitchatMessage?,
-    viewModel: ChatViewModel
+    viewModel: ChatViewModel,
+    onShowWallet: (() -> Unit)? = null
 ) {
     // Password dialog
     PasswordPromptDialog(
@@ -530,7 +709,8 @@ private fun ChatDialogs(
     AboutSheet(
         isPresented = showAppInfo,
         onDismiss = onAppInfoDismiss,
-        onShowDebug = { showDebugSheet = true }
+        onShowDebug = { showDebugSheet = true },
+        onShowWallet = onShowWallet
     )
     if (showDebugSheet) {
         com.bitchat.android.ui.debug.DebugSettingsSheet(

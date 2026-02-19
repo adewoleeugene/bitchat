@@ -10,12 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.PinDrop
-import androidx.compose.material.icons.outlined.BookmarkBorder
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -24,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +34,9 @@ import com.bitchat.android.geohash.GeohashBookmarksStore
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * Location Channels Sheet for selecting geohash-based location channels
@@ -107,9 +105,8 @@ fun LocationChannelsSheet(
 
     // iOS system colors (matches iOS exactly)
     val colorScheme = MaterialTheme.colorScheme
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // iOS green
-    val standardBlue = Color(0xFF007AFF) // iOS blue
+    val standardGreen = BitchatColors.AccentGreen // iOS green
+    val standardBlue = BitchatColors.MeshChannel // iOS blue
 
     if (isPresented) {
         ModalBottomSheet(
@@ -137,7 +134,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.location_channels_title),
                                 style = MaterialTheme.typography.headlineSmall,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = CourierPrimeFamily,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground
                             )
@@ -145,7 +142,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.location_channels_desc),
                                 fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = CourierPrimeFamily,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                             )
                         }
@@ -174,7 +171,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.grant_location_permission),
                                                 fontSize = 12.sp,
-                                                fontFamily = FontFamily.Monospace
+                                                fontFamily = CourierPrimeFamily
                                             )
                                         }
                                     }
@@ -183,9 +180,9 @@ fun LocationChannelsSheet(
                                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Text(
                                                 text = stringResource(R.string.location_permission_denied),
-                                                fontSize = 11.sp,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = Color.Red.copy(alpha = 0.8f)
+                                                fontSize = 12.sp,
+                                                fontFamily = CourierPrimeFamily,
+                                                color = BitchatColors.StatusError.copy(alpha = 0.8f)
                                             )
                                             TextButton(
                                                 onClick = {
@@ -197,8 +194,8 @@ fun LocationChannelsSheet(
                                             ) {
                                                 Text(
                                                     text = stringResource(R.string.open_settings),
-                                                    fontSize = 11.sp,
-                                                    fontFamily = FontFamily.Monospace
+                                                    fontSize = 12.sp,
+                                                    fontFamily = CourierPrimeFamily
                                                 )
                                             }
                                         }
@@ -206,8 +203,8 @@ fun LocationChannelsSheet(
                                     LocationChannelManager.PermissionState.AUTHORIZED -> {
                                         Text(
                                             text = stringResource(R.string.location_permission_granted),
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            fontFamily = CourierPrimeFamily,
                                             color = standardGreen
                                         )
                                     }
@@ -219,8 +216,8 @@ fun LocationChannelsSheet(
                                             CircularProgressIndicator(modifier = Modifier.size(12.dp))
                                             Text(
                                                 text = stringResource(R.string.checking_permissions),
-                                                fontSize = 11.sp,
-                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 12.sp,
+                                                fontFamily = CourierPrimeFamily,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                             )
                                         }
@@ -269,7 +266,7 @@ fun LocationChannelsSheet(
                                 trailingContent = {
                                 IconButton(onClick = { bookmarksStore.toggle(channel.geohash) }) {
                                     Icon(
-                                        imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                        painter = rememberPixelPainter(if (isBookmarked) PixelIcons.BookmarkFilled else PixelIcons.BookmarkOutline),
                                         contentDescription = if (isBookmarked) stringResource(R.string.cd_remove_bookmark) else stringResource(R.string.cd_add_bookmark),
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                     )
@@ -293,7 +290,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = stringResource(R.string.finding_nearby_channels),
                                     fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
+                                    fontFamily = CourierPrimeFamily
                                 )
                             }
                         }
@@ -305,7 +302,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.bookmarked),
                                 style = MaterialTheme.typography.labelLarge,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = CourierPrimeFamily,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -332,7 +329,7 @@ fun LocationChannelsSheet(
                                 trailingContent = {
                                     IconButton(onClick = { bookmarksStore.toggle(gh) }) {
                                         Icon(
-                                            imageVector = Icons.Filled.Bookmark,
+                                            painter = rememberPixelPainter(PixelIcons.BookmarkFilled),
                                             contentDescription = stringResource(R.string.cd_remove_bookmark),
                                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                         )
@@ -373,7 +370,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = stringResource(R.string.hash_symbol),
                                     fontSize = BASE_FONT_SIZE.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = CourierPrimeFamily,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                 )
 
@@ -393,7 +390,7 @@ fun LocationChannelsSheet(
                                     },
                                     textStyle = androidx.compose.ui.text.TextStyle(
                                         fontSize = BASE_FONT_SIZE.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = CourierPrimeFamily,
                                         color = MaterialTheme.colorScheme.onSurface
                                     ),
                                     modifier = Modifier
@@ -416,7 +413,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.geohash_placeholder),
                                                 fontSize = BASE_FONT_SIZE.sp,
-                                                fontFamily = FontFamily.Monospace,
+                                                fontFamily = CourierPrimeFamily,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                             )
                                         }
@@ -439,7 +436,7 @@ fun LocationChannelsSheet(
                                     mapPickerLauncher.launch(intent)
                                 }) {
                                     Icon(
-                                        imageVector = Icons.Filled.Map,
+                                        painter = rememberPixelPainter(PixelIcons.Map),
                                         contentDescription = stringResource(R.string.cd_open_map),
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                                     )
@@ -465,7 +462,8 @@ fun LocationChannelsSheet(
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
                                         contentColor = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    ),
+                                    shape = BitchatShapes.Button
                                 ) {
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -474,10 +472,10 @@ fun LocationChannelsSheet(
                                         Text(
                                             text = stringResource(R.string.teleport),
                                             fontSize = BASE_FONT_SIZE.sp,
-                                            fontFamily = FontFamily.Monospace
+                                            fontFamily = CourierPrimeFamily
                                         )
                                         Icon(
-                                            imageVector = Icons.Filled.PinDrop,
+                                            painter = rememberPixelPainter(PixelIcons.PinDrop),
                                             contentDescription = stringResource(R.string.cd_teleport),
                                             modifier = Modifier.size(14.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
@@ -494,8 +492,8 @@ fun LocationChannelsSheet(
                             Text(
                                 text = customError!!,
                                 fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color.Red,
+                                fontFamily = CourierPrimeFamily,
+                                color = BitchatColors.StatusError,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 24.dp)
@@ -521,12 +519,12 @@ fun LocationChannelsSheet(
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (locationServicesEnabled) {
-                                        Color.Red.copy(alpha = 0.08f)
+                                        BitchatColors.StatusError.copy(alpha = 0.08f)
                                     } else {
                                         standardGreen.copy(alpha = 0.12f)
                                     },
                                     contentColor = if (locationServicesEnabled) {
-                                        Color(0xFFBF1A1A)
+                                        BitchatColors.Destructive
                                     } else {
                                         standardGreen
                                     }
@@ -536,7 +534,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = if (locationServicesEnabled) stringResource(R.string.disable_location_services) else stringResource(R.string.enable_location_services),
                                     fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
+                                    fontFamily = CourierPrimeFamily
                                 )
                             }
                         }
@@ -614,9 +612,9 @@ private fun ChannelRow(
         color = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
         } else {
-            Color.Transparent
+            BitchatColors.BackgroundElevated.copy(alpha = 0.3f)
         },
-        shape = MaterialTheme.shapes.medium,
+        shape = BitchatShapes.Large,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 2.dp)
@@ -639,7 +637,7 @@ private fun ChannelRow(
                     Text(
                         text = baseTitle,
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = if (titleBold) FontWeight.Bold else FontWeight.Normal,
                         color = titleColor ?: MaterialTheme.colorScheme.onSurface
                     )
@@ -647,8 +645,8 @@ private fun ChannelRow(
                     countSuffix?.let { count ->
                         Text(
                             text = count,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            fontFamily = CourierPrimeFamily,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
@@ -657,7 +655,7 @@ private fun ChannelRow(
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             }
@@ -665,9 +663,9 @@ private fun ChannelRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isSelected) {
                     Icon(
-                        imageVector = Icons.Filled.Check,
+                        painter = rememberPixelPainter(PixelIcons.Check),
                         contentDescription = stringResource(R.string.cd_selected),
-                        tint = Color(0xFF32D74B), // iOS green for checkmark
+                        tint = BitchatColors.AccentGreen, // iOS green for checkmark
                         modifier = Modifier.size(20.dp)
                     )
                 }

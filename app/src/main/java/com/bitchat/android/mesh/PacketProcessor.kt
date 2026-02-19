@@ -148,6 +148,13 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.LEAVE -> handleLeave(routed)
             MessageType.FRAGMENT -> handleFragment(routed)
             MessageType.REQUEST_SYNC -> handleRequestSync(routed)
+            MessageType.SOLANA_TX_RELAY -> handleSolanaTxRelay(routed)
+            MessageType.SOLANA_TX_RECEIPT -> handleSolanaTxReceipt(routed)
+            MessageType.SOLANA_TX_INTENT -> handleSolanaIntentRequest(routed)
+            MessageType.SOLANA_BLOCKHASH_RESPONSE -> handleSolanaBlockhashResponse(routed)
+            MessageType.FEED_POST -> handleFeedPost(routed)
+            MessageType.FEED_REACTION -> handleFeedReaction(routed)
+            MessageType.FEED_REPLY -> handleFeedReply(routed)
             else -> {
                 // Handle private packet types (address check required)
                 if (packetRelayManager.isPacketAddressedToMe(packet)) {
@@ -244,6 +251,69 @@ class PacketProcessor(private val myPeerID: String) {
         Log.d(TAG, "Processing REQUEST_SYNC from ${formatPeerForLog(peerID)}")
         delegate?.handleRequestSync(routed)
     }
+
+    /**
+     * Handle Solana transaction relay request (0x30)
+     */
+    private suspend fun handleSolanaTxRelay(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_TX_RELAY from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaTxRelay(routed)
+    }
+
+    /**
+     * Handle Solana transaction relay receipt (0x31)
+     */
+    private suspend fun handleSolanaTxReceipt(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_TX_RECEIPT from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaTxReceipt(routed)
+    }
+
+    /**
+     * Handle Solana transfer intent (0x32) — offline user requesting blockhash
+     */
+    private suspend fun handleSolanaIntentRequest(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_TX_INTENT from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaIntentRequest(routed)
+    }
+
+    /**
+     * Handle Solana blockhash response (0x33) — online peer sending fresh blockhash
+     */
+    private suspend fun handleSolanaBlockhashResponse(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_BLOCKHASH_RESPONSE from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaBlockhashResponse(routed)
+    }
+
+    /**
+     * Handle feed post (0x40)
+     */
+    private suspend fun handleFeedPost(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing FEED_POST from ${formatPeerForLog(peerID)}")
+        delegate?.handleFeedPost(routed)
+    }
+
+    /**
+     * Handle feed reaction (0x41)
+     */
+    private suspend fun handleFeedReaction(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing FEED_REACTION from ${formatPeerForLog(peerID)}")
+        delegate?.handleFeedReaction(routed)
+    }
+
+    /**
+     * Handle feed reply (0x42)
+     */
+    private suspend fun handleFeedReply(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing FEED_REPLY from ${formatPeerForLog(peerID)}")
+        delegate?.handleFeedReply(routed)
+    }
     
     /**
      * Handle delivery acknowledgment
@@ -318,7 +388,14 @@ interface PacketProcessorDelegate {
     fun handleLeave(routed: RoutedPacket)
     fun handleFragment(packet: BitchatPacket): BitchatPacket?
     fun handleRequestSync(routed: RoutedPacket)
-    
+    fun handleSolanaTxRelay(routed: RoutedPacket)
+    fun handleSolanaTxReceipt(routed: RoutedPacket)
+    fun handleSolanaIntentRequest(routed: RoutedPacket)
+    fun handleSolanaBlockhashResponse(routed: RoutedPacket)
+    fun handleFeedPost(routed: RoutedPacket)
+    fun handleFeedReaction(routed: RoutedPacket)
+    fun handleFeedReply(routed: RoutedPacket)
+
     // Communication
     fun sendAnnouncementToPeer(peerID: String)
     fun sendCachedMessages(peerID: String)

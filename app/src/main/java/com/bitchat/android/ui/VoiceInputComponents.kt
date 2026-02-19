@@ -6,8 +6,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,7 +19,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
 import com.bitchat.android.features.voice.VoiceRecorder
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionStatus
 import com.google.accompanist.permissions.rememberPermissionState
@@ -56,7 +59,13 @@ fun VoiceRecordButton(
 
     Box(
         modifier = modifier
-            .size(32.dp)
+            .size(36.dp)
+            .shadow(
+                elevation = 6.dp,
+                shape = CircleShape,
+                ambientColor = BitchatColors.GlowGreen,
+                spotColor = BitchatColors.GlowGreen
+            )
             .background(backgroundColor, CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -129,7 +138,7 @@ fun VoiceRecordButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = Icons.Filled.Mic,
+            painter = rememberPixelPainter(PixelIcons.Mic),
             contentDescription = stringResource(com.bitchat.android.R.string.cd_record_voice),
             tint = Color.Black,
             modifier = Modifier.size(20.dp)

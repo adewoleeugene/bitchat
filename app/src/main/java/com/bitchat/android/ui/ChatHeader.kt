@@ -2,6 +2,7 @@ package com.bitchat.android.ui
 
 
 import android.util.Log
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -9,9 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -20,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import androidx.compose.ui.text.font.FontWeight
@@ -31,6 +28,10 @@ import com.bitchat.android.core.ui.utils.singleOrTripleClickable
 import com.bitchat.android.geohash.LocationChannelManager.PermissionState
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 
 /**
  * Header components for ChatScreen
@@ -63,9 +64,9 @@ fun TorStatusDot(
     
     if (torStatus.mode != com.bitchat.android.net.TorMode.OFF) {
         val dotColor = when {
-            torStatus.running && torStatus.bootstrapPercent < 100 -> Color(0xFFFF9500) // Orange - bootstrapping
-            torStatus.running && torStatus.bootstrapPercent >= 100 -> Color(0xFF00C851) // Green - connected
-            else -> Color.Red // Red - error/disconnected
+            torStatus.running && torStatus.bootstrapPercent < 100 -> BitchatColors.SelfMessage // Orange - bootstrapping
+            torStatus.running && torStatus.bootstrapPercent >= 100 -> BitchatColors.StatusSuccess // Green - connected
+            else -> BitchatColors.StatusError // Red - error/disconnected
         }
         Canvas(
             modifier = modifier
@@ -85,33 +86,35 @@ fun NoiseSessionIcon(
     sessionState: String?,
     modifier: Modifier = Modifier
 ) {
-    val (icon, color, contentDescription) = when (sessionState) {
-        "uninitialized" -> Triple(
-            Icons.Outlined.NoEncryption,
-            Color(0x87878700), // Grey - ready to establish
-            stringResource(R.string.cd_ready_for_handshake)
-        )
-        "handshaking" -> Triple(
-            Icons.Outlined.Sync,
-            Color(0x87878700), // Grey - in progress
-            stringResource(R.string.cd_handshake_in_progress)
-        )
-        "established" -> Triple(
-            Icons.Filled.Lock,
-            Color(0xFFFF9500), // Orange - secure
-            stringResource(R.string.cd_encrypted)
-        )
+    val grid: Array<IntArray>
+    val color: Color
+    val contentDescription: String
+
+    when (sessionState) {
+        "uninitialized" -> {
+            grid = PixelIcons.Unlock
+            color = BitchatColors.TextDisabled // Grey - ready to establish
+            contentDescription = stringResource(R.string.cd_ready_for_handshake)
+        }
+        "handshaking" -> {
+            grid = PixelIcons.Sync
+            color = BitchatColors.TextDisabled // Grey - in progress
+            contentDescription = stringResource(R.string.cd_handshake_in_progress)
+        }
+        "established" -> {
+            grid = PixelIcons.Lock
+            color = BitchatColors.SelfMessage // Orange - secure
+            contentDescription = stringResource(R.string.cd_encrypted)
+        }
         else -> { // "failed" or any other state
-            Triple(
-                Icons.Outlined.Warning,
-                Color(0xFFFF4444), // Red - error
-                stringResource(R.string.cd_handshake_failed)
-            )
+            grid = PixelIcons.Warning
+            color = BitchatColors.StatusError // Red - error
+            contentDescription = stringResource(R.string.cd_handshake_failed)
         }
     }
-    
+
     Icon(
-        imageVector = icon,
+        painter = rememberPixelPainter(grid),
         contentDescription = contentDescription,
         modifier = modifier,
         tint = color
@@ -148,7 +151,7 @@ fun NicknameEditor(
             onValueChange = onValueChange,
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 color = colorScheme.primary,
-                fontFamily = FontFamily.Monospace
+                fontFamily = CourierPrimeFamily
             ),
             cursorBrush = SolidColor(colorScheme.primary),
             singleLine = true,
@@ -183,15 +186,15 @@ fun PeerCounter(
         is com.bitchat.android.geohash.ChannelID.Location -> {
             // Geohash channel: show geohash participants
             val count = geohashPeople.size
-            val green = Color(0xFF00C851) // Standard green
-            Pair(count, if (count > 0) green else Color.Gray)
+            val green = BitchatColors.StatusSuccess // Standard green
+            Pair(count, if (count > 0) green else BitchatColors.TextSecondary)
         }
         is com.bitchat.android.geohash.ChannelID.Mesh,
         null -> {
             // Mesh channel: show Bluetooth-connected peers (excluding self)
             val count = connectedPeers.size
-            val meshBlue = Color(0xFF007AFF) // iOS-style blue for mesh
-            Pair(count, if (isConnected && count > 0) meshBlue else Color.Gray)
+            val meshBlue = BitchatColors.MeshChannel // iOS-style blue for mesh
+            Pair(count, if (isConnected && count > 0) meshBlue else BitchatColors.TextSecondary)
         }
     }
     
@@ -200,12 +203,12 @@ fun PeerCounter(
         modifier = modifier.clickable { onClick() }.padding(end = 8.dp) // Added right margin to match "bitchat" logo spacing
     ) {
         Icon(
-            imageVector = Icons.Default.Group,
+            painter = rememberPixelPainter(PixelIcons.Group),
             contentDescription = when (selectedLocationChannel) {
                 is com.bitchat.android.geohash.ChannelID.Location -> stringResource(R.string.cd_geohash_participants)
                 else -> stringResource(R.string.cd_connected_peers)
             },
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(22.dp),
             tint = countColor
         )
         Spacer(modifier = Modifier.width(4.dp))
@@ -222,7 +225,7 @@ fun PeerCounter(
             Text(
                 text = stringResource(R.string.channel_count_prefix) + "${joinedChannels.size}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) Color(0xFF00C851) else Color.Red,
+                color = if (isConnected) BitchatColors.StatusSuccess else BitchatColors.StatusError,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -241,7 +244,8 @@ fun ChatHeaderContent(
     onTripleClick: () -> Unit,
     onShowAppInfo: () -> Unit,
     onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onLocationNotesClick: () -> Unit,
+    onShowWallet: () -> Unit = {}
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -298,6 +302,7 @@ fun ChatHeaderContent(
                 onSidebarClick = onSidebarClick,
                 onLocationChannelsClick = onLocationChannelsClick,
                 onLocationNotesClick = onLocationNotesClick,
+                onShowWallet = onShowWallet,
                 viewModel = viewModel
             )
         }
@@ -367,25 +372,18 @@ private fun PrivateChatHeader(
     }
     
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Back button - positioned all the way to the left with minimal margin
-        Button(
+        // Back button - proper IconButton with adequate tap target
+        IconButton(
             onClick = onBackClick,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Transparent,
-                contentColor = colorScheme.primary
-            ),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp), // Reduced horizontal padding
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .offset(x = (-8).dp) // Move even further left to minimize margin
+            modifier = Modifier.align(Alignment.CenterStart)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Filled.ArrowBack,
+                    painter = rememberPixelPainter(PixelIcons.ArrowBack),
                     contentDescription = stringResource(R.string.back),
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(22.dp),
                     tint = colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -396,17 +394,17 @@ private fun PrivateChatHeader(
                 )
             }
         }
-        
+
         // Title - perfectly centered regardless of other elements
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.align(Alignment.Center)
         ) {
-            
+
             Text(
                 text = titleText,
                 style = MaterialTheme.typography.titleMedium,
-                color = Color(0xFFFF9500) // Orange
+                color = BitchatColors.SelfMessage // Orange
             )
 
             Spacer(modifier = Modifier.width(4.dp))
@@ -415,15 +413,15 @@ private fun PrivateChatHeader(
             val showGlobe = isNostrDM || (sessionState != "established" && isMutualFavorite)
             if (showGlobe) {
                 Icon(
-                    imageVector = Icons.Outlined.Public,
+                    painter = rememberPixelPainter(PixelIcons.Globe),
                 contentDescription = stringResource(R.string.cd_nostr_reachable),
-                    modifier = Modifier.size(14.dp),
-                    tint = Color(0xFF9B59B6) // Purple like iOS
+                    modifier = Modifier.size(20.dp),
+                    tint = BitchatColors.NostrIndicator // Purple like iOS
                 )
             } else {
                 NoiseSessionIcon(
                     sessionState = sessionState,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
@@ -438,10 +436,10 @@ private fun PrivateChatHeader(
             modifier = Modifier.align(Alignment.CenterEnd)
         ) {
             Icon(
-                imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.Star,
+                painter = rememberPixelPainter(if (isFavorite) PixelIcons.StarFilled else PixelIcons.StarOutline),
                 contentDescription = if (isFavorite) stringResource(R.string.cd_remove_favorite) else stringResource(R.string.cd_add_favorite),
-                modifier = Modifier.size(18.dp), // Slightly larger than sidebar icon
-                tint = if (isFavorite) Color(0xFFFFD700) else Color(0x87878700) // Yellow or grey
+                modifier = Modifier.size(20.dp), // Slightly larger than sidebar icon
+                tint = if (isFavorite) BitchatColors.FavoriteStar else BitchatColors.TextDisabled // Yellow or grey
             )
         }
     }
@@ -458,25 +456,18 @@ private fun ChannelHeader(
     val displayName = ChannelKeys.displayName(channel)
     
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Back button - positioned all the way to the left with minimal margin
-        Button(
+        // Back button - proper IconButton with adequate tap target
+        IconButton(
             onClick = onBackClick,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Transparent,
-                contentColor = colorScheme.primary
-            ),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp), // Reduced horizontal padding
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .offset(x = (-8).dp) // Move even further left to minimize margin
+            modifier = Modifier.align(Alignment.CenterStart)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Filled.ArrowBack,
+                    painter = rememberPixelPainter(PixelIcons.ArrowBack),
                     contentDescription = stringResource(R.string.back),
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(22.dp),
                     tint = colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -487,12 +478,12 @@ private fun ChannelHeader(
                 )
             }
         }
-        
+
         // Title - perfectly centered regardless of other elements
         Text(
             text = stringResource(R.string.chat_channel_prefix, displayName),
             style = MaterialTheme.typography.titleMedium,
-            color = Color(0xFFFF9500), // Orange to match input field
+            color = BitchatColors.SelfMessage, // Orange to match input field
             modifier = Modifier
                 .align(Alignment.Center)
                 .clickable { onSidebarClick() }
@@ -506,7 +497,7 @@ private fun ChannelHeader(
             Text(
                 text = stringResource(R.string.chat_leave),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.Red
+                color = BitchatColors.StatusError
             )
         }
     }
@@ -521,6 +512,7 @@ private fun MainHeader(
     onSidebarClick: () -> Unit,
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
+    onShowWallet: () -> Unit = {},
     viewModel: ChatViewModel
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -572,45 +564,36 @@ private fun MainHeader(
 
             // Unread private messages badge (click to open most recent DM)
             if (hasUnreadPrivateMessages.isNotEmpty()) {
-                // Render icon directly to avoid symbol resolution issues
-                Icon(
-                    imageVector = Icons.Filled.Email,
-                    contentDescription = stringResource(R.string.cd_unread_private_messages),
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable { viewModel.openLatestUnreadPrivateChat() },
-                    tint = Color(0xFFFF9500)
-                )
+                IconButton(
+                    onClick = { viewModel.openLatestUnreadPrivateChat() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        painter = rememberPixelPainter(PixelIcons.Email),
+                        contentDescription = stringResource(R.string.cd_unread_private_messages),
+                        modifier = Modifier.size(22.dp),
+                        tint = BitchatColors.SelfMessage
+                    )
+                }
             }
 
-            // Location channels button (matching iOS implementation) and bookmark grouped tightly
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp)) {
-                LocationChannelsButton(
-                    viewModel = viewModel,
-                    onClick = onLocationChannelsClick
-                )
-
-                // Bookmark toggle for current geohash (not shown for mesh)
-                val currentGeohash: String? = when (val sc = selectedLocationChannel) {
-                    is com.bitchat.android.geohash.ChannelID.Location -> sc.channel.geohash
-                    else -> null
-                }
-                if (currentGeohash != null) {
-                    val isBookmarked = bookmarks.contains(currentGeohash)
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 2.dp) // minimal gap between geohash and bookmark
-                            .size(20.dp)
-                            .clickable { bookmarksStore.toggle(currentGeohash) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                            contentDescription = stringResource(R.string.cd_toggle_bookmark),
-                            tint = if (isBookmarked) Color(0xFF00C851) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+            // Bookmark toggle for current geohash (not shown for mesh)
+            val currentGeohash: String? = when (val sc = selectedLocationChannel) {
+                is com.bitchat.android.geohash.ChannelID.Location -> sc.channel.geohash
+                else -> null
+            }
+            if (currentGeohash != null) {
+                val isBookmarked = bookmarks.contains(currentGeohash)
+                IconButton(
+                    onClick = { bookmarksStore.toggle(currentGeohash) },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        painter = rememberPixelPainter(if (isBookmarked) PixelIcons.BookmarkFilled else PixelIcons.BookmarkOutline),
+                        contentDescription = stringResource(R.string.cd_toggle_bookmark),
+                        tint = if (isBookmarked) BitchatColors.StatusSuccess else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
             }
 
@@ -620,10 +603,23 @@ private fun MainHeader(
                 onClick = onLocationNotesClick
             )
 
+            // Wallet button
+            IconButton(
+                onClick = onShowWallet,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    painter = rememberPixelPainter(PixelIcons.Wallet),
+                    contentDescription = "Wallet",
+                    modifier = Modifier.size(22.dp),
+                    tint = BitchatColors.SolanaAccent
+                )
+            }
+
             // Tor status dot when Tor is enabled
             TorStatusDot(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(10.dp)
                     .padding(start = 0.dp, end = 2.dp)
             )
             
@@ -659,13 +655,13 @@ private fun LocationChannelsButton(
     
     val (badgeText, badgeColor) = when (selectedChannel) {
         is com.bitchat.android.geohash.ChannelID.Mesh -> {
-            "#mesh" to Color(0xFF007AFF) // iOS blue for mesh
+            "#mesh" to BitchatColors.MeshChannel // iOS blue for mesh
         }
         is com.bitchat.android.geohash.ChannelID.Location -> {
             val geohash = (selectedChannel as com.bitchat.android.geohash.ChannelID.Location).channel.geohash
-            "#$geohash" to Color(0xFF00C851) // Green for location
+            "#$geohash" to BitchatColors.StatusSuccess // Green for location
         }
-        null -> "#mesh" to Color(0xFF007AFF) // Default to mesh
+        null -> "#mesh" to BitchatColors.MeshChannel // Default to mesh
     }
     
     Button(
@@ -680,7 +676,7 @@ private fun LocationChannelsButton(
             Text(
                 text = badgeText,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = CourierPrimeFamily
                 ),
                 color = badgeColor,
                 maxLines = 1
@@ -690,9 +686,9 @@ private fun LocationChannelsButton(
             if (teleported) {
                 Spacer(modifier = Modifier.width(2.dp))
                 Icon(
-                    imageVector = Icons.Default.PinDrop,
+                    painter = rememberPixelPainter(PixelIcons.PinDrop),
                     contentDescription = stringResource(R.string.cd_teleported),
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = badgeColor
                 )
             }

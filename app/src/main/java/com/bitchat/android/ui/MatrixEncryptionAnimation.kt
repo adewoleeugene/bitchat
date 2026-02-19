@@ -4,13 +4,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 /**
  * Animation state for individual characters
@@ -87,7 +87,7 @@ fun MessageWithMatrixAnimation(
     val isAnimating = shouldAnimateMessage(message.id)
     
     if (isAnimating) {
-        // During animation: Show formatted message with animated content
+        // During animation: Show formatted content with animated text
         AnimatedMessageDisplay(
             message = message,
             currentUserNickname = currentUserNickname,
@@ -97,19 +97,19 @@ fun MessageWithMatrixAnimation(
             modifier = modifier
         )
     } else {
-        // After animation: Show complete normal message using existing formatter
-        val annotatedText = formatMessageAsAnnotatedString(
+        // After animation: Show content-only format (nickname is above bubble)
+        val contentText = formatContentAnnotatedString(
             message = message,
             currentUserNickname = currentUserNickname,
             meshService = meshService,
             colorScheme = colorScheme,
             timeFormatter = timeFormatter
         )
-        
+
         Text(
-            text = annotatedText,
+            text = contentText,
             modifier = modifier,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CourierPrimeFamily,
             softWrap = true
         )
     }
@@ -201,16 +201,16 @@ private fun AnimatedMessageDisplay(
     // Create a temporary message with animated content for formatting
     val animatedMessage = message.copy(content = animatedContent)
     
-    // Use formatting function without timestamp during animation
+    // Use content-only formatting (nickname is rendered above bubble)
     val annotatedText = if (isAnimating) {
-        formatMessageAsAnnotatedStringWithoutTimestamp(
+        formatContentAnnotatedStringWithoutTimestamp(
             message = animatedMessage,
             currentUserNickname = currentUserNickname,
             meshService = meshService,
             colorScheme = colorScheme
         )
     } else {
-        formatMessageAsAnnotatedString(
+        formatContentAnnotatedString(
             message = animatedMessage,
             currentUserNickname = currentUserNickname,
             meshService = meshService,
@@ -223,7 +223,7 @@ private fun AnimatedMessageDisplay(
     Text(
         text = annotatedText,
         modifier = modifier,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = CourierPrimeFamily,
         softWrap = true,
         overflow = androidx.compose.ui.text.style.TextOverflow.Visible,
         style = androidx.compose.ui.text.TextStyle(
@@ -234,32 +234,29 @@ private fun AnimatedMessageDisplay(
 
 
 /**
- * Format message without timestamp and PoW badge for animation phase
- * Identical to formatMessageAsAnnotatedString but excludes timestamp and PoW badge
+ * Format content without timestamp and PoW badge for animation phase
  */
-private fun formatMessageAsAnnotatedStringWithoutTimestamp(
+private fun formatContentAnnotatedStringWithoutTimestamp(
     message: com.bitchat.android.model.BitchatMessage,
     currentUserNickname: String,
     meshService: com.bitchat.android.mesh.BluetoothMeshService,
     colorScheme: androidx.compose.material3.ColorScheme
 ): AnnotatedString {
-    // Get the full formatted text first
     val timeFormatter = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-    val fullText = formatMessageAsAnnotatedString(
+    val fullText = formatContentAnnotatedString(
         message = message,
         currentUserNickname = currentUserNickname,
         meshService = meshService,
         colorScheme = colorScheme,
         timeFormatter = timeFormatter
     )
-    
+
     // Find and remove the timestamp and PoW badge at the end
     val text = fullText.text
-    val timestampPattern = """ \[\d{2}:\d{2}:\d{2}].*$""".toRegex() // Matches " [HH:mm:ss] 12b" or just " [HH:mm:ss]"
+    val timestampPattern = """ \[\d{2}:\d{2}:\d{2}].*$""".toRegex()
     val match = timestampPattern.find(text)
-    
+
     return if (match != null) {
-        // Remove timestamp and PoW portion
         val endIndex = match.range.first
         AnnotatedString(
             text = text.substring(0, endIndex),

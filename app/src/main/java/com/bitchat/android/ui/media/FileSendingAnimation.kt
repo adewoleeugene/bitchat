@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -28,10 +28,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import kotlinx.coroutines.delay
+import com.bitchat.android.ui.theme.BitchatColors
 
 /**
  * Matrix-style file sending animation with character-by-character reveal
@@ -79,9 +81,9 @@ fun FileSendingAnimation(
     ) {
         // File icon
         Icon(
-            imageVector = Icons.Filled.Description,
+            painter = rememberPixelPainter(PixelIcons.File),
             contentDescription = stringResource(R.string.cd_file),
-            tint = Color(0xFF00C851), // Green like app theme
+            tint = BitchatColors.StatusSuccess, // Green like app theme
             modifier = Modifier.size(32.dp)
         )
 
@@ -96,7 +98,7 @@ fun FileSendingAnimation(
                 androidx.compose.material3.Text(
                     text = revealedText,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         color = Color.White
                     ),
                     modifier = Modifier.padding(end = 2.dp)
@@ -107,7 +109,7 @@ fun FileSendingAnimation(
                     androidx.compose.material3.Text(
                         text = stringResource(R.string.underscore),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontFamily = CourierPrimeFamily,
                             color = Color.White
                         )
                     )
@@ -149,8 +151,8 @@ private fun FileProgressBars(
     androidx.compose.material3.Text(
         text = progressString,
         style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-            color = Color(0xFF00FF7F) // Matrix green
+            fontFamily = CourierPrimeFamily,
+            color = BitchatColors.AccentGreen // Matrix green
         ),
         modifier = modifier
     )

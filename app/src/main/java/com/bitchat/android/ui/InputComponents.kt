@@ -9,8 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +19,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -38,11 +35,17 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.withStyle
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
+import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.features.voice.normalizeAmplitudeSample
 import com.bitchat.android.features.voice.AudioWaveformExtractor
 import com.bitchat.android.ui.media.RealtimeScrollingWaveform
 import com.bitchat.android.ui.media.ImagePickerButton
 import com.bitchat.android.ui.media.FilePickerButton
+import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.BitchatShapes
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
+import androidx.compose.ui.draw.shadow
 
 /**
  * Input components for ChatScreen
@@ -68,10 +71,10 @@ class SlashCommandVisualTransformation : VisualTransformation {
                 // Add the styled slash command
                 withStyle(
                     style = SpanStyle(
-                        color = Color(0xFF00FF7F), // Bright green
-                        fontFamily = FontFamily.Monospace,
+                        color = BitchatColors.AccentGreen,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = FontWeight.Medium,
-                        background = Color(0xFF2D2D2D) // Dark gray background
+                        background = BitchatColors.BackgroundElevated
                     )
                 ) {
                     append(match.value)
@@ -112,8 +115,8 @@ class MentionVisualTransformation : VisualTransformation {
                 // Add the styled mention
                 withStyle(
                     style = SpanStyle(
-                        color = Color(0xFFFF9500), // Orange
-                        fontFamily = FontFamily.Monospace,
+                        color = BitchatColors.SelfMessage,
+                        fontFamily = CourierPrimeFamily,
                         fontWeight = FontWeight.SemiBold
                     )
                 ) {
@@ -189,7 +192,11 @@ fun MessageInput(
     ) {
         // Text input with placeholder OR visualizer when recording
         Box(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .background(BitchatColors.InputFieldBg, BitchatShapes.Large)
+                .border(1.dp, BitchatColors.InputFieldBorder, BitchatShapes.Large)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             // Always keep the text field mounted to retain focus and avoid IME collapse
             BasicTextField(
@@ -197,7 +204,7 @@ fun MessageInput(
                 onValueChange = onValueChange,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = colorScheme.primary,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = CourierPrimeFamily
                 ),
                 cursorBrush = SolidColor(if (isRecording) Color.Transparent else colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -220,7 +227,7 @@ fun MessageInput(
                 Text(
                     text = stringResource(R.string.type_a_message_placeholder),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = CourierPrimeFamily
                     ),
                     color = colorScheme.onSurface.copy(alpha = 0.5f), // Muted grey
                     modifier = Modifier.fillMaxWidth()
@@ -243,9 +250,9 @@ fun MessageInput(
                     val maxSs = maxSecs % 60
                     Text(
                         text = String.format("%02d:%02d / %02d:%02d", mm, ss, maxMm, maxSs),
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         color = colorScheme.primary,
-                        fontSize = (BASE_FONT_SIZE - 4).sp
+                        fontSize = (BASE_FONT_SIZE - 3).sp
                     )
                 }
             }
@@ -256,7 +263,7 @@ fun MessageInput(
         // Voice and image buttons when no text (only visible in Mesh chat)
         if (value.text.isEmpty() && showMediaButtons) {
             // Hold-to-record microphone
-            val bg = if (colorScheme.background == Color.Black) Color(0xFF00FF00).copy(alpha = 0.75f) else Color(0xFF008000).copy(alpha = 0.75f)
+            val bg = BitchatColors.AccentGreen.copy(alpha = 0.75f)
 
             // Ensure latest values are used when finishing recording
             val latestSelectedPeer = rememberUpdatedState(selectedPrivatePeer)
@@ -316,45 +323,51 @@ fun MessageInput(
             
         } else {
             // Send button with enabled/disabled state
+            // Determine glow color for send button shadow
+            val isPrivateOrChannel = selectedPrivatePeer != null || currentChannel != null
+            val glowColor = if (isPrivateOrChannel) BitchatColors.GlowOrange else BitchatColors.GlowGreen
+
             IconButton(
                 onClick = { if (hasText) onSend() }, // Only execute if there's text
                 enabled = hasText, // Enable only when there's text
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(48.dp)
             ) {
                 // Update send button to match input field colors
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .size(36.dp)
+                        .then(
+                            if (hasText) Modifier.shadow(
+                                elevation = 8.dp,
+                                shape = CircleShape,
+                                ambientColor = glowColor,
+                                spotColor = glowColor
+                            ) else Modifier
+                        )
                         .background(
                             color = if (!hasText) {
                                 // Disabled state - muted grey
                                 colorScheme.onSurface.copy(alpha = 0.3f)
-                            } else if (selectedPrivatePeer != null || currentChannel != null) {
+                            } else if (isPrivateOrChannel) {
                                 // Orange for both private messages and channels when enabled
-                                Color(0xFFFF9500).copy(alpha = 0.75f)
-                            } else if (colorScheme.background == Color.Black) {
-                                Color(0xFF00FF00).copy(alpha = 0.75f) // Bright green for dark theme
+                                BitchatColors.SelfMessage
                             } else {
-                                Color(0xFF008000).copy(alpha = 0.75f) // Dark green for light theme
+                                BitchatColors.AccentGreen
                             },
                             shape = CircleShape
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.ArrowUpward,
+                        painter = rememberPixelPainter(PixelIcons.ArrowUp),
                         contentDescription = stringResource(id = R.string.send_message),
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(24.dp),
                         tint = if (!hasText) {
                             // Disabled state - muted grey icon
                             colorScheme.onSurface.copy(alpha = 0.5f)
-                        } else if (selectedPrivatePeer != null || currentChannel != null) {
-                            // Black arrow on orange for both private and channel modes
-                            Color.Black
-                        } else if (colorScheme.background == Color.Black) {
-                            Color.Black // Black arrow on bright green in dark theme
                         } else {
-                            Color.White // White arrow on dark green in light theme
+                            // Black arrow on colored background
+                            Color.Black
                         }
                     )
                 }
@@ -400,50 +413,43 @@ fun CommandSuggestionItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 3.dp)
-            .background(Color.Gray.copy(alpha = 0.1f)),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+            .background(BitchatColors.TextSecondary.copy(alpha = 0.1f)),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Show all aliases together
+        // Command + aliases (e.g. "/j, /join")
         val allCommands = if (suggestion.aliases.isNotEmpty()) {
             listOf(suggestion.command) + suggestion.aliases
         } else {
             listOf(suggestion.command)
         }
+        // Combine command with syntax hint (e.g. "/tip name amount")
+        val commandText = buildString {
+            append(allCommands.joinToString(", "))
+            suggestion.syntax?.let { append(" $it") }
+        }
 
         Text(
-            text = allCommands.joinToString(", "),
+            text = commandText,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontWeight = FontWeight.Medium
             ),
             color = colorScheme.primary,
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            fontSize = (BASE_FONT_SIZE - 3).sp
         )
 
-        // Show syntax if any
-        suggestion.syntax?.let { syntax ->
-            Text(
-                text = syntax,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace
-                ),
-                color = colorScheme.onSurface.copy(alpha = 0.8f),
-                fontSize = (BASE_FONT_SIZE - 5).sp
-            )
-        }
+        Spacer(modifier = Modifier.weight(1f))
 
-        // Show description
+        // Description — right-aligned, won't compete for space
         Text(
             text = suggestion.description,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace
+                fontFamily = CourierPrimeFamily
             ),
-            color = colorScheme.onSurface.copy(alpha = 0.7f),
-            fontSize = (BASE_FONT_SIZE - 5).sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            color = colorScheme.onSurface.copy(alpha = 0.5f),
+            fontSize = (BASE_FONT_SIZE - 3).sp,
+            maxLines = 1
         )
     }
 }
@@ -483,17 +489,17 @@ fun MentionSuggestionItem(
             .fillMaxWidth()
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 3.dp)
-            .background(Color.Gray.copy(alpha = 0.1f)),
+            .background(BitchatColors.TextSecondary.copy(alpha = 0.1f)),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = stringResource(R.string.mention_suggestion_at, suggestion),
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CourierPrimeFamily,
                 fontWeight = FontWeight.SemiBold
             ),
-            color = Color(0xFFFF9500), // Orange like mentions
-            fontSize = (BASE_FONT_SIZE - 4).sp
+            color = BitchatColors.SelfMessage,
+            fontSize = (BASE_FONT_SIZE - 3).sp
         )
         
         Spacer(modifier = Modifier.weight(1f))
@@ -501,10 +507,10 @@ fun MentionSuggestionItem(
         Text(
             text = stringResource(R.string.mention),
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace
+                fontFamily = CourierPrimeFamily
             ),
             color = colorScheme.onSurface.copy(alpha = 0.7f),
-            fontSize = (BASE_FONT_SIZE - 5).sp
+            fontSize = (BASE_FONT_SIZE - 3).sp
         )
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.bitchat.android.features.voice.AudioWaveformExtractor
 import com.bitchat.android.features.voice.VoiceWaveformCache
 import com.bitchat.android.features.voice.resampleWave
+import com.bitchat.android.ui.theme.BitchatColors
 
 @Composable
 fun ScrollingWaveformRecorder(
@@ -41,7 +42,7 @@ fun ScrollingWaveformRecorder(
             kotlinx.coroutines.delay(80)
         }
     }
-    WaveformCanvas(modifier = modifier, samples = samples, fillProgress = 1f, baseColor = Color(0xFF444444), fillColor = Color(0xFF00FF7F))
+    WaveformCanvas(modifier = modifier, samples = samples, fillProgress = 1f, baseColor = BitchatColors.Border, fillColor = BitchatColors.AccentGreen)
 }
 
 @Composable
@@ -76,8 +77,8 @@ fun WaveformPreview(
         fillProgress = if (stateSamples.isEmpty()) 0f else progress,
         baseColor = Color(0x2200FF7F),
         fillColor = when {
-            sendProgress != null -> Color(0xFF1E88E5) // blue while sending
-            else -> Color(0xFF00C851) // green during playback
+            sendProgress != null -> BitchatColors.StatusInfo // blue while sending
+            else -> BitchatColors.StatusSuccess // green during playback
         },
         onSeek = onSeek
     )

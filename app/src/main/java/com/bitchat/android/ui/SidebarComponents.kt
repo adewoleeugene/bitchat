@@ -7,22 +7,23 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import com.bitchat.android.ui.theme.PixelIcons
+import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
+import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
+import com.bitchat.android.ui.theme.CourierPrimeFamily
 
 
 /**
@@ -65,14 +66,14 @@ fun SidebarOverlay(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(1.dp)
-                    .background(Color.Gray.copy(alpha = 0.3f))
+                    .background(BitchatColors.TextSecondary.copy(alpha = 0.3f))
             )
             
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
                     .weight(1f)
-                    .background(colorScheme.background.copy(alpha = 0.95f))
+                    .background(BitchatColors.BackgroundLayer0.copy(alpha = 0.98f))
                     .windowInsetsPadding(WindowInsets.statusBars) // Add status bar padding
             ) {
                 SidebarHeader()
@@ -153,7 +154,7 @@ private fun SidebarHeader() {
         modifier = Modifier
             .height(42.dp) // Match reduced main header height
             .fillMaxWidth()
-            .background(colorScheme.background.copy(alpha = 0.95f))
+            .background(BitchatColors.BackgroundLayer0.copy(alpha = 0.98f))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -161,7 +162,7 @@ private fun SidebarHeader() {
             text = stringResource(id = R.string.your_network).uppercase(),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
+                fontFamily = CourierPrimeFamily
             ),
             color = colorScheme.onSurface
         )
@@ -188,7 +189,7 @@ fun ChannelsSection(
         // Mesh channels section
         if (meshChannels.isNotEmpty()) {
             ChannelGroupHeader(
-                icon = Icons.Filled.Bluetooth,
+                iconGrid = PixelIcons.Bluetooth,
                 title = "MESH",
                 colorScheme = colorScheme
             )
@@ -213,7 +214,7 @@ fun ChannelsSection(
             }
 
             ChannelGroupHeader(
-                icon = Icons.Filled.Public,
+                iconGrid = PixelIcons.Globe,
                 title = "GEO $geohash",
                 colorScheme = colorScheme
             )
@@ -235,7 +236,7 @@ fun ChannelsSection(
 
 @Composable
 private fun ChannelGroupHeader(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconGrid: Array<IntArray>,
     title: String,
     colorScheme: ColorScheme
 ) {
@@ -245,10 +246,17 @@ private fun ChannelGroupHeader(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(16.dp)
+                .background(BitchatColors.SectionAccentLine.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
+        )
+        Spacer(modifier = Modifier.width(6.dp))
         Icon(
-            imageVector = icon,
+            painter = rememberPixelPainter(iconGrid),
             contentDescription = null,
-            modifier = Modifier.size(10.dp),
+            modifier = Modifier.size(14.dp),
             tint = colorScheme.onSurface.copy(alpha = 0.6f)
         )
         Spacer(modifier = Modifier.width(6.dp))
@@ -278,10 +286,10 @@ private fun ChannelItem(
             .fillMaxWidth()
             .clickable { onChannelClick(channelKey) }
             .background(
-                if (isSelected) colorScheme.primaryContainer.copy(alpha = 0.3f)
+                if (isSelected) BitchatColors.GlowGreen.copy(alpha = 0.15f)
                 else Color.Transparent
             )
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Unread badge for channels
@@ -305,9 +313,9 @@ private fun ChannelItem(
             modifier = Modifier.size(24.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Close,
+                painter = rememberPixelPainter(PixelIcons.Close),
                 contentDescription = stringResource(com.bitchat.android.R.string.cd_leave_channel),
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(16.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
@@ -333,10 +341,17 @@ fun PeopleSection(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(16.dp)
+                    .background(BitchatColors.SectionAccentLine.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Icon(
-                imageVector = Icons.Default.Group, // Using Person icon for people
+                painter = rememberPixelPainter(PixelIcons.Group),
                 contentDescription = null,
-                modifier = Modifier.size(12.dp),
+                modifier = Modifier.size(16.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.6f)
             )
             Spacer(modifier = Modifier.width(6.dp))
@@ -599,54 +614,55 @@ private fun PeerItem(
     val isMe = displayName == "You" || peerID == viewModel.nickname.value
     
     // Get consistent peer color (iOS-compatible)
-    val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    val assignedColor = viewModel.colorForMeshPeer(peerID, isDark)
-    val baseColor = if (isMe) Color(0xFFFF9500) else assignedColor
+    val assignedColor = viewModel.colorForMeshPeer(peerID)
+    val baseColor = if (isMe) BitchatColors.SelfMessage else assignedColor
     
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onItemClick() }
             .background(
-                if (isSelected) colorScheme.primaryContainer.copy(alpha = 0.3f)
-                else Color.Transparent
+                when {
+                    isSelected -> BitchatColors.GlowGreen.copy(alpha = 0.15f)
+                    hasUnreadDM -> BitchatColors.GlowOrange.copy(alpha = 0.08f)
+                    else -> Color.Transparent
+                }
             )
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Show unread badge or signal strength  
         if (hasUnreadDM) {
             // Show mail icon for unread DMs (iOS orange)
             Icon(
-                imageVector = Icons.Filled.Email,
+                painter = rememberPixelPainter(PixelIcons.Email),
                 contentDescription = stringResource(com.bitchat.android.R.string.cd_unread_message),
-                modifier = Modifier.size(16.dp),
-                tint = Color(0xFFFF9500) // iOS orange
+                modifier = Modifier.size(18.dp),
+                tint = BitchatColors.SelfMessage // iOS orange
             )
         } else {
             // Connection indicator icons
             if (showNostrGlobe) {
                 // Purple globe to indicate Nostr availability
                 Icon(
-                    imageVector = Icons.Filled.Public,
+                    painter = rememberPixelPainter(PixelIcons.Globe),
                     contentDescription = stringResource(com.bitchat.android.R.string.cd_reachable_via_nostr),
-                    modifier = Modifier.size(16.dp),
-                    tint = Color(0xFF9C27B0) // Purple
+                    modifier = Modifier.size(18.dp),
+                    tint = BitchatColors.NostrIndicator // Purple
                 )
             } else if (!isDirect && isFavorite) {
                 // Offline favorited user: show outlined circle icon
                 Icon(
-                    //painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_offline_favorite),
-                    imageVector = Icons.Outlined.Circle,
+                    painter = rememberPixelPainter(PixelIcons.Circle),
                     contentDescription = stringResource(com.bitchat.android.R.string.cd_offline_favorite),
-                    modifier = Modifier.size(16.dp),
-                    tint = Color.Gray
+                    modifier = Modifier.size(18.dp),
+                    tint = BitchatColors.TextSecondary
                 )
             } else {
                 Icon(
-                    imageVector = if (isDirect) Icons.Outlined.SettingsInputAntenna else Icons.Filled.Route,
+                    painter = rememberPixelPainter(if (isDirect) PixelIcons.Antenna else PixelIcons.Route),
                     contentDescription = if (isDirect) "Direct Bluetooth" else "Routed",
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurface.copy(alpha = 0.8f)
                 )
             }
@@ -663,7 +679,7 @@ private fun PeerItem(
             Text(
                 text = baseName,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CourierPrimeFamily,
                     fontSize = BASE_FONT_SIZE.sp,
                     fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal
                 ),
@@ -677,7 +693,7 @@ private fun PeerItem(
                 Text(
                     text = suffix,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CourierPrimeFamily,
                         fontSize = BASE_FONT_SIZE.sp
                     ),
                     color = baseColor.copy(alpha = 0.6f)
@@ -691,10 +707,10 @@ private fun PeerItem(
             modifier = Modifier.size(24.dp)
         ) {
             Icon(
-                imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.Star,
+                painter = rememberPixelPainter(if (isFavorite) PixelIcons.StarFilled else PixelIcons.StarOutline),
                 contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                modifier = Modifier.size(16.dp),
-                tint = if (isFavorite) Color(0xFFFFD700) else Color(0xFF4CAF50)
+                modifier = Modifier.size(18.dp),
+                tint = if (isFavorite) BitchatColors.FavoriteStar else BitchatColors.TextTertiary
             )
         }
     }
@@ -718,7 +734,7 @@ private fun SignalStrengthIndicator(
                     .size(width = 3.dp, height = (4 + index * 2).dp)
                     .background(
                         colorScheme.onSurface.copy(alpha = opacity),
-                        RoundedCornerShape(1.dp)
+                        RoundedCornerShape(0.dp)
                     )
             )
             if (index < 2) Spacer(modifier = Modifier.width(2.dp))
@@ -739,8 +755,8 @@ private fun UnreadBadge(
         Box(
             modifier = modifier
                 .background(
-                    color = Color(0xFFFFD700), // Yellow color
-                    shape = RoundedCornerShape(10.dp)
+                    color = BitchatColors.FavoriteStar, // Yellow color
+                    shape = RoundedCornerShape(4.dp)
                 )
                 .padding(horizontal = 2.dp, vertical = 0.dp)
                 .defaultMinSize(minWidth = 14.dp, minHeight = 14.dp),
@@ -749,7 +765,7 @@ private fun UnreadBadge(
             Text(
                 text = if (count > 99) "99+" else count.toString(),
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 ),
                 color = Color.Black // Black text on yellow background

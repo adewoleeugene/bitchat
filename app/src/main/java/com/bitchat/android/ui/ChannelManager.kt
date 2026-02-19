@@ -1,13 +1,15 @@
 package com.bitchat.android.ui
 
+import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.solana.TokenGateService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.security.MessageDigest
+import java.util.*
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import com.bitchat.android.model.BitchatMessage
-import java.util.*
 
 /**
  * Handles channel management including creation, joining, leaving, and encryption
@@ -19,11 +21,15 @@ class ChannelManager(
     private val coroutineScope: CoroutineScope
 ) {
     
+    // Solana token gate service (set lazily from ChatViewModel via Hilt EntryPoint)
+    var tokenGateService: TokenGateService? = null
+
     // Channel encryption and security
     private val channelKeys = mutableMapOf<String, SecretKeySpec>()
     private val channelPasswords = mutableMapOf<String, String>()
     private val channelKeyCommitments = mutableMapOf<String, String>()
     private val retentionEnabledChannels = mutableSetOf<String>()
+    private val tokenGatedChannels = mutableSetOf<String>()
     
     // MARK: - Channel Lifecycle
     
@@ -67,6 +73,41 @@ class ChannelManager(
                 state.setShowPasswordPrompt(true)
                 return false
             }
+        }
+
+        // Token gate validation (if service available and channel is gated)
+        val tgs = tokenGateService
+        if (tgs != null) {
+            try {
+                val isGated = runBlocking { tgs.isTokenGated(key) }
+                if (isGated) {
+                    tokenGatedChannels.add(key)
+                    val validation = runBlocking { tgs.validateEligibility(key) }
+                    validation.onSuccess { result ->
+                        if (!result.isEligible) {
+                            val displayAmount = tgs.formatTokenAmount(result.requiredBalance, result.tokenDecimals)
+                            val symbol = result.tokenSymbol.ifEmpty { "tokens" }
+                            val msg = BitchatMessage(
+                                sender = "system",
+                                content = "token gate: you need at least $displayAmount $symbol to join $channelTag. check your wallet.",
+                                timestamp = Date(),
+                                isRelay = false
+                            )
+                            messageManager.addMessage(msg)
+                            return false
+                        }
+                    }.onFailure { error ->
+                        val msg = BitchatMessage(
+                            sender = "system",
+                            content = "token gate check failed: ${error.message}",
+                            timestamp = Date(),
+                            isRelay = false
+                        )
+                        messageManager.addMessage(msg)
+                        return false
+                    }
+                }
+            } catch (_: Exception) { }
         }
 
         // Join the channel
@@ -219,6 +260,10 @@ class ChannelManager(
         return dataManager.isChannelCreator(channel, peerID)
     }
     
+    fun isChannelTokenGated(channel: String): Boolean {
+        return tokenGatedChannels.contains(channel)
+    }
+
     fun getJoinedChannelsList(): List<String> {
         return state.getJoinedChannelsValue().toList().sorted()
     }
