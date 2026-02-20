@@ -258,13 +258,15 @@ class ChatViewModel(
                 meshService.broadcastSolanaRelayReceipt(receipt)
             }
             relayHandler.onRelayEvent = { event ->
-                val msg = BitchatMessage(
-                    sender = "system",
-                    content = "solana relay: $event",
-                    timestamp = java.util.Date(),
-                    isRelay = false
-                )
-                messageManager.addMessage(msg)
+                viewModelScope.launch(Dispatchers.Main) {
+                    val msg = BitchatMessage(
+                        sender = "system",
+                        content = "solana relay: $event",
+                        timestamp = java.util.Date(),
+                        isRelay = false
+                    )
+                    messageManager.addMessage(msg)
+                }
             }
 
             // Wire mesh relay fallback into payment manager
@@ -284,20 +286,22 @@ class ChatViewModel(
                 meshService.broadcastSolanaBlockhashResponse(response)
             }
             meshService.onBlockhashResponseReceived = { response ->
-                viewModelScope.launch(Dispatchers.IO) {
+                viewModelScope.launch {
                     paymentManager.handleBlockhashResponse(response)
                 }
             }
 
             // Wire payment manager status events to system messages in chat
             paymentManager.onStatusEvent = { event ->
-                val msg = BitchatMessage(
-                    sender = "system",
-                    content = "solana: $event",
-                    timestamp = java.util.Date(),
-                    isRelay = false
-                )
-                messageManager.addMessage(msg)
+                viewModelScope.launch(Dispatchers.Main) {
+                    val msg = BitchatMessage(
+                        sender = "system",
+                        content = "solana: $event",
+                        timestamp = java.util.Date(),
+                        isRelay = false
+                    )
+                    messageManager.addMessage(msg)
+                }
             }
 
             // Wire up message notarization service
@@ -1147,9 +1151,11 @@ class ChatViewModel(
                 service.observeReactions(postId)
             }
             reactions.collect { reactionList ->
-                val current = state.getFeedReactionsValue().toMutableMap()
-                current[postId] = reactionList
-                state.setFeedReactions(current)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    val current = state.getFeedReactionsValue().toMutableMap()
+                    current[postId] = reactionList
+                    state.setFeedReactions(current)
+                }
             }
         } catch (_: Exception) { }
     }
@@ -1161,9 +1167,11 @@ class ChatViewModel(
                 service.observeReplies(postId)
             }
             replies.collect { replyList ->
-                val current = state.getFeedRepliesValue().toMutableMap()
-                current[postId] = replyList
-                state.setFeedReplies(current)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    val current = state.getFeedRepliesValue().toMutableMap()
+                    current[postId] = replyList
+                    state.setFeedReplies(current)
+                }
             }
         } catch (_: Exception) { }
     }
@@ -1178,49 +1186,53 @@ class ChatViewModel(
     private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
         val paymentManager = entryPoint.solanaPaymentManager()
         viewModelScope.launch {
-            paymentManager.observeRecentTransactions().collect { transactions ->
-                for (tx in transactions) {
-                    val key = "${tx.id}:${tx.status}"
-                    if (notifiedTransactionIds.contains(key)) continue
+            paymentManager.observeRecentTransactions()
+                .collect { transactions ->
+                    for (tx in transactions) {
+                        val key = "${tx.id}:${tx.status}"
+                        if (notifiedTransactionIds.contains(key)) continue
 
-                    val amountSol = paymentManager.lamportsToSolDisplay(tx.amountLamports)
-                    val shortRecipient = if (tx.recipientPublicKey.length > 12) {
-                        "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
-                    } else tx.recipientPublicKey
+                        val amountSol = paymentManager.lamportsToSolDisplay(tx.amountLamports)
+                        val shortRecipient = if (tx.recipientPublicKey.length > 12) {
+                            "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
+                        } else tx.recipientPublicKey
 
-                    val statusMessage = when (tx.status) {
-                        com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
-                            notifiedTransactionIds.add(key)
-                            "payment: $amountSol SOL to $shortRecipient — requesting blockhash from mesh peer..."
+                        val statusMessage = when (tx.status) {
+                            com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
+                                notifiedTransactionIds.add(key)
+                                "payment: $amountSol SOL to $shortRecipient — requesting blockhash from mesh peer..."
+                            }
+                            com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
+                                notifiedTransactionIds.add(key)
+                                "payment: $amountSol SOL to $shortRecipient — broadcasting via relay peer..."
+                            }
+                            com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
+                                notifiedTransactionIds.add(key)
+                                "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                    if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                            }
+                            com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
+                                notifiedTransactionIds.add(key)
+                                "payment failed: $amountSol SOL to $shortRecipient" +
+                                    if (!tx.errorMessage.isNullOrEmpty()) " - ${tx.errorMessage}" else ""
+                            }
+                            else -> null
                         }
-                        com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
-                            notifiedTransactionIds.add(key)
-                            "payment: $amountSol SOL to $shortRecipient — broadcasting via relay peer..."
-                        }
-                        com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
-                            notifiedTransactionIds.add(key)
-                            "payment confirmed: $amountSol SOL to $shortRecipient" +
-                                if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
-                        }
-                        com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
-                            notifiedTransactionIds.add(key)
-                            "payment failed: $amountSol SOL to $shortRecipient" +
-                                if (!tx.errorMessage.isNullOrEmpty()) " - ${tx.errorMessage}" else ""
-                        }
-                        else -> null
-                    }
 
-                    if (statusMessage != null) {
-                        val systemMsg = BitchatMessage(
-                            sender = "system",
-                            content = statusMessage,
-                            timestamp = java.util.Date(),
-                            isRelay = false
-                        )
-                        messageManager.addMessage(systemMsg)
+                        if (statusMessage != null) {
+                            // Ensure we're on the main thread for LiveData updates
+                            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                val systemMsg = BitchatMessage(
+                                    sender = "system",
+                                    content = statusMessage,
+                                    timestamp = java.util.Date(),
+                                    isRelay = false
+                                )
+                                messageManager.addMessage(systemMsg)
+                            }
+                        }
                     }
                 }
-            }
         }
     }
 

@@ -150,13 +150,21 @@ class SolanaPaymentManager @Inject constructor(
         }
     }
 
+    private fun safeStatusEvent(message: String) {
+        try {
+            onStatusEvent?.invoke(message)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to post status event: ${e.message}")
+        }
+    }
+
     private suspend fun broadcastTransaction(tx: QueuedTransactionEntity) {
         try {
             // Check connectivity FIRST — if offline, go straight to mesh relay
             // This avoids hanging on DNS/HTTP timeouts before falling back
             if (!hasInternetConnectivity()) {
                 Log.d(TAG, "Device offline for tx ${tx.id}, going directly to mesh relay")
-                onStatusEvent?.invoke("offline — routing payment via mesh relay...")
+                safeStatusEvent("offline — routing payment via mesh relay...")
                 transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
                 tryMeshRelayFallback(tx)
                 return
@@ -262,7 +270,7 @@ class SolanaPaymentManager @Inject constructor(
         if (relayCallback == null) {
             transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
             Log.w(TAG, ">>> BLOCKED: No mesh relay callback (onRequestMeshRelay=null) for tx ${tx.id}, keeping as pending")
-            onStatusEvent?.invoke("mesh relay not available — payment saved, will retry")
+            safeStatusEvent("mesh relay not available — payment saved, will retry")
             return
         }
         Log.d(TAG, ">>> onRequestMeshRelay callback is set")
@@ -271,7 +279,7 @@ class SolanaPaymentManager @Inject constructor(
         val cachedBlockhash = rpcService.getCachedBlockhash()
         if (cachedBlockhash != null) {
             Log.d(TAG, ">>> Using cached blockhash for mesh relay of tx ${tx.id}")
-            onStatusEvent?.invoke("signing with cached blockhash, sending via mesh...")
+            safeStatusEvent("signing with cached blockhash, sending via mesh...")
             signAndRelayTransaction(tx, cachedBlockhash.blockhash, relayCallback)
             return
         }
@@ -292,7 +300,7 @@ class SolanaPaymentManager @Inject constructor(
 
         // Truly offline with no cached blockhash — initiate 2-step handshake
         Log.d(TAG, ">>> No blockhash available, initiating 2-step mesh handshake for tx ${tx.id}")
-        onStatusEvent?.invoke("requesting blockhash from mesh peers...")
+        safeStatusEvent("requesting blockhash from mesh peers...")
         requestBlockhashViaMesh(tx)
     }
 
@@ -326,7 +334,7 @@ class SolanaPaymentManager @Inject constructor(
 
         transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
         Log.d(TAG, ">>> Invoking mesh relay callback for tx ${tx.id} (signed tx size: ${signedTxBase64.length} chars)")
-        onStatusEvent?.invoke("signed tx sent to mesh for relay broadcast")
+        safeStatusEvent("signed tx sent to mesh for relay broadcast")
         relayCallback(request)
         Log.d(TAG, ">>> Mesh relay callback invoked successfully for tx ${tx.id}")
     }
@@ -395,7 +403,7 @@ class SolanaPaymentManager @Inject constructor(
             }
 
             Log.d(TAG, ">>> Received fresh blockhash for tx ${tx.id}, signing and relaying")
-            onStatusEvent?.invoke("received blockhash from mesh peer, signing tx...")
+            safeStatusEvent("received blockhash from mesh peer, signing tx...")
             val relayCallback = onRequestMeshRelay
             if (relayCallback == null) {
                 transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
