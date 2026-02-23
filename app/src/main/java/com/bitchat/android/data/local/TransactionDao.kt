@@ -27,7 +27,7 @@ interface TransactionDao {
     suspend fun recoverStaleBroadcasting(staleThreshold: Long = System.currentTimeMillis() - 120_000L, now: Long = System.currentTimeMillis())
 
     @Query("UPDATE queued_transactions SET status = 'PENDING' WHERE status = 'AWAITING_BLOCKHASH' AND lastAttemptAt < :staleThreshold AND ttlExpiresAt > :now")
-    suspend fun recoverStaleHandshake(staleThreshold: Long = System.currentTimeMillis() - 120_000L, now: Long = System.currentTimeMillis())
+    suspend fun recoverStaleHandshake(staleThreshold: Long = System.currentTimeMillis() - 30_000L, now: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM queued_transactions WHERE status = 'PENDING' AND ttlExpiresAt > :now ORDER BY createdAt ASC")
     fun observePendingTransactions(now: Long = System.currentTimeMillis()): Flow<List<QueuedTransactionEntity>>

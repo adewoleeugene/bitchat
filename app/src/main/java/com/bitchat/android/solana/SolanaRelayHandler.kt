@@ -35,6 +35,7 @@ class SolanaRelayHandler @Inject constructor(
         private const val MIN_BATTERY_PERCENT = 20
         private const val REQUEST_EXPIRY_MS = 5 * 60 * 1000L // 5 minutes
         private const val CLAIM_TTL_MS = 90_000L
+        private const val INTENT_DEDUP_WINDOW_MS = 20_000L
     }
 
     private data class RelayClaimLock(
@@ -53,6 +54,7 @@ class SolanaRelayHandler @Inject constructor(
 
     // Track processed intent requests to avoid duplicates (intentId -> timestamp)
     private val processedIntents = ConcurrentHashMap<String, Long>()
+    private val inflightIntents = ConcurrentHashMap<String, Long>()
 
     // Track relay ownership claims to prevent multiple gateways processing same request
     private val relayClaims = ConcurrentHashMap<String, RelayClaimLock>()
@@ -218,9 +220,18 @@ class SolanaRelayHandler @Inject constructor(
         fromPeerID: String,
         context: Context
     ): Boolean {
-        // Dedup (separate map from relay requests so 0x32→0x30 flow works)
-        if (processedIntents.containsKey(intent.intentId)) {
+        cleanup()
+
+        // Dedup while request is in flight on this peer.
+        if (inflightIntents.containsKey(intent.intentId)) {
             Log.d(TAG, "Already processed intent ${intent.intentId}, ignoring")
+            return false
+        }
+
+        // Short post-success dedup window to avoid broadcast storms, while still allowing fast retries.
+        val recentProcessedAt = processedIntents[intent.intentId]
+        if (recentProcessedAt != null && (System.currentTimeMillis() - recentProcessedAt) < INTENT_DEDUP_WINDOW_MS) {
+            Log.d(TAG, "Ignoring duplicate recent intent ${intent.intentId} within dedup window")
             return false
         }
 
@@ -245,7 +256,7 @@ class SolanaRelayHandler @Inject constructor(
             return false
         }
 
-        processedIntents[intent.intentId] = System.currentTimeMillis()
+        inflightIntents[intent.intentId] = System.currentTimeMillis()
         onRelayEvent?.invoke("fetching blockhash for ${fromPeerID.take(8)}...")
 
         // Fetch fresh blockhash asynchronously
@@ -254,6 +265,7 @@ class SolanaRelayHandler @Inject constructor(
                 val blockhashResult = rpcService.getLatestBlockhash()
                 blockhashResult.onSuccess { info ->
                     Log.d(TAG, "Sending blockhash response for intent ${intent.intentId.take(8)}...")
+                    processedIntents[intent.intentId] = System.currentTimeMillis()
                     sendBlockhashResponse(intent.intentId, info.blockhash, info.lastValidBlockHeight, "")
                     onRelayEvent?.invoke("sent blockhash to ${fromPeerID.take(8)}...")
                 }.onFailure { error ->
@@ -264,6 +276,8 @@ class SolanaRelayHandler @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Intent relay error: ${e.message}", e)
                 sendBlockhashResponse(intent.intentId, "", 0, e.message ?: "Unknown error")
+            } finally {
+                inflightIntents.remove(intent.intentId)
             }
         }
 
@@ -409,7 +423,8 @@ class SolanaRelayHandler @Inject constructor(
         val now = System.currentTimeMillis()
         pendingRequests.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         processedRelays.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
-        processedIntents.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
+        processedIntents.entries.removeAll { (now - it.value) > INTENT_DEDUP_WINDOW_MS }
+        inflightIntents.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         relayClaims.entries.removeAll { it.value.expiresAtMs <= now }
     }
 

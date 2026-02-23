@@ -475,13 +475,17 @@ class SolanaPaymentManager @Inject constructor(
             }
 
             if (response.errorMessage.isNotEmpty()) {
-                // Peer couldn't fetch blockhash — keep as AWAITING_BLOCKHASH, another peer may respond
-                Log.w(TAG, "Blockhash request failed from one peer: ${response.errorMessage}, tx ${tx.id} still awaiting")
+                // Move back to PENDING so retry loop can request another gateway quickly.
+                Log.w(TAG, "Blockhash request failed: ${response.errorMessage}, reverting tx ${tx.id} to PENDING")
+                safeStatusEvent("blockhash request failed, retrying with next mesh peer...")
+                transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
                 return@withContext
             }
 
             if (response.blockhash.isEmpty()) {
-                Log.w(TAG, "Empty blockhash in response for tx ${tx.id}, still awaiting")
+                Log.w(TAG, "Empty blockhash in response for tx ${tx.id}, reverting to PENDING")
+                safeStatusEvent("received empty blockhash, retrying...")
+                transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
                 return@withContext
             }
 
