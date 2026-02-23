@@ -98,6 +98,15 @@ object RelayReceiptStatus {
     const val CONFIRMED: Byte = 2
 }
 
+/**
+ * Status codes for relay ACKs used by the guaranteed-delivery control plane.
+ */
+object RelayAckType {
+    const val REQUEST_SEEN: Byte = 1
+    const val CLAIM_SEEN: Byte = 2
+    const val RECEIPT_SEEN: Byte = 3
+}
+
 data class SolanaRelayReceipt(
     val requestId: String,     // Matches the original request
     val status: Byte,          // RelayReceiptStatus
@@ -169,6 +178,132 @@ data class SolanaRelayReceipt(
                 return SolanaRelayReceipt(requestId, status, txSignature, errorMessage)
             } catch (_: Exception) {
                 return null
+            }
+        }
+    }
+}
+
+/**
+ * RELAY_CLAIM (0x34) payload:
+ * - requestIdLength: 1 byte
+ * - requestId: variable
+ * - relayPeerIdLength: 1 byte
+ * - relayPeerId: variable (mesh peer ID that claimed the relay)
+ * - claimExpiresAtMs: 8 bytes (big-endian unix ms)
+ */
+data class SolanaRelayClaim(
+    val requestId: String,
+    val relayPeerId: String,
+    val claimExpiresAtMs: Long
+) {
+    fun encode(): ByteArray {
+        val requestBytes = requestId.toByteArray(Charsets.UTF_8)
+        val relayPeerBytes = relayPeerId.toByteArray(Charsets.UTF_8)
+        val buffer = ByteBuffer.allocate(1 + requestBytes.size + 1 + relayPeerBytes.size + 8)
+            .apply { order(ByteOrder.BIG_ENDIAN) }
+
+        buffer.put(requestBytes.size.coerceAtMost(255).toByte())
+        buffer.put(requestBytes.take(255).toByteArray())
+        buffer.put(relayPeerBytes.size.coerceAtMost(255).toByte())
+        buffer.put(relayPeerBytes.take(255).toByteArray())
+        buffer.putLong(claimExpiresAtMs)
+
+        val result = ByteArray(buffer.position())
+        buffer.rewind()
+        buffer.get(result)
+        return result
+    }
+
+    companion object {
+        fun decode(data: ByteArray): SolanaRelayClaim? {
+            return try {
+                if (data.size < 11) return null
+                val buffer = ByteBuffer.wrap(data).apply { order(ByteOrder.BIG_ENDIAN) }
+
+                val requestLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < requestLen) return null
+                val requestBytes = ByteArray(requestLen)
+                buffer.get(requestBytes)
+                val requestId = String(requestBytes, Charsets.UTF_8)
+
+                val relayPeerLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < relayPeerLen) return null
+                val relayPeerBytes = ByteArray(relayPeerLen)
+                buffer.get(relayPeerBytes)
+                val relayPeerId = String(relayPeerBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 8) return null
+                val claimExpiresAtMs = buffer.getLong()
+
+                SolanaRelayClaim(requestId, relayPeerId, claimExpiresAtMs)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}
+
+/**
+ * RELAY_ACK (0x35) payload:
+ * - requestIdLength: 1 byte
+ * - requestId: variable
+ * - ackType: 1 byte (RelayAckType)
+ * - peerIdLength: 1 byte
+ * - peerId: variable (peer emitting the ACK)
+ * - timestampMs: 8 bytes (big-endian unix ms)
+ */
+data class SolanaRelayAck(
+    val requestId: String,
+    val ackType: Byte,
+    val peerId: String,
+    val timestampMs: Long = System.currentTimeMillis()
+) {
+    fun encode(): ByteArray {
+        val requestBytes = requestId.toByteArray(Charsets.UTF_8)
+        val peerBytes = peerId.toByteArray(Charsets.UTF_8)
+        val buffer = ByteBuffer.allocate(1 + requestBytes.size + 1 + 1 + peerBytes.size + 8)
+            .apply { order(ByteOrder.BIG_ENDIAN) }
+
+        buffer.put(requestBytes.size.coerceAtMost(255).toByte())
+        buffer.put(requestBytes.take(255).toByteArray())
+        buffer.put(ackType)
+        buffer.put(peerBytes.size.coerceAtMost(255).toByte())
+        buffer.put(peerBytes.take(255).toByteArray())
+        buffer.putLong(timestampMs)
+
+        val result = ByteArray(buffer.position())
+        buffer.rewind()
+        buffer.get(result)
+        return result
+    }
+
+    companion object {
+        fun decode(data: ByteArray): SolanaRelayAck? {
+            return try {
+                if (data.size < 12) return null
+                val buffer = ByteBuffer.wrap(data).apply { order(ByteOrder.BIG_ENDIAN) }
+
+                val requestLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < requestLen) return null
+                val requestBytes = ByteArray(requestLen)
+                buffer.get(requestBytes)
+                val requestId = String(requestBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 1) return null
+                val ackType = buffer.get()
+
+                val peerLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < peerLen) return null
+                val peerBytes = ByteArray(peerLen)
+                buffer.get(peerBytes)
+                val peerId = String(peerBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 8) return null
+                val timestampMs = buffer.getLong()
+
+                SolanaRelayAck(requestId, ackType, peerId, timestampMs)
+            } catch (_: Exception) {
+                null
             }
         }
     }

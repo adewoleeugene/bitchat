@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,12 +35,20 @@ class SolanaPaymentManager @Inject constructor(
         private const val TAG = "SolanaPaymentManager"
         private const val TTL_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
         private const val MAX_RETRY_ATTEMPTS = 5
-        private const val RETRY_DELAY_MS = 10_000L // 10 seconds
         private const val LAMPORTS_PER_SOL = 1_000_000_000L
+        private val RELAY_RETRY_SCHEDULE_MS = listOf(2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
+        private const val RELAY_CLAIM_STALE_MS = 90_000L
+        private const val RELAY_HARD_TIMEOUT_MS = 180_000L
+        private const val RELAY_MONITOR_POLL_MS = 2_000L
+        private const val RECOVERY_TICK_MS = 20_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var broadcastJob: Job? = null
+    private var recoveryJob: Job? = null
+    private val relayMonitorJobs = ConcurrentHashMap<String, Job>()
+    private val relayClaimTimestamps = ConcurrentHashMap<String, Long>()
+    private val relayAckTimestamps = ConcurrentHashMap<String, Long>()
 
     // Callback for mesh relay when direct RPC is unavailable
     var onRequestMeshRelay: ((SolanaRelayRequest) -> Unit)? = null
@@ -49,6 +58,10 @@ class SolanaPaymentManager @Inject constructor(
 
     // Callback for posting status events to the UI (system messages in chat)
     var onStatusEvent: ((String) -> Unit)? = null
+
+    init {
+        startRecoveryTicker()
+    }
 
     /**
      * Queue a SOL payment to a recipient.
@@ -155,6 +168,28 @@ class SolanaPaymentManager @Inject constructor(
             onStatusEvent?.invoke(message)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to post status event: ${e.message}")
+        }
+    }
+
+    fun handleRelayClaimObserved(claim: SolanaRelayClaim) {
+        relayClaimTimestamps[claim.requestId] = System.currentTimeMillis()
+        safeStatusEvent("relay claim received for ${claim.requestId.take(8)}... from ${claim.relayPeerId.take(8)}...")
+    }
+
+    fun handleRelayAckObserved(ack: SolanaRelayAck) {
+        relayAckTimestamps[ack.requestId] = ack.timestampMs
+        if (ack.ackType == RelayAckType.REQUEST_SEEN) {
+            safeStatusEvent("mesh accepted relay request ${ack.requestId.take(8)}...")
+        }
+    }
+
+    private fun startRecoveryTicker() {
+        if (recoveryJob?.isActive == true) return
+        recoveryJob = scope.launch {
+            while (isActive) {
+                delay(RECOVERY_TICK_MS)
+                tryBroadcastPending()
+            }
         }
     }
 
@@ -332,11 +367,59 @@ class SolanaPaymentManager @Inject constructor(
             senderPubKey = tx.senderPublicKey
         )
 
+        // Persist signed payload so retries remain deterministic for this requestId.
+        transactionDao.updateTransaction(tx.copy(signedTransactionBase64 = signedTxBase64))
         transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
         Log.d(TAG, ">>> Invoking mesh relay callback for tx ${tx.id} (signed tx size: ${signedTxBase64.length} chars)")
         safeStatusEvent("signed tx sent to mesh for relay broadcast")
         relayCallback(request)
+        startRelayMonitor(request, relayCallback)
         Log.d(TAG, ">>> Mesh relay callback invoked successfully for tx ${tx.id}")
+    }
+
+    private fun startRelayMonitor(
+        request: SolanaRelayRequest,
+        relayCallback: (SolanaRelayRequest) -> Unit
+    ) {
+        relayMonitorJobs.remove(request.requestId)?.cancel()
+        relayMonitorJobs[request.requestId] = scope.launch {
+            val startedAt = System.currentTimeMillis()
+            var retryIndex = 0
+            var nextRetryAt = startedAt + RELAY_RETRY_SCHEDULE_MS.first()
+
+            while (isActive) {
+                delay(RELAY_MONITOR_POLL_MS)
+
+                val tx = transactionDao.getTransaction(request.requestId) ?: break
+                if (tx.status != TransactionStatus.BROADCASTING.value) break
+
+                val now = System.currentTimeMillis()
+                val claimAt = relayClaimTimestamps[request.requestId]
+                val hasFreshClaim = claimAt != null && (now - claimAt) <= RELAY_CLAIM_STALE_MS
+
+                if ((now - startedAt) > RELAY_HARD_TIMEOUT_MS) {
+                    transactionDao.updateStatus(request.requestId, TransactionStatus.PENDING.value)
+                    safeStatusEvent("relay timed out for ${request.requestId.take(8)}... queued for retry")
+                    break
+                }
+
+                if (hasFreshClaim) continue
+
+                if (retryIndex < RELAY_RETRY_SCHEDULE_MS.size && now >= nextRetryAt) {
+                    safeStatusEvent(
+                        "no relay claim yet for ${request.requestId.take(8)}... retrying (${retryIndex + 1}/${RELAY_RETRY_SCHEDULE_MS.size})"
+                    )
+                    relayCallback(request)
+                    val delayMs = RELAY_RETRY_SCHEDULE_MS[retryIndex]
+                    retryIndex += 1
+                    nextRetryAt = now + delayMs
+                }
+            }
+
+            relayMonitorJobs.remove(request.requestId)
+            relayClaimTimestamps.remove(request.requestId)
+            relayAckTimestamps.remove(request.requestId)
+        }
     }
 
     /**
@@ -581,6 +664,9 @@ class SolanaPaymentManager @Inject constructor(
 
     fun shutdown() {
         broadcastJob?.cancel()
+        recoveryJob?.cancel()
+        relayMonitorJobs.values.forEach { it.cancel() }
+        relayMonitorJobs.clear()
         scope.cancel()
     }
 }
