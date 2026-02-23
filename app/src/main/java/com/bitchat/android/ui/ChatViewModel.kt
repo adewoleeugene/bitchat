@@ -257,6 +257,12 @@ class ChatViewModel(
             relayHandler.onSendRelayReceipt = { receipt ->
                 meshService.broadcastSolanaRelayReceipt(receipt)
             }
+            relayHandler.onSendRelayClaim = { claim ->
+                meshService.broadcastSolanaRelayClaim(claim)
+            }
+            relayHandler.onSendRelayAck = { ack ->
+                meshService.broadcastSolanaRelayAck(ack)
+            }
             relayHandler.onRelayEvent = { event ->
                 viewModelScope.launch(Dispatchers.Main) {
                     val msg = BitchatMessage(
@@ -272,6 +278,12 @@ class ChatViewModel(
             // Wire mesh relay fallback into payment manager
             val paymentManager = solanaEntryPoint.solanaPaymentManager()
             solanaPaymentManager = paymentManager
+            relayHandler.onClaimObserved = { claim ->
+                paymentManager.handleRelayClaimObserved(claim)
+            }
+            relayHandler.onAckObserved = { ack ->
+                paymentManager.handleRelayAckObserved(ack)
+            }
             paymentManager.onRequestMeshRelay = { request ->
                 // Track the outgoing request so we can match the receipt when it arrives
                 relayHandler.trackOutgoingRequest(request.requestId)

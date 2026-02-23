@@ -16,6 +16,8 @@ import com.bitchat.android.feed.FeedReactionPayload
 import com.bitchat.android.feed.FeedReplyPayload
 import com.bitchat.android.feed.FeedService
 import com.bitchat.android.solana.SolanaBlockhashResponse
+import com.bitchat.android.solana.SolanaRelayAck
+import com.bitchat.android.solana.SolanaRelayClaim
 import com.bitchat.android.solana.SolanaRelayHandler
 import com.bitchat.android.solana.SolanaRelayReceipt
 import com.bitchat.android.solana.SolanaRelayRequest
@@ -513,7 +515,7 @@ class BluetoothMeshService(private val context: Context) {
                     Log.d(TAG, "No Solana relay handler configured, ignoring relay request")
                     return
                 }
-                handler.handleRelayRequest(request, fromPeer, context)
+                handler.handleRelayRequest(request, fromPeer, myPeerID, context)
             }
 
             override fun handleSolanaTxReceipt(routed: RoutedPacket) {
@@ -552,6 +554,26 @@ class BluetoothMeshService(private val context: Context) {
                 }
                 onBlockhashResponseReceived?.invoke(response)
                     ?: Log.d(TAG, "No blockhash response handler configured, ignoring")
+            }
+
+            override fun handleSolanaRelayClaim(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val claim = SolanaRelayClaim.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_TX_CLAIM payload from $fromPeer")
+                    return
+                }
+                solanaRelayHandler?.handleRelayClaim(claim, fromPeer)
+                    ?: Log.d(TAG, "No Solana relay handler configured, ignoring relay claim")
+            }
+
+            override fun handleSolanaRelayAck(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val ack = SolanaRelayAck.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_TX_ACK payload from $fromPeer")
+                    return
+                }
+                solanaRelayHandler?.handleRelayAck(ack, fromPeer)
+                    ?: Log.d(TAG, "No Solana relay handler configured, ignoring relay ack")
             }
 
             override fun handleFeedPost(routed: RoutedPacket) {
@@ -1328,6 +1350,40 @@ class BluetoothMeshService(private val context: Context) {
             val signedPacket = signPacketBeforeBroadcast(packet)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             Log.d(TAG, "Broadcast SOLANA_BLOCKHASH_RESPONSE for ${response.intentId.take(8)}...")
+        }
+    }
+
+    /**
+     * Broadcast relay claim for gateway ownership election.
+     */
+    fun broadcastSolanaRelayClaim(claim: SolanaRelayClaim) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_TX_CLAIM.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = claim.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_TX_CLAIM for ${claim.requestId.take(8)}... by ${claim.relayPeerId.take(8)}...")
+        }
+    }
+
+    /**
+     * Broadcast relay ACK for request/claim/receipt delivery confirmation.
+     */
+    fun broadcastSolanaRelayAck(ack: SolanaRelayAck) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_TX_ACK.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = ack.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_TX_ACK for ${ack.requestId.take(8)}... type=${ack.ackType}")
         }
     }
 

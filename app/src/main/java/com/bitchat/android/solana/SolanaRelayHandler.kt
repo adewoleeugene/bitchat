@@ -34,7 +34,13 @@ class SolanaRelayHandler @Inject constructor(
         private const val MAX_REQUESTS_PER_HOUR = 20
         private const val MIN_BATTERY_PERCENT = 20
         private const val REQUEST_EXPIRY_MS = 5 * 60 * 1000L // 5 minutes
+        private const val CLAIM_TTL_MS = 90_000L
     }
+
+    private data class RelayClaimLock(
+        val relayPeerId: String,
+        val expiresAtMs: Long
+    )
 
     // Rate limiting: peerID -> list of timestamps
     private val peerRequestTimestamps = ConcurrentHashMap<String, MutableList<Long>>()
@@ -48,14 +54,29 @@ class SolanaRelayHandler @Inject constructor(
     // Track processed intent requests to avoid duplicates (intentId -> timestamp)
     private val processedIntents = ConcurrentHashMap<String, Long>()
 
+    // Track relay ownership claims to prevent multiple gateways processing same request
+    private val relayClaims = ConcurrentHashMap<String, RelayClaimLock>()
+
     // Callback for sending packets back through the mesh
     var onSendRelayReceipt: ((SolanaRelayReceipt) -> Unit)? = null
 
     // Callback for sending blockhash responses back through the mesh (2-step handshake)
     var onSendBlockhashResponse: ((SolanaBlockhashResponse) -> Unit)? = null
 
+    // Callback for sending relay ownership claims through the mesh
+    var onSendRelayClaim: ((SolanaRelayClaim) -> Unit)? = null
+
+    // Callback for sending relay ACKs through the mesh
+    var onSendRelayAck: ((SolanaRelayAck) -> Unit)? = null
+
     // Callback for notifying the UI about relay events
     var onRelayEvent: ((String) -> Unit)? = null
+
+    // Callback when a claim is observed for a request we're tracking
+    var onClaimObserved: ((SolanaRelayClaim) -> Unit)? = null
+
+    // Callback when a relay ACK is observed for a request we're tracking
+    var onAckObserved: ((SolanaRelayAck) -> Unit)? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -85,12 +106,24 @@ class SolanaRelayHandler @Inject constructor(
     fun handleRelayRequest(
         request: SolanaRelayRequest,
         fromPeerID: String,
+        localPeerID: String,
         context: Context
     ): Boolean {
+        cleanup()
+        sendAck(request.requestId, RelayAckType.REQUEST_SEEN, localPeerID)
+
         // Dedup: check if we've already processed this relay request
         // Note: uses separate map from intents so a 0x32→0x30 handshake flow works
         if (processedRelays.containsKey(request.requestId)) {
             Log.d(TAG, "Already processed relay request ${request.requestId}, ignoring")
+            return false
+        }
+
+        // Honor active claim locks from other peers.
+        val existingClaim = relayClaims[request.requestId]
+        if (existingClaim != null && existingClaim.expiresAtMs > System.currentTimeMillis() &&
+            existingClaim.relayPeerId != localPeerID) {
+            Log.d(TAG, "Request ${request.requestId.take(8)}... already claimed by ${existingClaim.relayPeerId.take(8)}..., skipping")
             return false
         }
 
@@ -115,6 +148,17 @@ class SolanaRelayHandler @Inject constructor(
             return false
         }
 
+        // Claim ownership before processing to reduce duplicate gateway broadcasts.
+        val claim = SolanaRelayClaim(
+            requestId = request.requestId,
+            relayPeerId = localPeerID,
+            claimExpiresAtMs = System.currentTimeMillis() + CLAIM_TTL_MS
+        )
+        relayClaims[request.requestId] = RelayClaimLock(claim.relayPeerId, claim.claimExpiresAtMs)
+        onSendRelayClaim?.invoke(claim)
+        onClaimObserved?.invoke(claim)
+        sendAck(request.requestId, RelayAckType.CLAIM_SEEN, localPeerID)
+
         processedRelays[request.requestId] = System.currentTimeMillis()
         onRelayEvent?.invoke("relaying transaction from ${fromPeerID.take(8)}...")
 
@@ -136,9 +180,31 @@ class SolanaRelayHandler @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Relay error: ${e.message}", e)
                 sendReceipt(request.requestId, RelayReceiptStatus.FAILED, "", e.message ?: "Unknown error")
+            } finally {
+                relayClaims.remove(request.requestId)
             }
         }
 
+        return true
+    }
+
+    /**
+     * Track relay ownership claim packets (0x34) observed in mesh.
+     */
+    fun handleRelayClaim(claim: SolanaRelayClaim, fromPeerID: String): Boolean {
+        if (claim.claimExpiresAtMs <= System.currentTimeMillis()) return false
+        relayClaims[claim.requestId] = RelayClaimLock(claim.relayPeerId, claim.claimExpiresAtMs)
+        onClaimObserved?.invoke(claim)
+        Log.d(TAG, "Observed relay claim for ${claim.requestId.take(8)}... by ${claim.relayPeerId.take(8)}... (from=${fromPeerID.take(8)}...)")
+        return true
+    }
+
+    /**
+     * Track relay ACK packets (0x35) observed in mesh.
+     */
+    fun handleRelayAck(ack: SolanaRelayAck, fromPeerID: String): Boolean {
+        onAckObserved?.invoke(ack)
+        Log.d(TAG, "Observed relay ack for ${ack.requestId.take(8)}... type=${ack.ackType} from=${fromPeerID.take(8)}...")
         return true
     }
 
@@ -215,13 +281,14 @@ class SolanaRelayHandler @Inject constructor(
      * Updates the local transaction status in Room DB.
      */
     fun handleRelayReceipt(receipt: SolanaRelayReceipt): Boolean {
-        val pending = pendingRequests.remove(receipt.requestId) ?: return false
+        val trackedAt = pendingRequests[receipt.requestId] ?: return false
 
         val statusStr = when (receipt.status) {
             RelayReceiptStatus.BROADCAST -> "broadcast"
             RelayReceiptStatus.CONFIRMED -> "confirmed"
             else -> "failed"
         }
+        val isRetryableFailure = receipt.status == RelayReceiptStatus.FAILED && isRetryableRelayError(receipt.errorMessage)
 
         // Update the transaction status in Room DB
         scope.launch {
@@ -238,8 +305,7 @@ class SolanaRelayHandler @Inject constructor(
                     RelayReceiptStatus.FAILED -> {
                         // If the failure is due to relay peer conditions (not a Solana error),
                         // revert to PENDING so another peer can try relaying it
-                        val isRetryable = isRetryableRelayError(receipt.errorMessage)
-                        if (isRetryable) {
+                        if (isRetryableFailure) {
                             transactionDao.updateStatus(receipt.requestId, TransactionStatus.PENDING.value)
                             Log.d(TAG, "Relay failed (retryable: ${receipt.errorMessage}), tx ${receipt.requestId} reverted to PENDING")
                         } else {
@@ -253,8 +319,16 @@ class SolanaRelayHandler @Inject constructor(
             }
         }
 
+        if (isRetryableFailure) {
+            // Keep request tracked for additional relay attempts and subsequent success receipts.
+            pendingRequests[receipt.requestId] = trackedAt
+        } else {
+            pendingRequests.remove(receipt.requestId)
+            relayClaims.remove(receipt.requestId)
+        }
+
         if (receipt.status == RelayReceiptStatus.FAILED) {
-            val retryNote = if (isRetryableRelayError(receipt.errorMessage)) " (will retry with next peer)" else ""
+            val retryNote = if (isRetryableFailure) " (will retry with next peer)" else ""
             val errorSuffix = if (receipt.errorMessage.isNotEmpty()) ": ${receipt.errorMessage}" else ""
             onRelayEvent?.invoke("relay $statusStr for ${receipt.requestId.take(8)}...$errorSuffix$retryNote")
         } else {
@@ -288,6 +362,16 @@ class SolanaRelayHandler @Inject constructor(
     private fun sendReceipt(requestId: String, status: Byte, txSignature: String, errorMessage: String) {
         val receipt = SolanaRelayReceipt(requestId, status, txSignature, errorMessage)
         onSendRelayReceipt?.invoke(receipt)
+    }
+
+    private fun sendAck(requestId: String, type: Byte, localPeerID: String) {
+        onSendRelayAck?.invoke(
+            SolanaRelayAck(
+                requestId = requestId,
+                ackType = type,
+                peerId = localPeerID
+            )
+        )
     }
 
     private fun checkRateLimit(peerID: String): Boolean {
@@ -326,6 +410,7 @@ class SolanaRelayHandler @Inject constructor(
         pendingRequests.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         processedRelays.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         processedIntents.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
+        relayClaims.entries.removeAll { it.value.expiresAtMs <= now }
     }
 
     fun shutdown() {

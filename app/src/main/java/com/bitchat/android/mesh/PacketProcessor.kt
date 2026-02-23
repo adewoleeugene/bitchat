@@ -152,6 +152,8 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.SOLANA_TX_RECEIPT -> handleSolanaTxReceipt(routed)
             MessageType.SOLANA_TX_INTENT -> handleSolanaIntentRequest(routed)
             MessageType.SOLANA_BLOCKHASH_RESPONSE -> handleSolanaBlockhashResponse(routed)
+            MessageType.SOLANA_TX_CLAIM -> handleSolanaRelayClaim(routed)
+            MessageType.SOLANA_TX_ACK -> handleSolanaRelayAck(routed)
             MessageType.FEED_POST -> handleFeedPost(routed)
             MessageType.FEED_REACTION -> handleFeedReaction(routed)
             MessageType.FEED_REPLY -> handleFeedReply(routed)
@@ -289,6 +291,24 @@ class PacketProcessor(private val myPeerID: String) {
     }
 
     /**
+     * Handle Solana relay claim (0x34)
+     */
+    private suspend fun handleSolanaRelayClaim(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_TX_CLAIM from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaRelayClaim(routed)
+    }
+
+    /**
+     * Handle Solana relay ACK (0x35)
+     */
+    private suspend fun handleSolanaRelayAck(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_TX_ACK from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaRelayAck(routed)
+    }
+
+    /**
      * Handle feed post (0x40)
      */
     private suspend fun handleFeedPost(routed: RoutedPacket) {
@@ -392,6 +412,8 @@ interface PacketProcessorDelegate {
     fun handleSolanaTxReceipt(routed: RoutedPacket)
     fun handleSolanaIntentRequest(routed: RoutedPacket)
     fun handleSolanaBlockhashResponse(routed: RoutedPacket)
+    fun handleSolanaRelayClaim(routed: RoutedPacket)
+    fun handleSolanaRelayAck(routed: RoutedPacket)
     fun handleFeedPost(routed: RoutedPacket)
     fun handleFeedReaction(routed: RoutedPacket)
     fun handleFeedReply(routed: RoutedPacket)
