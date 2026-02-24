@@ -243,13 +243,83 @@ class ChatViewModel(
             )
             commandProcessor.walletService = solanaEntryPoint.solanaWalletService()
             commandProcessor.paymentManager = solanaEntryPoint.solanaPaymentManager()
-            commandProcessor.tokenGateService = solanaEntryPoint.tokenGateService()
+            val tokenGateService = solanaEntryPoint.tokenGateService()
+            commandProcessor.tokenGateService = tokenGateService
 
             // Wire up token gate service to channel manager for join validation
-            channelManager.tokenGateService = solanaEntryPoint.tokenGateService()
+            channelManager.tokenGateService = tokenGateService
 
+            val walletService = solanaEntryPoint.solanaWalletService()
             // Set local Solana address on mesh service for identity announcements
-            meshService.solanaAddress = solanaEntryPoint.solanaWalletService().getPublicKeyBase58()
+            meshService.solanaAddress = walletService.getPublicKeyBase58()
+            // Build automatic wallet-link proof for announcements (username <-> wallet binding)
+            meshService.buildSolanaLinkProof = { nickname, signingPublicKey ->
+                try {
+                    val address = walletService.getPublicKeyBase58()
+                    if (address.isNullOrBlank()) {
+                        null
+                    } else {
+                        val message = com.bitchat.android.solana.SolanaIdentityProofUtil.buildLinkMessage(
+                            nickname = nickname,
+                            solanaAddress = address,
+                            signingPublicKey = signingPublicKey
+                        )
+                        val signature = walletService.sign(message)
+                        if (signature == null) null else Pair(address, signature)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            meshService.buildSolanaOwnershipProofs = { nickname, signingPublicKey, solanaAddress ->
+                try {
+                    val now = System.currentTimeMillis()
+                    val proofs = mutableListOf<com.bitchat.android.model.SolanaOwnershipProof>()
+                    for (config in tokenGateService.getAllTokenGates()) {
+                        if (proofs.size >= 12) break
+                        val claimType = when (config.gateType) {
+                            com.bitchat.android.data.local.entities.TokenGateType.SPL_TOKEN ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.SPL_TOKEN
+                            com.bitchat.android.data.local.entities.TokenGateType.NFT_SPECIFIC ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_MINT
+                            com.bitchat.android.data.local.entities.TokenGateType.NFT_COLLECTION ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_COLLECTION
+                            else -> null
+                        } ?: continue
+
+                        val validation = tokenGateService
+                            .validateEligibility(
+                                channelKey = config.channelKey,
+                                mode = com.bitchat.android.solana.ValidationMode.PREFER_CACHE_THEN_ONLINE
+                            )
+                            .getOrNull() ?: continue
+
+                        if (validation.decision != com.bitchat.android.solana.GateDecision.ALLOW) continue
+
+                        val expiresAt = validation.validUntil.coerceAtLeast(now + 60_000L)
+                        val unsignedProof = com.bitchat.android.model.SolanaOwnershipProof(
+                            claimType = claimType,
+                            targetAddress = config.tokenMintAddress,
+                            minRequired = config.minBalance,
+                            observedBalance = validation.userBalance,
+                            validatedAtMs = now,
+                            expiresAtMs = expiresAt,
+                            signature = ByteArray(64)
+                        )
+                        val message = com.bitchat.android.solana.SolanaOwnershipProofUtil.buildProofMessage(
+                            nickname = nickname,
+                            solanaAddress = solanaAddress,
+                            signingPublicKey = signingPublicKey,
+                            proof = unsignedProof
+                        )
+                        val signature = walletService.sign(message) ?: continue
+                        proofs.add(unsignedProof.copy(signature = signature))
+                    }
+                    proofs
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
 
             // Wire up Solana relay handler for mesh transaction relay
             val relayHandler = solanaEntryPoint.solanaRelayHandler()
@@ -1046,6 +1116,15 @@ class ChatViewModel(
     }
 
     /**
+     * Get a peer's verified Solana ownership proofs by nickname.
+     */
+    fun getPeerOwnershipProofs(nickname: String): List<com.bitchat.android.model.SolanaOwnershipProof> {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return emptyList()
+        return meshService.getPeerInfo(peerID)?.solanaOwnershipProofs ?: emptyList()
+    }
+
+    /**
      * Get all peers that have a known Solana address.
      * Returns list of (nickname, solanaAddress) pairs.
      */
@@ -1094,11 +1173,72 @@ class ChatViewModel(
         }
     }
 
+    fun inspectNotarization(message: BitchatMessage) {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            val proof = service.getProof(message.id, refreshMetadata = true)
+            if (proof == null) {
+                messageManager.addSystemMessage("notarization: no record for this message")
+                return@launch
+            }
+            val details = when (proof.status) {
+                com.bitchat.android.data.local.entities.NotarizationStatus.CONFIRMED -> {
+                    val tx = proof.txSignature?.take(12)?.plus("...") ?: "n/a"
+                    val slot = proof.slot?.toString() ?: "n/a"
+                    val blockTime = proof.blockTime?.let { java.util.Date(it * 1000).toString() } ?: "n/a"
+                    "notarization confirmed\nhash: ${proof.messageHash.take(16)}...\ntx: $tx\nslot: $slot\nblock time: $blockTime"
+                }
+                com.bitchat.android.data.local.entities.NotarizationStatus.BROADCASTING ->
+                    "notarization pending confirmation\nhash: ${proof.messageHash.take(16)}..."
+                com.bitchat.android.data.local.entities.NotarizationStatus.QUEUED ->
+                    "notarization queued (waiting for connectivity)\nhash: ${proof.messageHash.take(16)}..."
+                com.bitchat.android.data.local.entities.NotarizationStatus.FAILED ->
+                    "notarization failed: ${proof.errorMessage ?: "unknown error"}"
+                else ->
+                    "notarization status: ${proof.status.lowercase()}"
+            }
+            messageManager.addSystemMessage(details)
+        }
+    }
+
+    fun processNotarizationQueueNow() {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            val result = service.processBatch()
+            result.onSuccess { count ->
+                messageManager.addSystemMessage(
+                    if (count > 0) "processed notarization batch ($count messages)"
+                    else "no queued notarizations to process"
+                )
+            }
+            result.onFailure { error ->
+                messageManager.addSystemMessage("notarization processing failed: ${error.message}")
+            }
+        }
+    }
+
+    fun retryFailedNotarizations() {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            service.retryFailed()
+            messageManager.addSystemMessage("retrying failed notarizations")
+        }
+    }
+
     /**
      * Check if a message has been notarized and get the proof.
      */
     suspend fun getNotarizationProof(messageId: String): com.bitchat.android.data.local.entities.MessageNotarizationEntity? {
-        return notarizationService?.getProof(messageId)
+        return notarizationService?.getProof(messageId, refreshMetadata = true)
     }
 
     // MARK: - Social Feed

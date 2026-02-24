@@ -1,6 +1,7 @@
 package com.bitchat.android.solana
 
 import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,8 @@ class SolanaRpcService @Inject constructor(
     private var lastBlockhash: BlockhashInfo? = null
     @Volatile
     private var lastBlockhashTimestamp: Long = 0L
+    @Volatile
+    private var cachedNftApiSupport: Boolean? = null
 
     companion object {
         // Solana blockhashes are valid for ~60-90 seconds; cache for up to 60s
@@ -132,6 +135,26 @@ class SolanaRpcService @Inject constructor(
     }
 
     /**
+     * Fetch transaction metadata for a signature.
+     * Returns slot and blockTime (if available).
+     */
+    suspend fun getTransactionInfo(signature: String): Result<TransactionInfo> = withContext(Dispatchers.IO) {
+        try {
+            val response = rpcCall(
+                "getTransaction",
+                """["$signature", {"encoding":"json","commitment":"confirmed","maxSupportedTransactionVersion":0}]"""
+            )
+            val result = response.getAsJsonObject("result")
+                ?: return@withContext Result.success(TransactionInfo(slot = null, blockTime = null))
+            val slot = result.get("slot")?.asLong
+            val blockTime = result.get("blockTime")?.asLong
+            Result.success(TransactionInfo(slot = slot, blockTime = blockTime))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get SPL token accounts owned by a wallet for a specific mint.
      * Returns the token balance (in smallest unit) or 0 if no account exists.
      */
@@ -155,6 +178,205 @@ class SolanaRpcService @Inject constructor(
             } else {
                 Result.success(0L)
             }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Check if an owner holds any NFT from a specific collection mint.
+     * Strategy:
+     * 1) Fast path via DAS getAssetsByOwner.
+     * 2) Fallback: standard getTokenAccountsByOwner (Token Program) to enumerate owned NFT-like mints,
+     *    then DAS getAsset per mint to inspect collection grouping.
+     */
+    suspend fun hasNftFromCollection(ownerPublicKey: String, collectionMintAddress: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedCollection = collectionMintAddress.trim()
+
+            // 1) DAS fast path
+            val dasOwnerResult = hasNftFromCollectionViaDasOwner(ownerPublicKey, normalizedCollection)
+            dasOwnerResult.onSuccess { found ->
+                if (found) return@withContext Result.success(true)
+            }
+
+            // If DAS owner call failed due unsupported method/provider, attempt fallback path.
+            val ownedNftLikeMints = getOwnedNftLikeMints(ownerPublicKey).getOrElse { error ->
+                return@withContext Result.failure<Boolean>(error)
+            }
+
+            if (ownedNftLikeMints.isEmpty()) {
+                return@withContext Result.success(false)
+            }
+
+            var sawAssetApiFailure = false
+            for (mint in ownedNftLikeMints) {
+                val collectionKeyResult = getAssetCollectionKey(mint)
+                if (collectionKeyResult.isFailure) {
+                    sawAssetApiFailure = true
+                    continue
+                }
+                val collectionKey = collectionKeyResult.getOrNull() ?: continue
+
+                if (collectionKey == normalizedCollection) {
+                    return@withContext Result.success(true)
+                }
+            }
+
+            if (sawAssetApiFailure) {
+                return@withContext Result.failure<Boolean>(
+                    SolanaRpcException(
+                        "RPC provider lacks required NFT APIs (DAS). Configure an RPC endpoint with DAS support for collection gates."
+                    )
+                )
+            }
+
+            Result.success(false)
+        } catch (e: Exception) {
+            Result.failure<Boolean>(e)
+        }
+    }
+
+    /**
+     * Check whether the configured RPC appears to support the NFT APIs required
+     * for collection gates. Cached after first successful probe.
+     */
+    suspend fun supportsNftCollectionGates(): Boolean = withContext(Dispatchers.IO) {
+        cachedNftApiSupport?.let { return@withContext it }
+        val supported = try {
+            // Probe DAS getAsset existence with a known public key string.
+            // "Asset not found" still means method exists; "method not found" means unsupported.
+            val response = rpcCall("getAsset", """{"id":"11111111111111111111111111111111"}""")
+            if (!response.has("error")) {
+                true
+            } else {
+                val msg = response.getAsJsonObject("error").get("message")?.asString?.lowercase() ?: ""
+                !(msg.contains("method not found") || msg.contains("unsupported"))
+            }
+        } catch (_: Exception) {
+            false
+        }
+        cachedNftApiSupport = supported
+        supported
+    }
+
+    private fun hasNftFromCollectionViaDasOwner(
+        ownerPublicKey: String,
+        normalizedCollection: String
+    ): Result<Boolean> {
+        return try {
+            var page = 1
+            val limit = 100
+            var hasMatch = false
+
+            while (!hasMatch) {
+                val params = """
+                    {"ownerAddress":"$ownerPublicKey","page":$page,"limit":$limit}
+                """.trimIndent()
+                val response = rpcCall("getAssetsByOwner", params)
+
+                if (response.has("error")) {
+                    val message = response.getAsJsonObject("error").get("message")?.asString
+                        ?: "DAS getAssetsByOwner failed"
+                    return Result.failure(SolanaRpcException(message))
+                }
+
+                val result = response.getAsJsonObject("result")
+                    ?: return Result.failure(SolanaRpcException("Missing result in DAS response"))
+                val items = result.getAsJsonArray("items") ?: JsonArray()
+
+                if (items.size() == 0) break
+
+                for (itemElement in items) {
+                    if (!itemElement.isJsonObject) continue
+                    val item = itemElement.asJsonObject
+                    val grouping = item.getAsJsonArray("grouping") ?: continue
+
+                    val matches = grouping.any { groupEl ->
+                        if (!groupEl.isJsonObject) return@any false
+                        val group = groupEl.asJsonObject
+                        val key = group.get("group_key")?.asString ?: return@any false
+                        val value = group.get("group_value")?.asString ?: return@any false
+                        key == "collection" && value == normalizedCollection
+                    }
+                    if (matches) {
+                        hasMatch = true
+                        break
+                    }
+                }
+
+                val total = result.get("total")?.asInt ?: 0
+                if (items.size() < limit || page * limit >= total) break
+                page++
+            }
+
+            Result.success(hasMatch)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun getOwnedNftLikeMints(ownerPublicKey: String): Result<List<String>> {
+        return try {
+            val mints = LinkedHashSet<String>()
+
+            val tokenProgramIds = listOf(
+                // SPL Token Program
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                // Token-2022 Program
+                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+            )
+
+            for (programId in tokenProgramIds) {
+                val response = rpcCall(
+                    "getTokenAccountsByOwner",
+                    """["$ownerPublicKey", {"programId":"$programId"}, {"encoding":"jsonParsed"}]"""
+                )
+                val result = response.getAsJsonObject("result") ?: continue
+                val accounts = result.getAsJsonArray("value") ?: continue
+
+                for (accountEl in accounts) {
+                    if (!accountEl.isJsonObject) continue
+                    val info = accountEl.asJsonObject
+                        .getAsJsonObject("account")
+                        ?.getAsJsonObject("data")
+                        ?.getAsJsonObject("parsed")
+                        ?.getAsJsonObject("info")
+                        ?: continue
+                    val mint = info.get("mint")?.asString ?: continue
+                    val tokenAmount = info.getAsJsonObject("tokenAmount") ?: continue
+                    val amount = tokenAmount.get("amount")?.asString?.toLongOrNull() ?: 0L
+                    val decimals = tokenAmount.get("decimals")?.asInt ?: 0
+
+                    // NFT-like heuristic for token-account fallback: non-zero balance and 0 decimals.
+                    if (amount > 0 && decimals == 0) {
+                        mints.add(mint)
+                    }
+                }
+            }
+
+            Result.success(mints.toList())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun getAssetCollectionKey(mintAddress: String): Result<String?> {
+        return try {
+            val response = rpcCall("getAsset", """{"id":"$mintAddress"}""")
+            if (response.has("error")) {
+                val message = response.getAsJsonObject("error").get("message")?.asString
+                    ?: "DAS getAsset failed"
+                return Result.failure(SolanaRpcException(message))
+            }
+
+            val result = response.getAsJsonObject("result") ?: return Result.success(null)
+            val grouping = result.getAsJsonArray("grouping") ?: JsonArray()
+            val collectionKey = grouping.firstOrNull { el ->
+                el.isJsonObject && el.asJsonObject.get("group_key")?.asString == "collection"
+            }?.asJsonObject?.get("group_value")?.asString
+
+            Result.success(collectionKey)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -217,6 +439,11 @@ class SolanaRpcService @Inject constructor(
 data class BlockhashInfo(
     val blockhash: String,
     val lastValidBlockHeight: Long
+)
+
+data class TransactionInfo(
+    val slot: Long?,
+    val blockTime: Long?
 )
 
 class SolanaRpcException(message: String) : Exception(message)

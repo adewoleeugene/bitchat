@@ -1,6 +1,7 @@
 package com.bitchat.android.mesh
 
 import android.util.Log
+import com.bitchat.android.model.SolanaOwnershipProof
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -18,6 +19,7 @@ data class PeerInfo(
     var signingPublicKey: ByteArray?,      // Ed25519 public key for verification
     var isVerifiedNickname: Boolean,       // Verification status flag
     var solanaAddress: String? = null,     // Solana wallet address (Base58) from ANNOUNCE
+    var solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(), // Verified ownership claims from ANNOUNCE
     var lastSeen: Long  // Using Long instead of Date for simplicity
 ) {
     override fun equals(other: Any?): Boolean {
@@ -40,6 +42,7 @@ data class PeerInfo(
         } else if (other.signingPublicKey != null) return false
         if (isVerifiedNickname != other.isVerifiedNickname) return false
         if (solanaAddress != other.solanaAddress) return false
+        if (solanaOwnershipProofs != other.solanaOwnershipProofs) return false
         if (lastSeen != other.lastSeen) return false
 
         return true
@@ -54,6 +57,7 @@ data class PeerInfo(
         result = 31 * result + (signingPublicKey?.contentHashCode() ?: 0)
         result = 31 * result + isVerifiedNickname.hashCode()
         result = 31 * result + (solanaAddress?.hashCode() ?: 0)
+        result = 31 * result + solanaOwnershipProofs.hashCode()
         result = 31 * result + lastSeen.hashCode()
         return result
     }
@@ -108,7 +112,8 @@ class PeerManager {
         noisePublicKey: ByteArray,
         signingPublicKey: ByteArray,
         isVerified: Boolean,
-        solanaAddress: String? = null
+        solanaAddress: String? = null,
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
     ): Boolean {
         if (peerID == "unknown") return false
 
@@ -126,6 +131,7 @@ class PeerManager {
             signingPublicKey = signingPublicKey,
             isVerifiedNickname = isVerified,
             solanaAddress = solanaAddress ?: existingPeer?.solanaAddress,
+            solanaOwnershipProofs = if (solanaOwnershipProofs.isNotEmpty()) solanaOwnershipProofs else (existingPeer?.solanaOwnershipProofs ?: emptyList()),
             lastSeen = now
         )
         

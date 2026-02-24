@@ -41,12 +41,15 @@ class SolanaPaymentManager @Inject constructor(
         private const val RELAY_HARD_TIMEOUT_MS = 180_000L
         private const val RELAY_MONITOR_POLL_MS = 2_000L
         private const val RECOVERY_TICK_MS = 20_000L
+        private const val CONFIRMATION_POLL_MS = 5_000L
+        private const val MAX_CONFIRMATION_POLLS = 24
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var broadcastJob: Job? = null
     private var recoveryJob: Job? = null
     private val relayMonitorJobs = ConcurrentHashMap<String, Job>()
+    private val confirmationJobs = ConcurrentHashMap<String, Job>()
     private val relayClaimTimestamps = ConcurrentHashMap<String, Long>()
     private val relayAckTimestamps = ConcurrentHashMap<String, Long>()
 
@@ -90,7 +93,7 @@ class SolanaPaymentManager @Inject constructor(
                 senderPublicKey = senderPublicKey,
                 recipientPublicKey = recipientPublicKey,
                 amountLamports = amountLamports,
-                status = TransactionStatus.PENDING.value,
+                status = TransactionStatus.QUEUED.value,
                 createdAt = now,
                 ttlExpiresAt = now + TTL_MILLIS
             )
@@ -188,6 +191,7 @@ class SolanaPaymentManager @Inject constructor(
         recoveryJob = scope.launch {
             while (isActive) {
                 delay(RECOVERY_TICK_MS)
+                reconcileBroadcastingConfirmations()
                 tryBroadcastPending()
             }
         }
@@ -249,16 +253,15 @@ class SolanaPaymentManager @Inject constructor(
             Log.d(TAG, "Broadcasting tx ${tx.id}: ${tx.amountLamports} lamports to ${tx.recipientPublicKey}")
             val sendResult = rpcService.sendTransaction(signedTxBase64)
             sendResult.onSuccess { signature ->
-                transactionDao.updateStatus(tx.id, TransactionStatus.CONFIRMED.value, signature)
-                Log.d(TAG, "Transaction ${tx.id} sent! signature: $signature")
-
-                // Update sender's balance cache
-                walletService.refreshBalance()
+                transactionDao.markBroadcastObserved(tx.id, signature)
+                Log.d(TAG, "Transaction ${tx.id} broadcasted. waiting confirmation: $signature")
+                safeStatusEvent("payment broadcasted (${tx.id.take(8)}...) waiting confirmation...")
+                startConfirmationMonitor(tx.id, signature, source = "direct-rpc")
             }.onFailure { error ->
                 val errorMsg = error.message ?: "Unknown RPC error"
                 if (errorMsg.contains("Blockhash not found") || errorMsg.contains("expired")) {
                     // Blockhash expired, retry with fresh one
-                    transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+                    transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
                     Log.w(TAG, "Blockhash expired for tx ${tx.id}, will retry")
                 } else if (errorMsg.contains("timeout") || errorMsg.contains("Unable to resolve host") || errorMsg.contains("connect")) {
                     // Network error — try mesh relay
@@ -303,7 +306,7 @@ class SolanaPaymentManager @Inject constructor(
 
         val relayCallback = onRequestMeshRelay
         if (relayCallback == null) {
-            transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+            transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
             Log.w(TAG, ">>> BLOCKED: No mesh relay callback (onRequestMeshRelay=null) for tx ${tx.id}, keeping as pending")
             safeStatusEvent("mesh relay not available — payment saved, will retry")
             return
@@ -398,7 +401,7 @@ class SolanaPaymentManager @Inject constructor(
                 val hasFreshClaim = claimAt != null && (now - claimAt) <= RELAY_CLAIM_STALE_MS
 
                 if ((now - startedAt) > RELAY_HARD_TIMEOUT_MS) {
-                    transactionDao.updateStatus(request.requestId, TransactionStatus.PENDING.value)
+                    transactionDao.updateStatus(request.requestId, TransactionStatus.QUEUED.value)
                     safeStatusEvent("relay timed out for ${request.requestId.take(8)}... queued for retry")
                     break
                 }
@@ -422,6 +425,52 @@ class SolanaPaymentManager @Inject constructor(
         }
     }
 
+    private suspend fun reconcileBroadcastingConfirmations() {
+        try {
+            if (!hasInternetConnectivity()) return
+            val broadcasting = transactionDao.getBroadcastingWithSignature()
+            for (tx in broadcasting) {
+                val signature = tx.txSignature ?: continue
+                startConfirmationMonitor(tx.id, signature, source = "recovery")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to reconcile broadcasting confirmations: ${e.message}")
+        }
+    }
+
+    private fun startConfirmationMonitor(txId: String, signature: String, source: String) {
+        val existing = confirmationJobs[txId]
+        if (existing?.isActive == true) return
+
+        confirmationJobs[txId] = scope.launch {
+            try {
+                repeat(MAX_CONFIRMATION_POLLS) { _ ->
+                    delay(CONFIRMATION_POLL_MS)
+                    val tx = transactionDao.getTransaction(txId) ?: return@launch
+                    if (tx.status != TransactionStatus.BROADCASTING.value) return@launch
+
+                    if (!hasInternetConnectivity()) return@repeat
+                    val confirmed = rpcService.confirmTransaction(signature).getOrElse { false }
+                    if (confirmed) {
+                        transactionDao.markConfirmed(txId, signature)
+                        safeStatusEvent("payment confirmed (${txId.take(8)}...)")
+                        try {
+                            walletService.refreshBalance()
+                        } catch (_: Exception) {
+                        }
+                        Log.d(TAG, "Transaction $txId confirmed on-chain via $source")
+                        return@launch
+                    }
+                }
+                Log.d(TAG, "Confirmation monitor timed out for $txId (kept as BROADCASTING)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Confirmation monitor failed for $txId: ${e.message}")
+            } finally {
+                confirmationJobs.remove(txId)
+            }
+        }
+    }
+
     /**
      * 2-step handshake step 1: Send unsigned transfer intent through mesh
      * to request a fresh blockhash from an online peer.
@@ -430,7 +479,7 @@ class SolanaPaymentManager @Inject constructor(
         Log.d(TAG, ">>> requestBlockhashViaMesh for tx ${tx.id}")
         val intentCallback = onRequestBlockhashIntent
         if (intentCallback == null) {
-            transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+            transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
             Log.w(TAG, ">>> BLOCKED: No mesh intent callback (onRequestBlockhashIntent=null) for tx ${tx.id}, keeping as pending")
             return
         }
@@ -475,17 +524,17 @@ class SolanaPaymentManager @Inject constructor(
             }
 
             if (response.errorMessage.isNotEmpty()) {
-                // Move back to PENDING so retry loop can request another gateway quickly.
-                Log.w(TAG, "Blockhash request failed: ${response.errorMessage}, reverting tx ${tx.id} to PENDING")
+                // Move back to QUEUED so retry loop can request another gateway quickly.
+                Log.w(TAG, "Blockhash request failed: ${response.errorMessage}, reverting tx ${tx.id} to QUEUED")
                 safeStatusEvent("blockhash request failed, retrying with next mesh peer...")
-                transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+                transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
                 return@withContext
             }
 
             if (response.blockhash.isEmpty()) {
-                Log.w(TAG, "Empty blockhash in response for tx ${tx.id}, reverting to PENDING")
+                Log.w(TAG, "Empty blockhash in response for tx ${tx.id}, reverting to QUEUED")
                 safeStatusEvent("received empty blockhash, retrying...")
-                transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+                transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
                 return@withContext
             }
 
@@ -493,7 +542,7 @@ class SolanaPaymentManager @Inject constructor(
             safeStatusEvent("received blockhash from mesh peer, signing tx...")
             val relayCallback = onRequestMeshRelay
             if (relayCallback == null) {
-                transactionDao.updateStatus(tx.id, TransactionStatus.PENDING.value)
+                transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
                 Log.w(TAG, "No mesh relay callback for tx ${tx.id} after receiving blockhash")
                 return@withContext
             }
@@ -671,6 +720,8 @@ class SolanaPaymentManager @Inject constructor(
         recoveryJob?.cancel()
         relayMonitorJobs.values.forEach { it.cancel() }
         relayMonitorJobs.clear()
+        confirmationJobs.values.forEach { it.cancel() }
+        confirmationJobs.clear()
         scope.cancel()
     }
 }

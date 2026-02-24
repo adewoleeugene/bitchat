@@ -53,9 +53,11 @@ fun WalletScreen(
 ) {
     val walletState by viewModel.walletState.collectAsState()
     val mnemonicPhrase by viewModel.mnemonicPhrase.collectAsState()
+    val privateKeyBase58 by viewModel.privateKeyBase58.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val showRestoreDialog by viewModel.showRestoreDialog.collectAsState()
+    val showImportPrivateKeyDialog by viewModel.showImportPrivateKeyDialog.collectAsState()
     val showSendScreen by viewModel.showSendDialog.collectAsState()
     val isSending by viewModel.isSending.collectAsState()
     val sendSuccess by viewModel.sendSuccess.collectAsState()
@@ -141,7 +143,10 @@ fun WalletScreen(
                         isRefreshing = isRefreshing,
                         onRefresh = { viewModel.refreshBalance() },
                         onDelete = { viewModel.deleteWallet() },
-                        onExportKey = { viewModel.showMnemonicBackup() },
+                        onCreateMnemonicWallet = { viewModel.createWallet() },
+                        onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
+                        onExportPrivateKey = { viewModel.showPrivateKeyExport() },
+                        onExportRecoveryPhrase = { viewModel.showMnemonicBackup() },
                         onSend = { viewModel.showSendDialog() },
                         onTransactionHistory = { viewModel.showTransactionHistory() }
                     )
@@ -155,6 +160,14 @@ fun WalletScreen(
         MnemonicBackupDialog(
             mnemonic = mnemonicPhrase!!,
             onDismiss = { viewModel.dismissMnemonic() }
+        )
+    }
+
+    // Private key export dialog
+    if (privateKeyBase58 != null) {
+        PrivateKeyExportDialog(
+            privateKeyBase58 = privateKeyBase58!!,
+            onDismiss = { viewModel.dismissPrivateKeyExport() }
         )
     }
 
@@ -197,6 +210,13 @@ fun WalletScreen(
         RestoreWalletDialog(
             onRestore = { phrase -> viewModel.restoreWallet(phrase) },
             onDismiss = { viewModel.dismissRestoreDialog() }
+        )
+    }
+
+    if (showImportPrivateKeyDialog) {
+        ImportPrivateKeyDialog(
+            onImport = { key -> viewModel.importPrivateKey(key) },
+            onDismiss = { viewModel.dismissImportPrivateKeyDialog() }
         )
     }
 }
@@ -262,13 +282,17 @@ private fun WalletReadyContent(
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
-    onExportKey: () -> Unit,
+    onCreateMnemonicWallet: () -> Unit,
+    onImportPrivateKey: () -> Unit,
+    onExportPrivateKey: () -> Unit,
+    onExportRecoveryPhrase: () -> Unit,
     onSend: () -> Unit = {},
     onTransactionHistory: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showQr by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showCreateMnemonicConfirm by remember { mutableStateOf(false) }
     var autoPaymentsEnabled by remember { mutableStateOf(true) }
 
     Spacer(modifier = Modifier.height(24.dp))
@@ -413,9 +437,51 @@ private fun WalletReadyContent(
     )
 
     WalletMenuItem(
+        title = "Create Mnemonic Wallet",
+        subtitle = "Replace with a new 24-word wallet",
+        onClick = { showCreateMnemonicConfirm = true },
+        trailing = {
+            Icon(
+                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                contentDescription = null,
+                tint = BitchatColors.TextDisabled,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    )
+
+    WalletMenuItem(
+        title = "Import Private Key",
+        subtitle = "Activate wallet from raw Base58 key",
+        onClick = onImportPrivateKey,
+        trailing = {
+            Icon(
+                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                contentDescription = null,
+                tint = BitchatColors.TextDisabled,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    )
+
+    WalletMenuItem(
         title = "Export Private Key",
-        subtitle = "Backup for recovery",
-        onClick = onExportKey,
+        subtitle = "Raw Base58 private key",
+        onClick = onExportPrivateKey,
+        trailing = {
+            Icon(
+                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                contentDescription = null,
+                tint = BitchatColors.TextDisabled,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    )
+
+    WalletMenuItem(
+        title = "Export Recovery Phrase",
+        subtitle = "Backup mnemonic phrase",
+        onClick = onExportRecoveryPhrase,
         trailing = {
             Icon(
                 painter = rememberPixelPainter(PixelIcons.ArrowRight),
@@ -461,6 +527,41 @@ private fun WalletReadyContent(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", fontFamily = CourierPrimeFamily)
+                }
+            }
+        )
+    }
+
+    if (showCreateMnemonicConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCreateMnemonicConfirm = false },
+            title = {
+                Text(
+                    "Replace Wallet?",
+                    fontFamily = CourierPrimeFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    "This creates a new mnemonic wallet and replaces the current active wallet. Back up existing secrets first.",
+                    fontFamily = CourierPrimeFamily,
+                    color = BitchatColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCreateMnemonicConfirm = false
+                        onCreateMnemonicWallet()
+                    }
+                ) {
+                    Text("Create", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateMnemonicConfirm = false }) {
                     Text("Cancel", fontFamily = CourierPrimeFamily)
                 }
             }
@@ -546,6 +647,109 @@ private fun QrCodeCard(address: String) {
             Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text("Copy Address", fontFamily = CourierPrimeFamily)
+        }
+    }
+}
+
+@Composable
+private fun PrivateKeyExportDialog(
+    privateKeyBase58: String,
+    onDismiss: () -> Unit
+) {
+    var revealed by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    Dialog(onDismissRequest = {}) {
+        Card(
+            shape = BitchatShapes.Card,
+            colors = CardDefaults.cardColors(containerColor = BitchatColors.BackgroundElevated),
+            border = BorderStroke(1.dp, BitchatColors.StatusError.copy(alpha = 0.4f))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Export Private Key",
+                    fontFamily = CourierPrimeFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = BitchatColors.TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Anyone with this key can spend your funds. Keep it offline and private.",
+                    fontFamily = CourierPrimeFamily,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = BitchatColors.StatusError
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (revealed) {
+                    Text(
+                        text = privateKeyBase58,
+                        fontFamily = CourierPrimeFamily,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BitchatColors.TextPrimary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(BitchatColors.SurfaceVariant, BitchatShapes.Large)
+                            .padding(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Solana Private Key (Base58)", privateKeyBase58))
+                            Toast.makeText(context, "Private key copied - clear clipboard soon!", Toast.LENGTH_LONG).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BitchatColors.ButtonGhostBg,
+                            contentColor = BitchatColors.TextPrimary
+                        ),
+                        shape = BitchatShapes.Button
+                    ) {
+                        Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Copy Private Key", fontFamily = CourierPrimeFamily)
+                    }
+                } else {
+                    Button(
+                        onClick = { revealed = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BitchatColors.ButtonGhostBg,
+                            contentColor = BitchatColors.TextPrimary
+                        ),
+                        shape = BitchatShapes.Button
+                    ) {
+                        Icon(painter = rememberPixelPainter(PixelIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Reveal Private Key", fontFamily = CourierPrimeFamily)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BitchatColors.SolanaAccent,
+                        contentColor = Color.White
+                    ),
+                    shape = BitchatShapes.Button
+                ) {
+                    Text("Close", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                }
+            }
         }
     }
 }
@@ -743,6 +947,66 @@ private fun RestoreWalletDialog(
     )
 }
 
+@Composable
+private fun ImportPrivateKeyDialog(
+    onImport: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var privateKey by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Import Private Key",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Paste raw Base58 private key (32-byte Ed25519 key):",
+                    fontFamily = CourierPrimeFamily,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = BitchatColors.TextSecondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = privateKey,
+                    onValueChange = { privateKey = it.trim() },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                    placeholder = {
+                        Text(
+                            "Base58 private key",
+                            fontFamily = CourierPrimeFamily,
+                            color = BitchatColors.TextDisabled
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = CourierPrimeFamily
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onImport(privateKey) },
+                enabled = privateKey.length >= 32
+            ) {
+                Text("Import", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
 private fun generateQrCode(content: String): Bitmap? {
     return try {
         val writer = QRCodeWriter()
@@ -854,14 +1118,14 @@ private fun TransactionRow(
         TransactionStatus.CONFIRMED -> BitchatColors.StatusSuccess
         TransactionStatus.FAILED -> BitchatColors.StatusError
         TransactionStatus.BROADCASTING -> BitchatColors.SolanaAccent
-        TransactionStatus.PENDING -> BitchatColors.TextSecondary
+        TransactionStatus.QUEUED -> BitchatColors.TextSecondary
         TransactionStatus.AWAITING_BLOCKHASH -> BitchatColors.SolanaAccent
     }
     val statusLabel = when (status) {
         TransactionStatus.CONFIRMED -> "Confirmed"
         TransactionStatus.FAILED -> "Failed"
         TransactionStatus.BROADCASTING -> "Broadcasting"
-        TransactionStatus.PENDING -> "Pending"
+        TransactionStatus.QUEUED -> "Queued"
         TransactionStatus.AWAITING_BLOCKHASH -> "Awaiting Blockhash"
     }
     val solAmount = tx.amountLamports.toDouble() / 1_000_000_000.0

@@ -5,8 +5,11 @@ import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
 import com.bitchat.android.model.IdentityAnnouncement
 import com.bitchat.android.model.RoutedPacket
+import com.bitchat.android.model.SolanaOwnershipProof
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
+import com.bitchat.android.solana.SolanaIdentityProofUtil
+import com.bitchat.android.solana.SolanaOwnershipProofUtil
 import com.bitchat.android.util.toHexString
 import kotlinx.coroutines.*
 import java.util.*
@@ -260,6 +263,52 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val nickname = announcement.nickname
         val noisePublicKey = announcement.noisePublicKey
         val signingPublicKey = announcement.signingPublicKey
+        val announcedSolana = announcement.solanaAddress
+        val announcedProof = announcement.solanaLinkProofSignature
+
+        val verifiedSolanaAddress: String? = if (!announcedSolana.isNullOrBlank()) {
+            if (announcedProof != null && SolanaIdentityProofUtil.verifyLinkProof(
+                    nickname = nickname,
+                    solanaAddress = announcedSolana,
+                    signingPublicKey = signingPublicKey,
+                    signature = announcedProof
+                )
+            ) {
+                announcedSolana
+            } else {
+                Log.w(TAG, "Ignoring unverified Solana mapping for $peerID (${nickname.take(16)})")
+                null
+            }
+        } else {
+            null
+        }
+
+        val verifiedOwnershipProofs: List<SolanaOwnershipProof> =
+            if (!verifiedSolanaAddress.isNullOrBlank() && announcement.solanaOwnershipProofs.isNotEmpty()) {
+                announcement.solanaOwnershipProofs
+                    .asSequence()
+                    .take(12) // Keep ANNOUNCE bounded and resilient against proof flooding.
+                    .filter { proof ->
+                        SolanaOwnershipProofUtil.verifyProof(
+                            nickname = nickname,
+                            solanaAddress = verifiedSolanaAddress,
+                            signingPublicKey = signingPublicKey,
+                            proof = proof
+                        )
+                    }
+                    .toList()
+            } else {
+                emptyList()
+            }
+
+        if (announcement.solanaOwnershipProofs.isNotEmpty() &&
+            verifiedOwnershipProofs.size != announcement.solanaOwnershipProofs.size
+        ) {
+            Log.w(
+                TAG,
+                "Dropped ${announcement.solanaOwnershipProofs.size - verifiedOwnershipProofs.size} invalid Solana ownership proofs from $peerID"
+            )
+        }
 
         // Update peer info with verification status through new method
         val isFirstAnnounce = delegate?.updatePeerInfo(
@@ -268,7 +317,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
             isVerified = true,
-            solanaAddress = announcement.solanaAddress
+            solanaAddress = verifiedSolanaAddress,
+            solanaOwnershipProofs = verifiedOwnershipProofs
         ) ?: false
 
         // Update peer ID binding with noise public key for identity management
@@ -584,7 +634,15 @@ interface MessageHandlerDelegate {
     fun getNetworkSize(): Int
     fun getMyNickname(): String?
     fun getPeerInfo(peerID: String): PeerInfo?
-    fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String? = null): Boolean
+    fun updatePeerInfo(
+        peerID: String,
+        nickname: String,
+        noisePublicKey: ByteArray,
+        signingPublicKey: ByteArray,
+        isVerified: Boolean,
+        solanaAddress: String? = null,
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
+    ): Boolean
     
     // Packet operations
     fun sendPacket(packet: BitchatPacket)

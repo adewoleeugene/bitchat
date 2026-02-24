@@ -13,6 +13,12 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+interface RelayRpcGateway {
+    suspend fun sendTransaction(signedTxBase64: String): Result<String>
+    suspend fun getLatestBlockhash(): Result<BlockhashInfo>
+    suspend fun confirmTransaction(signature: String): Result<Boolean>
+}
+
 /**
  * Handles Solana transaction relay over the Bluetooth mesh network.
  *
@@ -25,10 +31,28 @@ import javax.inject.Singleton
  * by default, and minimum battery threshold.
  */
 @Singleton
-class SolanaRelayHandler @Inject constructor(
-    private val rpcService: SolanaRpcService,
+class SolanaRelayHandler internal constructor(
+    private val rpcGateway: RelayRpcGateway,
     private val transactionDao: TransactionDao
 ) {
+    @Inject
+    constructor(
+        rpcService: SolanaRpcService,
+        transactionDao: TransactionDao
+    ) : this(
+        rpcGateway = object : RelayRpcGateway {
+            override suspend fun sendTransaction(signedTxBase64: String): Result<String> =
+                rpcService.sendTransaction(signedTxBase64)
+
+            override suspend fun getLatestBlockhash(): Result<BlockhashInfo> =
+                rpcService.getLatestBlockhash()
+
+            override suspend fun confirmTransaction(signature: String): Result<Boolean> =
+                rpcService.confirmTransaction(signature)
+        },
+        transactionDao = transactionDao
+    )
+
     companion object {
         private const val TAG = "SolanaRelayHandler"
         private const val MAX_REQUESTS_PER_HOUR = 20
@@ -36,6 +60,8 @@ class SolanaRelayHandler @Inject constructor(
         private const val REQUEST_EXPIRY_MS = 5 * 60 * 1000L // 5 minutes
         private const val CLAIM_TTL_MS = 90_000L
         private const val INTENT_DEDUP_WINDOW_MS = 20_000L
+        private const val CONFIRMATION_POLL_MS = 5_000L
+        private const val MAX_CONFIRMATION_POLLS = 24
     }
 
     private data class RelayClaimLock(
@@ -169,11 +195,14 @@ class SolanaRelayHandler @Inject constructor(
             try {
                 Log.d(TAG, "Broadcasting relayed transaction ${request.requestId}")
 
-                val result = rpcService.sendTransaction(request.signedTxBase64)
+                val result = rpcGateway.sendTransaction(request.signedTxBase64)
                 result.onSuccess { signature ->
                     Log.d(TAG, "Relay broadcast success: $signature")
                     sendReceipt(request.requestId, RelayReceiptStatus.BROADCAST, signature, "")
                     onRelayEvent?.invoke("relayed tx ${request.requestId.take(8)}... → ${signature.take(12)}...")
+                    scope.launch {
+                        confirmAndSendReceipt(request.requestId, signature)
+                    }
                 }.onFailure { error ->
                     Log.e(TAG, "Relay broadcast failed: ${error.message}")
                     sendReceipt(request.requestId, RelayReceiptStatus.FAILED, "", error.message ?: "RPC error")
@@ -262,7 +291,7 @@ class SolanaRelayHandler @Inject constructor(
         // Fetch fresh blockhash asynchronously
         scope.launch {
             try {
-                val blockhashResult = rpcService.getLatestBlockhash()
+                val blockhashResult = rpcGateway.getLatestBlockhash()
                 blockhashResult.onSuccess { info ->
                     Log.d(TAG, "Sending blockhash response for intent ${intent.intentId.take(8)}...")
                     processedIntents[intent.intentId] = System.currentTimeMillis()
@@ -308,20 +337,30 @@ class SolanaRelayHandler @Inject constructor(
         scope.launch {
             try {
                 when (receipt.status) {
-                    RelayReceiptStatus.BROADCAST, RelayReceiptStatus.CONFIRMED -> {
-                        transactionDao.updateStatus(
-                            receipt.requestId,
-                            TransactionStatus.CONFIRMED.value,
-                            receipt.txSignature
-                        )
+                    RelayReceiptStatus.BROADCAST -> {
+                        if (receipt.txSignature.isNotEmpty()) {
+                            transactionDao.markBroadcastObserved(receipt.requestId, receipt.txSignature)
+                            Log.d(TAG, "Updated tx ${receipt.requestId} status to BROADCASTING via mesh relay")
+                        } else {
+                            transactionDao.updateStatus(receipt.requestId, TransactionStatus.BROADCASTING.value)
+                            Log.d(TAG, "Updated tx ${receipt.requestId} status to BROADCASTING via mesh relay (no signature)")
+                        }
+                    }
+                    RelayReceiptStatus.CONFIRMED -> {
+                        val signature = receipt.txSignature
+                        if (signature.isNotEmpty()) {
+                            transactionDao.markConfirmed(receipt.requestId, signature)
+                        } else {
+                            transactionDao.updateStatus(receipt.requestId, TransactionStatus.CONFIRMED.value)
+                        }
                         Log.d(TAG, "Updated tx ${receipt.requestId} status to CONFIRMED via mesh relay")
                     }
                     RelayReceiptStatus.FAILED -> {
                         // If the failure is due to relay peer conditions (not a Solana error),
-                        // revert to PENDING so another peer can try relaying it
+                        // revert to QUEUED so another peer can try relaying it
                         if (isRetryableFailure) {
-                            transactionDao.updateStatus(receipt.requestId, TransactionStatus.PENDING.value)
-                            Log.d(TAG, "Relay failed (retryable: ${receipt.errorMessage}), tx ${receipt.requestId} reverted to PENDING")
+                            transactionDao.updateStatus(receipt.requestId, TransactionStatus.QUEUED.value)
+                            Log.d(TAG, "Relay failed (retryable: ${receipt.errorMessage}), tx ${receipt.requestId} reverted to QUEUED")
                         } else {
                             transactionDao.markFailed(receipt.requestId, receipt.errorMessage.ifEmpty { "Relay failed" })
                             Log.d(TAG, "Updated tx ${receipt.requestId} status to FAILED via mesh relay")
@@ -351,6 +390,23 @@ class SolanaRelayHandler @Inject constructor(
         }
 
         return true
+    }
+
+    private suspend fun confirmAndSendReceipt(requestId: String, signature: String) {
+        try {
+            repeat(MAX_CONFIRMATION_POLLS) {
+                delay(CONFIRMATION_POLL_MS)
+                val confirmed = rpcGateway.confirmTransaction(signature).getOrElse { false }
+                if (confirmed) {
+                    sendReceipt(requestId, RelayReceiptStatus.CONFIRMED, signature, "")
+                    onRelayEvent?.invoke("relay confirmed for ${requestId.take(8)}... (tx: ${signature.take(12)}...)")
+                    return
+                }
+            }
+            Log.d(TAG, "Relay confirmation poll timed out for ${requestId.take(8)}... (tx: ${signature.take(12)}...)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Relay confirmation poll failed for ${requestId.take(8)}...: ${e.message}")
+        }
     }
 
     /**

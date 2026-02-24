@@ -9,14 +9,13 @@ import com.bitchat.android.data.local.entities.WalletEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import net.i2p.crypto.eddsa.EdDSAPrivateKey
 import net.i2p.crypto.eddsa.EdDSAPublicKey
-import net.i2p.crypto.eddsa.KeyPairGenerator
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable
 import net.i2p.crypto.eddsa.spec.EdDSAPrivateKeySpec
 import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -38,6 +37,8 @@ class SolanaWalletService @Inject constructor(
         private const val KEY_MNEMONIC = "wallet_mnemonic"
         private const val KEY_PRIVATE_KEY = "wallet_private_key"
         private const val KEY_PUBLIC_KEY = "wallet_public_key"
+        private const val IDENTITY_PREFS_NAME = "bitchat_crypto"
+        private const val IDENTITY_ED25519_PRIVATE_KEY_PREF = "ed25519_signing_private_key"
         private const val LAMPORTS_PER_SOL = 1_000_000_000L
     }
 
@@ -70,6 +71,7 @@ class SolanaWalletService @Inject constructor(
      * Check if a wallet already exists.
      */
     fun hasWallet(): Boolean {
+        ensureWalletInitializedFromIdentity()
         return securePrefs.contains(KEY_PRIVATE_KEY)
     }
 
@@ -88,8 +90,8 @@ class SolanaWalletService @Inject constructor(
 
             // Derive Ed25519 keypair from seed (first 32 bytes as per Solana convention)
             val keyBytes = seed.copyOfRange(0, 32)
-            val keypair = deriveKeypair(keyBytes)
-            val publicKeyBase58 = encodeBase58(keypair.second)
+            val keypair = SolanaKeyDerivation.deriveKeypair(keyBytes)
+            val publicKeyBase58 = SolanaKeyDerivation.encodeBase58(keypair.second)
 
             // Store securely
             securePrefs.edit()
@@ -108,11 +110,11 @@ class SolanaWalletService @Inject constructor(
                     publicKey = publicKeyBase58,
                     createdAt = System.currentTimeMillis(),
                     isActive = true,
-                    label = "Main Wallet"
+                    label = "Mnemonic Wallet"
                 )
             )
 
-            Log.d(TAG, "Created new wallet: $publicKeyBase58")
+            Log.d(TAG, "Created new mnemonic wallet")
             Result.success(mnemonicPhrase)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create wallet: ${e.message}", e)
@@ -132,8 +134,8 @@ class SolanaWalletService @Inject constructor(
             // Derive seed and keypair
             val seed = mnemonicCode.toSeed()
             val keyBytes = seed.copyOfRange(0, 32)
-            val keypair = deriveKeypair(keyBytes)
-            val publicKeyBase58 = encodeBase58(keypair.second)
+            val keypair = SolanaKeyDerivation.deriveKeypair(keyBytes)
+            val publicKeyBase58 = SolanaKeyDerivation.encodeBase58(keypair.second)
 
             // Store securely
             securePrefs.edit()
@@ -152,11 +154,11 @@ class SolanaWalletService @Inject constructor(
                     publicKey = publicKeyBase58,
                     createdAt = System.currentTimeMillis(),
                     isActive = true,
-                    label = "Restored Wallet"
+                    label = "Imported Mnemonic Wallet"
                 )
             )
 
-            Log.d(TAG, "Restored wallet: $publicKeyBase58")
+            Log.d(TAG, "Restored mnemonic wallet")
             Result.success(publicKeyBase58)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore wallet: ${e.message}", e)
@@ -165,20 +167,64 @@ class SolanaWalletService @Inject constructor(
     }
 
     /**
+     * Restore wallet from a raw 32-byte Ed25519 private key encoded as Base58.
+     */
+    suspend fun restoreWalletFromPrivateKeyBase58(privateKeyBase58: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val privateKeyBytes = decodeBase58(privateKeyBase58.trim())
+            if (privateKeyBytes.size != 32) {
+                return@withContext Result.failure(IllegalArgumentException("Private key must decode to 32 bytes"))
+            }
+
+            val keypair = SolanaKeyDerivation.deriveKeypair(privateKeyBytes)
+            val publicKeyBase58 = SolanaKeyDerivation.encodeBase58(keypair.second)
+
+            securePrefs.edit()
+                .remove(KEY_MNEMONIC)
+                .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
+                .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .apply()
+
+            cacheKeypair(keypair.first)
+
+            walletDao.deactivateAll()
+            walletDao.insertWallet(
+                WalletEntity(
+                    publicKey = publicKeyBase58,
+                    createdAt = System.currentTimeMillis(),
+                    isActive = true,
+                    label = "Imported Private Key Wallet"
+                )
+            )
+
+            Log.d(TAG, "Restored wallet from raw private key")
+            Result.success(publicKeyBase58)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore private key wallet: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get the active wallet's public key (Base58 encoded).
      */
     fun getPublicKeyBase58(): String? {
+        ensureWalletInitializedFromIdentity()
         val pubKeyBase64 = securePrefs.getString(KEY_PUBLIC_KEY, null) ?: return null
         val pubKeyBytes = android.util.Base64.decode(pubKeyBase64, android.util.Base64.NO_WRAP)
-        return encodeBase58(pubKeyBytes)
+        ensureWalletMetadata(pubKeyBytes)
+        return SolanaKeyDerivation.encodeBase58(pubKeyBytes)
     }
 
     /**
      * Get the raw 32-byte public key.
      */
     fun getPublicKeyBytes(): ByteArray? {
+        ensureWalletInitializedFromIdentity()
         val pubKeyBase64 = securePrefs.getString(KEY_PUBLIC_KEY, null) ?: return null
-        return android.util.Base64.decode(pubKeyBase64, android.util.Base64.NO_WRAP)
+        val pubKeyBytes = android.util.Base64.decode(pubKeyBase64, android.util.Base64.NO_WRAP)
+        ensureWalletMetadata(pubKeyBytes)
+        return pubKeyBytes
     }
 
     /**
@@ -238,9 +284,20 @@ class SolanaWalletService @Inject constructor(
     }
 
     /**
+     * Get the raw private key as Base58 for explicit private-key backup.
+     */
+    fun getPrivateKeyBase58(): String? {
+        ensureWalletInitializedFromIdentity()
+        val privKeyBase64 = securePrefs.getString(KEY_PRIVATE_KEY, null) ?: return null
+        val privKeyBytes = android.util.Base64.decode(privKeyBase64, android.util.Base64.NO_WRAP)
+        return SolanaKeyDerivation.encodeBase58(privKeyBytes)
+    }
+
+    /**
      * Sign arbitrary data with the wallet's Ed25519 private key.
      */
     fun sign(data: ByteArray): ByteArray? {
+        ensureWalletInitializedFromIdentity()
         val privKey = getOrLoadPrivateKey() ?: return null
         return try {
             // Ensure EdDSA provider is registered
@@ -273,14 +330,6 @@ class SolanaWalletService @Inject constructor(
 
     // --- Internal helpers ---
 
-    private fun deriveKeypair(seedBytes: ByteArray): Pair<ByteArray, ByteArray> {
-        val privKeySpec = EdDSAPrivateKeySpec(seedBytes, ed25519Spec)
-        val privKey = EdDSAPrivateKey(privKeySpec)
-        val pubKeySpec = EdDSAPublicKeySpec(privKey.a, ed25519Spec)
-        val pubKey = EdDSAPublicKey(pubKeySpec)
-        return Pair(seedBytes, pubKey.abyte)
-    }
-
     private fun cacheKeypair(privateKeyBytes: ByteArray) {
         val privKeySpec = EdDSAPrivateKeySpec(privateKeyBytes, ed25519Spec)
         cachedPrivateKey = EdDSAPrivateKey(privKeySpec)
@@ -289,6 +338,7 @@ class SolanaWalletService @Inject constructor(
     }
 
     private fun getOrLoadPrivateKey(): EdDSAPrivateKey? {
+        ensureWalletInitializedFromIdentity()
         cachedPrivateKey?.let { return it }
 
         val privKeyBase64 = securePrefs.getString(KEY_PRIVATE_KEY, null) ?: return null
@@ -298,32 +348,72 @@ class SolanaWalletService @Inject constructor(
     }
 
     /**
-     * Encode bytes to Base58 (Solana address format).
-     * Uses the Bitcoin/Solana alphabet.
+     * Auto-derive a deterministic Solana wallet from the existing app Ed25519 identity
+     * when no legacy wallet exists. This keeps legacy mnemonic wallets untouched.
      */
-    private fun encodeBase58(input: ByteArray): String {
-        val alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        if (input.isEmpty()) return ""
+    private fun ensureWalletInitializedFromIdentity() {
+        if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) return
 
-        // Count leading zeros
-        var zeros = 0
-        for (b in input) {
-            if (b.toInt() == 0) zeros++ else break
+        try {
+            val identityPrivB64 = context
+                .getSharedPreferences(IDENTITY_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(IDENTITY_ED25519_PRIVATE_KEY_PREF, null)
+                ?: return
+
+            val identityPrivateKey = android.util.Base64.decode(identityPrivB64, android.util.Base64.DEFAULT)
+            if (identityPrivateKey.size != 32) return
+
+            val derivedSeed = SolanaKeyDerivation.derivePrivateKeyFromIdentity(identityPrivateKey)
+            val keypair = SolanaKeyDerivation.deriveKeypair(derivedSeed)
+
+            securePrefs.edit()
+                .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
+                .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .apply()
+
+            cacheKeypair(keypair.first)
+            ensureWalletMetadata(keypair.second, "Identity-Derived Wallet")
+            Log.d(TAG, "Initialized identity-derived wallet")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize identity-derived wallet: ${e.message}")
         }
-
-        // Convert to big integer and encode
-        val encoded = StringBuilder()
-        var num = java.math.BigInteger(1, input)
-        val base = java.math.BigInteger.valueOf(58)
-        while (num > java.math.BigInteger.ZERO) {
-            val (quotient, remainder) = num.divideAndRemainder(base)
-            encoded.append(alphabet[remainder.toInt()])
-            num = quotient
-        }
-
-        // Add leading '1's for each leading zero byte
-        repeat(zeros) { encoded.append('1') }
-
-        return encoded.reverse().toString()
     }
+
+    private fun ensureWalletMetadata(publicKeyBytes: ByteArray, defaultLabel: String = "Wallet") {
+        try {
+            val publicKeyBase58 = SolanaKeyDerivation.encodeBase58(publicKeyBytes)
+            runBlocking(Dispatchers.IO) {
+                val current = walletDao.getActiveWallet()
+                if (current == null || current.publicKey != publicKeyBase58) {
+                    walletDao.deactivateAll()
+                    walletDao.insertWallet(
+                        WalletEntity(
+                            publicKey = publicKeyBase58,
+                            createdAt = System.currentTimeMillis(),
+                            isActive = true,
+                            label = defaultLabel
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun decodeBase58(input: String): ByteArray {
+        val alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        var num = java.math.BigInteger.ZERO
+        val base = java.math.BigInteger.valueOf(58)
+
+        for (c in input) {
+            val digit = alphabet.indexOf(c)
+            if (digit == -1) throw IllegalArgumentException("Invalid Base58 character: $c")
+            num = num.multiply(base).add(java.math.BigInteger.valueOf(digit.toLong()))
+        }
+
+        val leadingZeros = input.takeWhile { it == '1' }.length
+        val bytes = num.toByteArray()
+        val stripped = if (bytes.isNotEmpty() && bytes[0] == 0.toByte()) bytes.drop(1).toByteArray() else bytes
+        return ByteArray(leadingZeros) + stripped
+    }
+
 }

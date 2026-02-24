@@ -7,6 +7,7 @@ import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.protocol.MessagePadding
 import com.bitchat.android.model.RoutedPacket
 import com.bitchat.android.model.IdentityAnnouncement
+import com.bitchat.android.model.SolanaOwnershipProof
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
 import com.bitchat.android.protocol.SpecialRecipients
@@ -81,6 +82,11 @@ class BluetoothMeshService(private val context: Context) {
 
     // Solana wallet address to include in ANNOUNCE packets (set from ChatViewModel)
     var solanaAddress: String? = null
+    // Optional callback to build wallet-link proof for ANNOUNCE.
+    // Returns Pair<solanaAddress, proofSignature> or null if wallet unavailable.
+    var buildSolanaLinkProof: ((nickname: String, signingPublicKey: ByteArray) -> Pair<String, ByteArray>?)? = null
+    // Optional callback to build signed ownership claims for ANNOUNCE.
+    var buildSolanaOwnershipProofs: (suspend (nickname: String, signingPublicKey: ByteArray, solanaAddress: String) -> List<SolanaOwnershipProof>)? = null
 
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -264,8 +270,24 @@ class BluetoothMeshService(private val context: Context) {
                 return peerManager.getPeerInfo(peerID)
             }
             
-            override fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String?): Boolean {
-                return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
+            override fun updatePeerInfo(
+                peerID: String,
+                nickname: String,
+                noisePublicKey: ByteArray,
+                signingPublicKey: ByteArray,
+                isVerified: Boolean,
+                solanaAddress: String?,
+                solanaOwnershipProofs: List<SolanaOwnershipProof>
+            ): Boolean {
+                return peerManager.updatePeerInfo(
+                    peerID,
+                    nickname,
+                    noisePublicKey,
+                    signingPublicKey,
+                    isVerified,
+                    solanaAddress,
+                    solanaOwnershipProofs
+                )
             }
             
             // Packet operations
@@ -1007,8 +1029,29 @@ class BluetoothMeshService(private val context: Context) {
                 return@launch
             }
             
+            // Build optional Solana link proof automatically when wallet is available
+            val proofData = try { buildSolanaLinkProof?.invoke(nickname, signingKey) } catch (_: Exception) { null }
+            val announcementAddress = proofData?.first ?: solanaAddress
+            val announcementProof = proofData?.second
+            val ownershipProofs = try {
+                if (announcementAddress.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    buildSolanaOwnershipProofs?.invoke(nickname, signingKey, announcementAddress).orEmpty()
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
             // Create iOS-compatible IdentityAnnouncement with TLV encoding
-            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
+            val announcement = IdentityAnnouncement(
+                nickname = nickname,
+                noisePublicKey = staticKey,
+                signingPublicKey = signingKey,
+                solanaAddress = announcementAddress,
+                solanaLinkProofSignature = announcementProof,
+                solanaOwnershipProofs = ownershipProofs
+            )
             val tlvPayload = announcement.encode()
             if (tlvPayload == null) {
                 Log.e(TAG, "Failed to encode announcement as TLV")
@@ -1056,8 +1099,31 @@ class BluetoothMeshService(private val context: Context) {
             return
         }
         
+        // Build optional Solana link proof automatically when wallet is available
+        val proofData = try { buildSolanaLinkProof?.invoke(nickname, signingKey) } catch (_: Exception) { null }
+        val announcementAddress = proofData?.first ?: solanaAddress
+        val announcementProof = proofData?.second
+        val ownershipProofs = try {
+            if (announcementAddress.isNullOrBlank()) {
+                emptyList()
+            } else {
+                runBlocking {
+                    buildSolanaOwnershipProofs?.invoke(nickname, signingKey, announcementAddress).orEmpty()
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
         // Create iOS-compatible IdentityAnnouncement with TLV encoding
-        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
+        val announcement = IdentityAnnouncement(
+            nickname = nickname,
+            noisePublicKey = staticKey,
+            signingPublicKey = signingKey,
+            solanaAddress = announcementAddress,
+            solanaLinkProofSignature = announcementProof,
+            solanaOwnershipProofs = ownershipProofs
+        )
         val tlvPayload = announcement.encode()
         if (tlvPayload == null) {
             Log.e(TAG, "Failed to encode peer announcement as TLV")
@@ -1156,9 +1222,18 @@ class BluetoothMeshService(private val context: Context) {
         noisePublicKey: ByteArray,
         signingPublicKey: ByteArray,
         isVerified: Boolean,
-        solanaAddress: String? = null
+        solanaAddress: String? = null,
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
     ): Boolean {
-        return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
+        return peerManager.updatePeerInfo(
+            peerID,
+            nickname,
+            noisePublicKey,
+            signingPublicKey,
+            isVerified,
+            solanaAddress,
+            solanaOwnershipProofs
+        )
     }
     
     /**

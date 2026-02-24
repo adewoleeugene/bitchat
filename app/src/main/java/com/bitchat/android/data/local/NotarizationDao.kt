@@ -22,6 +22,9 @@ interface NotarizationDao {
     @Query("UPDATE message_notarizations SET status = :status, batchId = :batchId WHERE messageId IN (:messageIds)")
     suspend fun updateStatusBatch(messageIds: List<String>, status: String, batchId: String?)
 
+    @Query("UPDATE message_notarizations SET status = :status, txSignature = :txSignature, batchId = :batchId WHERE messageId IN (:messageIds)")
+    suspend fun updateBroadcasted(messageIds: List<String>, status: String, txSignature: String, batchId: String?)
+
     @Query("UPDATE message_notarizations SET status = :status, txSignature = :txSignature, slot = :slot, blockTime = :blockTime, batchId = :batchId WHERE messageId IN (:messageIds)")
     suspend fun updateConfirmed(messageIds: List<String>, status: String, txSignature: String, slot: Long?, blockTime: Long?, batchId: String?)
 
@@ -33,6 +36,12 @@ interface NotarizationDao {
 
     @Query("SELECT COUNT(*) FROM message_notarizations WHERE status = 'QUEUED'")
     fun observeQueuedCount(): Flow<Int>
+
+    @Query("UPDATE message_notarizations SET status = 'QUEUED', batchId = NULL WHERE status = 'BROADCASTING' AND txSignature IS NULL")
+    suspend fun recoverInterruptedBroadcasts(): Int
+
+    @Query("SELECT * FROM message_notarizations WHERE status = 'BROADCASTING' AND txSignature IS NOT NULL ORDER BY createdAt ASC")
+    suspend fun getBroadcastingWithSignature(): List<MessageNotarizationEntity>
 
     @Query("DELETE FROM message_notarizations WHERE status = 'CONFIRMED' AND createdAt < :beforeTimestamp")
     suspend fun pruneOldConfirmed(beforeTimestamp: Long)

@@ -36,6 +36,10 @@ class WalletViewModel @Inject constructor(
     private val _mnemonicPhrase = MutableStateFlow<String?>(null)
     val mnemonicPhrase: StateFlow<String?> = _mnemonicPhrase.asStateFlow()
 
+    // Private key export display (explicit reveal)
+    private val _privateKeyBase58 = MutableStateFlow<String?>(null)
+    val privateKeyBase58: StateFlow<String?> = _privateKeyBase58.asStateFlow()
+
     // Balance refresh state
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -47,6 +51,8 @@ class WalletViewModel @Inject constructor(
     // Restore input
     private val _showRestoreDialog = MutableStateFlow(false)
     val showRestoreDialog: StateFlow<Boolean> = _showRestoreDialog.asStateFlow()
+    private val _showImportPrivateKeyDialog = MutableStateFlow(false)
+    val showImportPrivateKeyDialog: StateFlow<Boolean> = _showImportPrivateKeyDialog.asStateFlow()
 
     // Send dialog state
     private val _showSendDialog = MutableStateFlow(false)
@@ -138,6 +144,23 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    fun importPrivateKey(privateKeyBase58: String) {
+        viewModelScope.launch {
+            _walletState.value = WalletUiState.Loading
+            _showImportPrivateKeyDialog.value = false
+            val result = walletService.restoreWalletFromPrivateKeyBase58(privateKeyBase58.trim())
+            result.onSuccess {
+                _mnemonicPhrase.value = null
+                Log.d(TAG, "Private key wallet imported successfully")
+                loadWalletState()
+            }.onFailure { error ->
+                _errorMessage.value = "Invalid private key: ${error.message}"
+                _walletState.value = WalletUiState.NoWallet
+                Log.e(TAG, "Private key import failed", error)
+            }
+        }
+    }
+
     fun refreshBalance() {
         viewModelScope.launch {
             _isRefreshing.value = true
@@ -194,6 +217,15 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    fun showPrivateKeyExport() {
+        val privateKey = walletService.getPrivateKeyBase58()
+        if (privateKey != null) {
+            _privateKeyBase58.value = privateKey
+        } else {
+            _errorMessage.value = "Private key not available"
+        }
+    }
+
     fun deleteWallet() {
         viewModelScope.launch {
             walletService.deleteWallet()
@@ -207,6 +239,10 @@ class WalletViewModel @Inject constructor(
         _mnemonicPhrase.value = null
     }
 
+    fun dismissPrivateKeyExport() {
+        _privateKeyBase58.value = null
+    }
+
     fun dismissError() {
         _errorMessage.value = null
     }
@@ -217,6 +253,14 @@ class WalletViewModel @Inject constructor(
 
     fun dismissRestoreDialog() {
         _showRestoreDialog.value = false
+    }
+
+    fun showImportPrivateKeyDialog() {
+        _showImportPrivateKeyDialog.value = true
+    }
+
+    fun dismissImportPrivateKeyDialog() {
+        _showImportPrivateKeyDialog.value = false
     }
 
     fun showTransactionHistory() {

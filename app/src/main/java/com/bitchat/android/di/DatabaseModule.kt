@@ -26,7 +26,12 @@ object DatabaseModule {
             context,
             SolanaDatabase::class.java,
             "solana_database"
-        ).addMigrations(SolanaDatabase.MIGRATION_1_2, SolanaDatabase.MIGRATION_2_3, SolanaDatabase.MIGRATION_3_4)
+        ).addMigrations(
+            SolanaDatabase.MIGRATION_1_2,
+            SolanaDatabase.MIGRATION_2_3,
+            SolanaDatabase.MIGRATION_3_4,
+            SolanaDatabase.MIGRATION_4_5
+        )
         .build()
     }
 
