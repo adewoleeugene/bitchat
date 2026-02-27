@@ -74,6 +74,7 @@ class WalletViewModel @Inject constructor(
 
     // Cached SOL/USD price
     private var cachedSolPrice: Double? = null
+    private var lastRefreshViaMesh: Boolean = false
 
     init {
         loadWalletState()
@@ -98,7 +99,8 @@ class WalletViewModel @Inject constructor(
                             balanceSol = walletService.lamportsToSol(wallet.lastBalanceLamports),
                             balanceUsd = usdString,
                             lastUpdated = wallet.lastBalanceUpdatedAt,
-                            label = wallet.label
+                            label = wallet.label,
+                            lastRefreshViaMesh = lastRefreshViaMesh
                         )
                     } else {
                         _walletState.value = WalletUiState.NoWallet
@@ -171,10 +173,14 @@ class WalletViewModel @Inject constructor(
                 }
             }
             val result = walletService.refreshBalance()
+            result.onSuccess {
+                lastRefreshViaMesh = false
+            }
             result.onFailure { error ->
                 if (isNetworkError(error)) {
                     val meshResult = paymentManager.requestBalanceViaMesh()
                     if (meshResult.isSuccess) {
+                        lastRefreshViaMesh = true
                         _errorMessage.value = null
                     } else {
                         _errorMessage.value = "Offline — balance will update when internet is available"
@@ -185,6 +191,7 @@ class WalletViewModel @Inject constructor(
                 Log.e(TAG, "Balance refresh failed", error)
             }
             priceJob.join()
+            refreshUsdFromCachedPrice()
             _isRefreshing.value = false
         }
     }
@@ -201,14 +208,18 @@ class WalletViewModel @Inject constructor(
         viewModelScope.launch {
             rpcService.getSolPrice().onSuccess { price ->
                 cachedSolPrice = price
-                // Update current state if ready
-                val current = _walletState.value
-                if (current is WalletUiState.Ready) {
-                    val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
-                    val usd = solAmount * price
-                    _walletState.value = current.copy(balanceUsd = "$${"%,.0f".format(usd)}")
-                }
+                refreshUsdFromCachedPrice()
             }
+        }
+    }
+
+    private fun refreshUsdFromCachedPrice() {
+        val price = cachedSolPrice ?: return
+        val current = _walletState.value
+        if (current is WalletUiState.Ready) {
+            val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
+            val usd = solAmount * price
+            _walletState.value = current.copy(balanceUsd = "$${"%,.0f".format(usd)}")
         }
     }
 
@@ -316,7 +327,10 @@ class WalletViewModel @Inject constructor(
             rpcService.getSolPrice().onSuccess { price ->
                 cachedSolPrice = price
             }
-            walletService.refreshBalance()
+            val refreshed = walletService.refreshBalance()
+            refreshed.onSuccess {
+                lastRefreshViaMesh = false
+            }
             // Balance update will flow through Room observation automatically
         } catch (e: Exception) {
             Log.d(TAG, "Silent balance refresh skipped (offline): ${e.message}")
@@ -337,6 +351,7 @@ sealed class WalletUiState {
         val balanceSol: String,
         val balanceUsd: String? = null,
         val lastUpdated: Long,
-        val label: String
+        val label: String,
+        val lastRefreshViaMesh: Boolean = false
     ) : WalletUiState()
 }

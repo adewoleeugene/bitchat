@@ -362,7 +362,6 @@ class SolanaRelayHandler internal constructor(
         }
 
         inflightBalanceIntents[intent.intentId] = System.currentTimeMillis()
-        onRelayEvent?.invoke("fetching balance for ${fromPeerID.take(8)}...")
 
         scope.launch {
             try {
@@ -377,7 +376,6 @@ class SolanaRelayHandler internal constructor(
                         slot = slot,
                         errorMessage = ""
                     )
-                    onRelayEvent?.invoke("sent balance to ${fromPeerID.take(8)}...")
                 }.onFailure { error ->
                     sendBalanceResponse(
                         intentId = intent.intentId,
@@ -386,7 +384,6 @@ class SolanaRelayHandler internal constructor(
                         slot = 0L,
                         errorMessage = error.message ?: "RPC error"
                     )
-                    onRelayEvent?.invoke("balance fetch failed for ${fromPeerID.take(8)}...: ${error.message}")
                 }
             } catch (e: Exception) {
                 sendBalanceResponse(

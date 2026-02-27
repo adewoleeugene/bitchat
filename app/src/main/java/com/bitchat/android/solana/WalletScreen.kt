@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import android.text.format.DateUtils
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -322,6 +323,16 @@ private fun WalletReadyContent(
                 text = "~ ${state.balanceSol}sol",
                 fontFamily = CourierPrimeFamily,
                 fontSize = 14.sp,
+                color = BitchatColors.TextSecondary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = formatBalanceFreshnessLabel(
+                    lastUpdated = state.lastUpdated,
+                    viaMesh = state.lastRefreshViaMesh
+                ),
+                fontFamily = CourierPrimeFamily,
+                fontSize = 12.sp,
                 color = BitchatColors.TextSecondary
             )
         }
@@ -1022,6 +1033,18 @@ private fun generateQrCode(content: String): Bitmap? {
     } catch (e: Exception) {
         null
     }
+}
+
+private fun formatBalanceFreshnessLabel(lastUpdated: Long, viaMesh: Boolean): String {
+    if (lastUpdated <= 0L) {
+        return if (viaMesh) "updated via mesh" else "not synced yet"
+    }
+    val relative = DateUtils.getRelativeTimeSpanString(
+        lastUpdated,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS
+    ).toString()
+    return if (viaMesh) "updated $relative via mesh" else "updated $relative"
 }
 
 /**

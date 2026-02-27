@@ -189,7 +189,6 @@ class SolanaPaymentManager @Inject constructor(
             pendingBalanceRequestPublicKeys[intentId] = publicKey
 
             callback(SolanaBalanceIntent(intentId = intentId, requesterPubKey = publicKey))
-            safeStatusEvent("requesting balance from mesh peers...")
 
             val result = withTimeoutOrNull(BALANCE_MESH_TIMEOUT_MS) { deferred.await() }
                 ?: Result.failure(IllegalStateException("Mesh balance request timed out"))
@@ -627,7 +626,6 @@ class SolanaPaymentManager @Inject constructor(
             pendingBalanceRequestPublicKeys.remove(response.intentId)
             return@withContext
         }
-        safeStatusEvent("mesh balance updated (${response.lamports} lamports)")
         deferred.complete(Result.success(response.lamports))
         pendingBalanceRequests.remove(response.intentId)
         pendingBalanceRequestPublicKeys.remove(response.intentId)
