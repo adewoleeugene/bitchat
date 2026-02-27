@@ -1,6 +1,8 @@
 package com.bitchat.android.mesh
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import com.bitchat.android.crypto.EncryptionService
 import com.bitchat.android.model.BitchatMessage
@@ -25,6 +27,7 @@ import com.bitchat.android.solana.SolanaRelayHandler
 import com.bitchat.android.solana.SolanaRelayReceipt
 import com.bitchat.android.solana.SolanaRelayRequest
 import com.bitchat.android.solana.SolanaTransferIntent
+import com.bitchat.android.solana.TokenGatePolicyPayload
 import com.bitchat.android.sync.GossipSyncManager
 import com.bitchat.android.util.toHexString
 import kotlinx.coroutines.*
@@ -79,6 +82,7 @@ class BluetoothMeshService(private val context: Context) {
     // Callback for blockhash responses received from online peers (set from ChatViewModel)
     var onBlockhashResponseReceived: ((SolanaBlockhashResponse) -> Unit)? = null
     var onBalanceResponseReceived: ((SolanaBalanceResponse) -> Unit)? = null
+    var onTokenGatePolicyReceived: ((String, TokenGatePolicyPayload) -> Unit)? = null
 
     // Feed service for social feed (set from ChatViewModel)
     var feedService: FeedService? = null
@@ -664,6 +668,15 @@ class BluetoothMeshService(private val context: Context) {
                     service.handleIncomingReply(payload, fromPeer)
                 }
             }
+
+            override fun handleTokenGatePolicy(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val payload = TokenGatePolicyPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode TOKEN_GATE_POLICY payload from $fromPeer")
+                    return
+                }
+                onTokenGatePolicyReceived?.invoke(fromPeer, payload)
+            }
         }
 
         // BluetoothConnectionManager delegates
@@ -1246,6 +1259,15 @@ class BluetoothMeshService(private val context: Context) {
         return peerManager.getPeerInfo(peerID)
     }
 
+    fun isInternetAvailable(): Boolean {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
     /**
      * Update peer information with verification data
      */
@@ -1575,6 +1597,21 @@ class BluetoothMeshService(private val context: Context) {
             val signedPacket = signPacketBeforeBroadcast(packet)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        }
+    }
+
+    fun broadcastTokenGatePolicy(payload: TokenGatePolicyPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.TOKEN_GATE_POLICY.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+            Log.d(TAG, "Broadcast TOKEN_GATE_POLICY action=${payload.action} channel=${payload.channelKey}")
         }
     }
 

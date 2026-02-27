@@ -54,8 +54,8 @@ class CommandProcessor(
         val cmd = parts.first().lowercase()
         return when (cmd) {
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
-            "/create" -> handleCreateCommand(parts, myPeerID, viewModel)
-            "/gate" -> handleGateCommand(parts, myPeerID, viewModel)
+            "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
+            "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
             "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
             "/tip" -> handleTipCommand(parts, meshService, viewModel)
             "/w" -> { handleWhoCommand(meshService, viewModel); null }
@@ -71,7 +71,7 @@ class CommandProcessor(
         }
     }
 
-    private fun handleGateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?): CommandResult? {
+    private fun handleGateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?, meshService: BluetoothMeshService): CommandResult? {
         if (parts.size < 2) {
             return CommandResult(
                 prefillText = "/gate create #",
@@ -126,7 +126,7 @@ class CommandProcessor(
                         )
                     }
                 }
-                handleCreateCommand(createArgs, myPeerID, viewModel)
+                handleCreateCommand(createArgs, myPeerID, viewModel, meshService)
             }
             "status" -> {
                 val tgs = tokenGateService
@@ -201,7 +201,9 @@ class CommandProcessor(
                         addSystemMessage("$channelTag is not token-gated.")
                         return@launch
                     }
+                    val removePayload = com.bitchat.android.solana.TokenGatePolicyPayload.removeFromConfig(config)
                     tgs.removeTokenGate(channelKey)
+                    meshService.broadcastTokenGatePolicy(removePayload)
                     addSystemMessage("removed token gate from $channelTag.")
                 }
                 null
@@ -256,7 +258,7 @@ class CommandProcessor(
         }
     }
 
-    private fun handleCreateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?): CommandResult? {
+    private fun handleCreateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?, meshService: BluetoothMeshService): CommandResult? {
         if (parts.size < 2) {
             return CommandResult(prefillText = "/create #", hintText = "type a channel name")
         }
@@ -358,6 +360,9 @@ class CommandProcessor(
                     tokenDecimals = decimals
                 )
                 result.onSuccess {
+                    meshService.broadcastTokenGatePolicy(
+                        com.bitchat.android.solana.TokenGatePolicyPayload.fromConfig(it)
+                    )
                     val descriptor = when (parsedGateType) {
                         TokenGateType.SPL_TOKEN -> {
                             val displaySymbol = symbol.ifEmpty { "tokens" }

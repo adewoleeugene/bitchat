@@ -1,10 +1,13 @@
 package com.bitchat.android.ui
 
+import android.util.Log
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.ui.NotificationTextUtils
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.DeliveryStatus
+import com.bitchat.android.solana.GateDecision
+import com.bitchat.android.solana.ValidationMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.Date
@@ -23,6 +26,17 @@ class MeshDelegateHandler(
     private val getMyPeerID: () -> String,
     private val getMeshService: () -> BluetoothMeshService
 ) : BluetoothMeshDelegate {
+    private data class PeerGateDecisionCache(
+        val allowed: Boolean,
+        val expiresAt: Long
+    )
+
+    private val peerGateDecisionCache = mutableMapOf<String, PeerGateDecisionCache>()
+
+    companion object {
+        private const val PEER_GATE_ONLINE_CACHE_MS = 15_000L
+        private const val PEER_GATE_OFFLINE_CACHE_MS = 60_000L
+    }
 
     override fun didReceiveMessage(message: BitchatMessage) {
         coroutineScope.launch {
@@ -74,8 +88,20 @@ class MeshDelegateHandler(
 
                     // Only add to channel if user has joined it
                     if (state.getJoinedChannelsValue().contains(key)) {
+                        val senderPeerID = message.senderPeerID
+                        val allowed = shouldAcceptTokenGatedChannelMessage(
+                            channelKey = key,
+                            senderPeerID = senderPeerID
+                        )
+                        if (!allowed) {
+                            Log.d(
+                                "MeshDelegateHandler",
+                                "Dropped gated channel message for $key from ${senderPeerID ?: "unknown"}"
+                            )
+                            return@launch
+                        }
                         val displayContent = channelInfo?.second ?: message.content
-                        channelManager.addChannelMessage(key, message.copy(content = displayContent), message.senderPeerID)
+                        channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
                     }
                 } else {
                     // Public mesh message - always store to preserve message history
@@ -95,6 +121,7 @@ class MeshDelegateHandler(
     
     override fun didUpdatePeerList(peers: List<String>) {
         coroutineScope.launch {
+            peerGateDecisionCache.clear()
             state.setConnectedPeers(peers)
             state.setIsConnected(peers.isNotEmpty())
             notificationManager.showActiveUserNotification(peers)
@@ -296,6 +323,45 @@ class MeshDelegateHandler(
      */
     fun getPeerInfo(peerID: String): com.bitchat.android.mesh.PeerInfo? {
         return getMeshService().getPeerInfo(peerID)
+    }
+
+    private suspend fun shouldAcceptTokenGatedChannelMessage(
+        channelKey: String,
+        senderPeerID: String?
+    ): Boolean {
+        val tgs = channelManager.tokenGateService ?: return true
+        val hasGate = runCatching { tgs.getTokenGate(channelKey) }.getOrNull() != null
+        if (!hasGate) return true
+        val peerID = senderPeerID ?: return false
+        val peerInfo = getMeshService().getPeerInfo(peerID) ?: return false
+
+        val senderWallet = peerInfo.solanaAddress ?: return false
+        val isOnline = getMeshService().isInternetAvailable()
+        val cacheKey = "$channelKey|$senderWallet|$isOnline"
+        val now = System.currentTimeMillis()
+        val cached = peerGateDecisionCache[cacheKey]
+        if (cached != null && cached.expiresAt > now) {
+            return cached.allowed
+        }
+
+        val validationMode = if (isOnline) {
+            ValidationMode.STRICT_ONLINE
+        } else {
+            ValidationMode.PREFER_CACHE_THEN_ONLINE
+        }
+        val validation = tgs.validateWalletEligibility(
+            channelKey = channelKey,
+            walletAddress = senderWallet,
+            mode = validationMode
+        ).getOrNull() ?: return false
+
+        val allowed = validation.decision == GateDecision.ALLOW
+        val ttl = if (isOnline) PEER_GATE_ONLINE_CACHE_MS else PEER_GATE_OFFLINE_CACHE_MS
+        peerGateDecisionCache[cacheKey] = PeerGateDecisionCache(
+            allowed = allowed,
+            expiresAt = now + ttl
+        )
+        return allowed
     }
 
 }

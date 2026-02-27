@@ -136,10 +136,7 @@ class SolanaWalletServiceIdentityTest {
         )
         val publicKey = net.i2p.crypto.eddsa.EdDSAPublicKey(pubSpec)
 
-        if (java.security.Security.getProvider("EdDSA") == null) {
-            java.security.Security.addProvider(net.i2p.crypto.eddsa.EdDSASecurityProvider())
-        }
-        val verifier = java.security.Signature.getInstance("NONEwithEdDSA", "EdDSA")
+        val verifier = net.i2p.crypto.eddsa.EdDSAEngine()
         verifier.initVerify(publicKey)
         verifier.update(payload)
         assertTrue(verifier.verify(signatureBytes))

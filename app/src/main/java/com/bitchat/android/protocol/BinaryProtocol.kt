@@ -28,7 +28,8 @@ enum class MessageType(val value: UByte) {
     SOLANA_BALANCE_RESPONSE(0x37u),   // Balance response (online peer → offline user)
     FEED_POST(0x40u),       // Social feed post (text + optional image)
     FEED_REACTION(0x41u),   // Emoji reaction on a feed post
-    FEED_REPLY(0x42u);      // Threaded reply under a feed post
+    FEED_REPLY(0x42u),      // Threaded reply under a feed post
+    TOKEN_GATE_POLICY(0x43u); // Token-gate policy sync (upsert/remove)
 
     companion object {
         fun fromValue(value: UByte): MessageType? {

@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.bitchat.android.util.NotificationIntervalManager
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import java.util.Date
 import kotlin.random.Random
 
@@ -37,9 +37,15 @@ class ChatViewModel(
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
     private var lastAnnouncedWalletAddress: String? = null
     private var walletLinkAnnounceJob: kotlinx.coroutines.Job? = null
+    private var tokenGateRevalidationJob: kotlinx.coroutines.Job? = null
+    private var tokenGatePolicySyncJob: kotlinx.coroutines.Job? = null
+    private val tokenGateDenyStrikes = mutableMapOf<String, Int>()
 
     companion object {
         private const val TAG = "ChatViewModel"
+        private const val TOKEN_GATE_REVALIDATION_INTERVAL_MS = 60_000L
+        private const val TOKEN_GATE_POLICY_SYNC_INTERVAL_MS = 5 * 60_000L
+        private const val TOKEN_GATE_DENY_STRIKES_TO_KICK = 2
     }
 
     fun sendVoiceNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
@@ -251,6 +257,20 @@ class ChatViewModel(
 
             // Wire up token gate service to channel manager for join validation
             channelManager.tokenGateService = tokenGateService
+            startTokenGateRevalidationLoop(tokenGateService)
+            startTokenGatePolicySyncLoop(tokenGateService)
+            meshService.onTokenGatePolicyReceived = { fromPeer, payload ->
+                viewModelScope.launch {
+                    val senderSolanaAddress = meshService.getPeerInfo(fromPeer)?.solanaAddress
+                    tokenGateService.applySyncedPolicy(
+                        payload = payload,
+                        senderSolanaAddress = senderSolanaAddress
+                    )
+                        .onFailure { error ->
+                            Log.d(TAG, "Failed applying token-gate policy sync: ${error.message}")
+                        }
+                }
+            }
 
             val walletService = solanaEntryPoint.solanaWalletService()
             // Set local Solana address on mesh service for identity announcements
@@ -476,7 +496,78 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        tokenGateRevalidationJob?.cancel()
+        tokenGatePolicySyncJob?.cancel()
+        walletLinkAnnounceJob?.cancel()
+        tokenGateDenyStrikes.clear()
+        meshService.onTokenGatePolicyReceived = null
         // Note: Mesh service lifecycle is now managed by MainActivity
+    }
+
+    private fun startTokenGateRevalidationLoop(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        tokenGateRevalidationJob?.cancel()
+        tokenGateRevalidationJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    revalidateJoinedTokenGatedChannels(tokenGateService)
+                }.onFailure { error ->
+                    Log.d(TAG, "Token gate revalidation skipped: ${error.message}")
+                }
+                delay(TOKEN_GATE_REVALIDATION_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun revalidateJoinedTokenGatedChannels(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        val joinedSnapshot = state.getJoinedChannelsValue().toList()
+        if (joinedSnapshot.isEmpty()) return
+
+        for (channelKey in joinedSnapshot) {
+            val isGated = runCatching { tokenGateService.isTokenGated(channelKey) }.getOrDefault(false)
+            if (!isGated) continue
+
+            val validation = tokenGateService.validateEligibility(
+                channelKey = channelKey,
+                mode = com.bitchat.android.solana.ValidationMode.STRICT_ONLINE
+            ).getOrNull() ?: continue
+
+            if (validation.decision == com.bitchat.android.solana.GateDecision.DENY) {
+                val strikes = (tokenGateDenyStrikes[channelKey] ?: 0) + 1
+                tokenGateDenyStrikes[channelKey] = strikes
+                if (strikes < TOKEN_GATE_DENY_STRIKES_TO_KICK) continue
+            } else {
+                tokenGateDenyStrikes.remove(channelKey)
+                continue
+            }
+            if (!state.getJoinedChannelsValue().contains(channelKey)) continue
+
+            channelManager.leaveChannel(channelKey)
+            tokenGateDenyStrikes.remove(channelKey)
+            val channelTag = ChannelKeys.parseChannelName(channelKey)
+            val reason = tokenGateService.formatRequirementText(validation)
+            messageManager.addSystemMessage(
+                "auto-removed from $channelTag: token gate no longer satisfied ($reason)."
+            )
+        }
+    }
+
+    private fun startTokenGatePolicySyncLoop(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        tokenGatePolicySyncJob?.cancel()
+        tokenGatePolicySyncJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    val policies = tokenGateService.getAllTokenGates()
+                    for (config in policies) {
+                        meshService.broadcastTokenGatePolicy(
+                            com.bitchat.android.solana.TokenGatePolicyPayload.fromConfig(config)
+                        )
+                    }
+                }.onFailure { error ->
+                    Log.d(TAG, "Token gate policy sync skipped: ${error.message}")
+                }
+                delay(TOKEN_GATE_POLICY_SYNC_INTERVAL_MS)
+            }
+        }
     }
     
     // MARK: - Nickname Management

@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import net.i2p.crypto.eddsa.EdDSAPrivateKey
 import net.i2p.crypto.eddsa.EdDSAPublicKey
+import net.i2p.crypto.eddsa.EdDSAEngine
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable
 import net.i2p.crypto.eddsa.spec.EdDSAPrivateKeySpec
 import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec
@@ -501,14 +502,11 @@ class SolanaWalletService @Inject constructor(
         ensureWalletInitializedFromIdentity()
         val privKey = getOrLoadPrivateKey() ?: return null
         return try {
-            // Ensure EdDSA provider is registered
-            if (java.security.Security.getProvider("EdDSA") == null) {
-                java.security.Security.addProvider(net.i2p.crypto.eddsa.EdDSASecurityProvider())
-            }
-            val sig = java.security.Signature.getInstance("NONEwithEdDSA", "EdDSA")
-            sig.initSign(privKey)
-            sig.update(data)
-            sig.sign()
+            // Use EdDSAEngine directly to avoid JVM/provider registration flakiness in tests.
+            val signer = EdDSAEngine()
+            signer.initSign(privKey)
+            signer.update(data)
+            signer.sign()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to sign: ${e.message}", e)
             null

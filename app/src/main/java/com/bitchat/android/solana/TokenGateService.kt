@@ -7,6 +7,7 @@ import android.util.Log
 import com.bitchat.android.data.local.TokenGateDao
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
 import com.bitchat.android.data.local.entities.TokenGateEligibilityCacheEntity
+import com.bitchat.android.data.local.entities.TokenGatePolicyStateEntity
 import com.bitchat.android.data.local.entities.TokenGateType
 import com.bitchat.android.data.local.entities.TokenGateValidationSource
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -52,9 +53,18 @@ class TokenGateService @Inject constructor(
                 )
             }
 
-            val creatorPubKey = walletService.getPublicKeyBase58() ?: ""
+            val creatorPubKey = walletService.getPublicKeyBase58()
+                ?: return@withContext Result.failure(IllegalStateException("No wallet found. Create a wallet first."))
             val existing = tokenGateDao.getTokenGate(channelKey)
-            val nextPolicyVersion = (existing?.policyVersion ?: 0) + 1
+            val policyState = tokenGateDao.getPolicyState(channelKey)
+            val knownCreator = existing?.creatorPublicKey ?: policyState?.creatorPublicKey
+            if (!knownCreator.isNullOrBlank() && knownCreator != creatorPubKey) {
+                return@withContext Result.failure(
+                    IllegalStateException("Only the original creator can update this token gate.")
+                )
+            }
+            val currentVersion = maxOf(existing?.policyVersion ?: 0, policyState?.lastPolicyVersion ?: 0)
+            val nextPolicyVersion = currentVersion + 1
             val config = TokenGateConfigEntity(
                 channelKey = channelKey,
                 gateType = gateType,
@@ -68,6 +78,16 @@ class TokenGateService @Inject constructor(
             )
             val withHash = config.copy(gateHash = computeGateHash(config))
             tokenGateDao.insertTokenGate(withHash)
+            tokenGateDao.upsertPolicyState(
+                TokenGatePolicyStateEntity(
+                    channelKey = channelKey,
+                    creatorPublicKey = creatorPubKey,
+                    lastPolicyVersion = withHash.policyVersion,
+                    lastGateHash = withHash.gateHash,
+                    updatedAt = withHash.createdAt,
+                    isRemoved = false
+                )
+            )
             tokenGateDao.deleteEligibilityCacheForChannel(channelKey)
             Log.d(TAG, "Created token gate for $channelKey: $minBalance $tokenSymbol ($gateType)")
             Result.success(withHash)
@@ -119,114 +139,7 @@ class TokenGateService @Inject constructor(
             val userPubKey = walletService.getPublicKeyBase58()
                 ?: return@withContext Result.failure(IllegalStateException("No wallet found. Create a wallet first."))
 
-            val now = System.currentTimeMillis()
-            val cache = tokenGateDao.getEligibilityCache(channelKey, userPubKey, config.gateHash)
-            val hasFreshCache = cache != null && cache.expiresAt > now
-
-            if (hasFreshCache && mode != ValidationMode.STRICT_ONLINE) {
-                val cached = cache!!
-                return@withContext Result.success(
-                    TokenGateValidationResult(
-                        decision = if (cached.isEligible) GateDecision.ALLOW else GateDecision.DENY,
-                        reasonCode = if (cached.isEligible) ValidationReason.CACHED_ALLOW else ValidationReason.CACHED_DENY,
-                        userBalance = cached.observedBalance,
-                        requiredBalance = config.minBalance,
-                        tokenSymbol = config.tokenSymbol,
-                        tokenDecimals = config.tokenDecimals,
-                        fromCache = true,
-                        validUntil = cached.expiresAt
-                    )
-                )
-            }
-
-            if (mode == ValidationMode.CACHE_ONLY) {
-                return@withContext Result.success(
-                    TokenGateValidationResult(
-                        decision = GateDecision.UNKNOWN_OFFLINE,
-                        reasonCode = ValidationReason.CACHE_MISS,
-                        userBalance = -1,
-                        requiredBalance = config.minBalance,
-                        tokenSymbol = config.tokenSymbol,
-                        tokenDecimals = config.tokenDecimals,
-                        fromCache = false,
-                        validUntil = now
-                    )
-                )
-            }
-
-            if (!hasInternetConnectivity()) {
-                return@withContext Result.success(
-                    TokenGateValidationResult(
-                        decision = GateDecision.UNKNOWN_OFFLINE,
-                        reasonCode = ValidationReason.OFFLINE_CACHE_MISS,
-                        userBalance = -1,
-                        requiredBalance = config.minBalance,
-                        tokenSymbol = config.tokenSymbol,
-                        tokenDecimals = config.tokenDecimals,
-                        fromCache = false,
-                        validUntil = now
-                    )
-                )
-            }
-
-            val balanceResult = when (config.gateType) {
-                TokenGateType.SPL_TOKEN -> {
-                    rpcService.getTokenBalance(userPubKey, config.tokenMintAddress)
-                }
-                TokenGateType.NFT_SPECIFIC -> {
-                    // NFT by specific mint: any balance > 0 of that mint means holder.
-                    rpcService.getTokenBalance(userPubKey, config.tokenMintAddress)
-                }
-                TokenGateType.NFT_COLLECTION -> {
-                    if (!rpcService.supportsNftCollectionGates()) {
-                        return@withContext Result.failure(
-                            IllegalStateException(
-                                "Configured RPC does not support NFT collection APIs. Use a DAS-capable Solana RPC endpoint."
-                            )
-                        )
-                    }
-                    rpcService.hasNftFromCollection(userPubKey, config.tokenMintAddress)
-                        .map { has -> if (has) 1L else 0L }
-                }
-                else -> Result.failure(IllegalArgumentException("Unknown gate type: ${config.gateType}"))
-            }
-
-            val userBalance = balanceResult.getOrElse { error ->
-                Log.e(TAG, "Failed to query token balance: ${error.message}")
-                return@withContext Result.failure(error)
-            }
-
-            val isEligible = userBalance >= config.minBalance
-
-            val expiresAt = now + config.validationTtlMs
-            tokenGateDao.updateEligibility(channelKey, isEligible, now)
-            tokenGateDao.upsertEligibilityCache(
-                TokenGateEligibilityCacheEntity(
-                    channelKey = channelKey,
-                    walletAddress = userPubKey,
-                    gateHash = config.gateHash,
-                    isEligible = isEligible,
-                    observedBalance = userBalance,
-                    validatedAt = now,
-                    expiresAt = expiresAt,
-                    source = TokenGateValidationSource.RPC
-                )
-            )
-
-            Log.d(TAG, "Token gate validation for $channelKey: eligible=$isEligible, balance=$userBalance, required=${config.minBalance}")
-
-            Result.success(
-                TokenGateValidationResult(
-                    decision = if (isEligible) GateDecision.ALLOW else GateDecision.DENY,
-                    reasonCode = if (isEligible) ValidationReason.RPC_ALLOW else ValidationReason.RPC_DENY,
-                    userBalance = userBalance,
-                    requiredBalance = config.minBalance,
-                    tokenSymbol = config.tokenSymbol,
-                    tokenDecimals = config.tokenDecimals,
-                    fromCache = false,
-                    validUntil = expiresAt
-                )
-            )
+            validateEligibilityForWallet(config, channelKey, userPubKey, mode)
         } catch (e: Exception) {
             Log.e(TAG, "Token gate validation failed: ${e.message}", e)
             Result.failure(e)
@@ -234,11 +147,307 @@ class TokenGateService @Inject constructor(
     }
 
     /**
+     * Validate eligibility for an arbitrary wallet address (used for peer enforcement).
+     */
+    suspend fun validateWalletEligibility(
+        channelKey: String,
+        walletAddress: String,
+        mode: ValidationMode = ValidationMode.PREFER_CACHE_THEN_ONLINE
+    ): Result<TokenGateValidationResult> = withContext(Dispatchers.IO) {
+        try {
+            val configRaw = tokenGateDao.getTokenGate(channelKey)
+                ?: return@withContext Result.failure(IllegalStateException("No token gate found for $channelKey"))
+            val config = if (configRaw.gateHash.isBlank()) {
+                val hashed = configRaw.copy(gateHash = computeGateHash(configRaw))
+                tokenGateDao.insertTokenGate(hashed)
+                hashed
+            } else {
+                configRaw
+            }
+
+            val normalizedWallet = walletAddress.trim()
+            if (normalizedWallet.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Wallet address required"))
+            }
+
+            validateEligibilityForWallet(config, channelKey, normalizedWallet, mode)
+        } catch (e: Exception) {
+            Log.e(TAG, "Token gate peer validation failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun validateEligibilityForWallet(
+        config: TokenGateConfigEntity,
+        channelKey: String,
+        walletAddress: String,
+        mode: ValidationMode
+    ): Result<TokenGateValidationResult> {
+        val now = System.currentTimeMillis()
+        val cache = tokenGateDao.getEligibilityCache(channelKey, walletAddress, config.gateHash)
+        val hasFreshCache = cache != null && cache.expiresAt > now
+
+        if (hasFreshCache && mode != ValidationMode.STRICT_ONLINE) {
+            val cached = cache!!
+            return Result.success(
+                TokenGateValidationResult(
+                    decision = if (cached.isEligible) GateDecision.ALLOW else GateDecision.DENY,
+                    reasonCode = if (cached.isEligible) ValidationReason.CACHED_ALLOW else ValidationReason.CACHED_DENY,
+                    userBalance = cached.observedBalance,
+                    requiredBalance = config.minBalance,
+                    tokenSymbol = config.tokenSymbol,
+                    tokenDecimals = config.tokenDecimals,
+                    fromCache = true,
+                    validUntil = cached.expiresAt
+                )
+            )
+        }
+
+        if (mode == ValidationMode.CACHE_ONLY) {
+            return Result.success(
+                TokenGateValidationResult(
+                    decision = GateDecision.UNKNOWN_OFFLINE,
+                    reasonCode = ValidationReason.CACHE_MISS,
+                    userBalance = -1,
+                    requiredBalance = config.minBalance,
+                    tokenSymbol = config.tokenSymbol,
+                    tokenDecimals = config.tokenDecimals,
+                    fromCache = false,
+                    validUntil = now
+                )
+            )
+        }
+
+        if (!hasInternetConnectivity()) {
+            return Result.success(
+                TokenGateValidationResult(
+                    decision = GateDecision.UNKNOWN_OFFLINE,
+                    reasonCode = ValidationReason.OFFLINE_CACHE_MISS,
+                    userBalance = -1,
+                    requiredBalance = config.minBalance,
+                    tokenSymbol = config.tokenSymbol,
+                    tokenDecimals = config.tokenDecimals,
+                    fromCache = false,
+                    validUntil = now
+                )
+            )
+        }
+
+        val balanceResult = when (config.gateType) {
+            TokenGateType.SPL_TOKEN -> {
+                rpcService.getTokenBalance(walletAddress, config.tokenMintAddress)
+            }
+            TokenGateType.NFT_SPECIFIC -> {
+                // NFT by specific mint: any balance > 0 of that mint means holder.
+                rpcService.getTokenBalance(walletAddress, config.tokenMintAddress)
+            }
+            TokenGateType.NFT_COLLECTION -> {
+                if (!rpcService.supportsNftCollectionGates()) {
+                    return Result.failure(
+                        IllegalStateException(
+                            "Configured RPC does not support NFT collection APIs. Use a DAS-capable Solana RPC endpoint."
+                        )
+                    )
+                }
+                rpcService.hasNftFromCollection(walletAddress, config.tokenMintAddress)
+                    .map { has -> if (has) 1L else 0L }
+            }
+            else -> Result.failure(IllegalArgumentException("Unknown gate type: ${config.gateType}"))
+        }
+
+        val userBalance = balanceResult.getOrElse { error ->
+            Log.e(TAG, "Failed to query token balance: ${error.message}")
+            return Result.failure(error)
+        }
+
+        val isEligible = userBalance >= config.minBalance
+
+        val expiresAt = now + config.validationTtlMs
+        val localWallet = runCatching { walletService.getPublicKeyBase58() }.getOrNull()
+        if (!localWallet.isNullOrBlank() && localWallet == walletAddress) {
+            tokenGateDao.updateEligibility(channelKey, isEligible, now)
+        }
+        tokenGateDao.upsertEligibilityCache(
+            TokenGateEligibilityCacheEntity(
+                channelKey = channelKey,
+                walletAddress = walletAddress,
+                gateHash = config.gateHash,
+                isEligible = isEligible,
+                observedBalance = userBalance,
+                validatedAt = now,
+                expiresAt = expiresAt,
+                source = TokenGateValidationSource.RPC
+            )
+        )
+
+        Log.d(
+            TAG,
+            "Token gate validation for $channelKey wallet=${walletAddress.take(8)}...: eligible=$isEligible, balance=$userBalance, required=${config.minBalance}"
+        )
+
+        return Result.success(
+            TokenGateValidationResult(
+                decision = if (isEligible) GateDecision.ALLOW else GateDecision.DENY,
+                reasonCode = if (isEligible) ValidationReason.RPC_ALLOW else ValidationReason.RPC_DENY,
+                userBalance = userBalance,
+                requiredBalance = config.minBalance,
+                tokenSymbol = config.tokenSymbol,
+                tokenDecimals = config.tokenDecimals,
+                fromCache = false,
+                validUntil = expiresAt
+            )
+        )
+    }
+
+    /**
      * Remove a token gate from a channel.
      */
-    suspend fun removeTokenGate(channelKey: String) {
+    suspend fun removeTokenGate(channelKey: String) = withContext(Dispatchers.IO) {
+        val existing = tokenGateDao.getTokenGate(channelKey)
+        val policyState = tokenGateDao.getPolicyState(channelKey)
+        val creator = existing?.creatorPublicKey ?: policyState?.creatorPublicKey ?: return@withContext
+        val currentVersion = maxOf(existing?.policyVersion ?: 0, policyState?.lastPolicyVersion ?: 0)
+        val nextVersion = currentVersion + 1
+        val gateHash = existing?.gateHash ?: policyState?.lastGateHash.orEmpty()
         tokenGateDao.deleteTokenGate(channelKey)
         tokenGateDao.deleteEligibilityCacheForChannel(channelKey)
+        tokenGateDao.upsertPolicyState(
+            TokenGatePolicyStateEntity(
+                channelKey = channelKey,
+                creatorPublicKey = creator,
+                lastPolicyVersion = nextVersion,
+                lastGateHash = gateHash,
+                updatedAt = System.currentTimeMillis(),
+                isRemoved = true
+            )
+        )
+    }
+
+    /**
+     * Apply a token-gate policy received over mesh sync.
+     * Returns true if local state changed.
+     */
+    suspend fun applySyncedPolicy(
+        payload: TokenGatePolicyPayload,
+        senderSolanaAddress: String?
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val senderCreator = senderSolanaAddress?.trim().orEmpty()
+            if (senderCreator.isBlank()) {
+                return@withContext Result.failure(
+                    IllegalStateException("Unauthenticated token-gate policy sender")
+                )
+            }
+
+            val payloadCreator = payload.creatorPublicKey?.trim().orEmpty()
+            if (payloadCreator.isBlank()) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Missing creatorPublicKey in synced policy")
+                )
+            }
+            if (payloadCreator != senderCreator) {
+                return@withContext Result.failure(
+                    IllegalStateException("Sender does not match policy creator")
+                )
+            }
+
+            val existing = tokenGateDao.getTokenGate(payload.channelKey)
+            val policyState = tokenGateDao.getPolicyState(payload.channelKey)
+            val currentVersion = maxOf(existing?.policyVersion ?: 0, policyState?.lastPolicyVersion ?: 0)
+            val knownCreator = existing?.creatorPublicKey ?: policyState?.creatorPublicKey
+            if (!knownCreator.isNullOrBlank() && knownCreator != senderCreator) {
+                return@withContext Result.success(false)
+            }
+            val now = System.currentTimeMillis()
+
+            when (payload.action) {
+                TokenGatePolicyAction.REMOVE -> {
+                    if (payload.policyVersion <= currentVersion) return@withContext Result.success(false)
+                    val expectedGateHash = existing?.gateHash ?: policyState?.lastGateHash
+                    if (!expectedGateHash.isNullOrBlank() && payload.gateHash != expectedGateHash) {
+                        return@withContext Result.success(false)
+                    }
+                    tokenGateDao.deleteTokenGate(payload.channelKey)
+                    tokenGateDao.deleteEligibilityCacheForChannel(payload.channelKey)
+                    tokenGateDao.upsertPolicyState(
+                        TokenGatePolicyStateEntity(
+                            channelKey = payload.channelKey,
+                            creatorPublicKey = senderCreator,
+                            lastPolicyVersion = payload.policyVersion,
+                            lastGateHash = payload.gateHash,
+                            updatedAt = now,
+                            isRemoved = true
+                        )
+                    )
+                    return@withContext Result.success(true)
+                }
+
+                TokenGatePolicyAction.UPSERT -> {
+                    val gateType = payload.gateType ?: return@withContext Result.failure(
+                        IllegalArgumentException("Missing gateType in synced upsert policy")
+                    )
+                    val mint = payload.tokenMintAddress ?: return@withContext Result.failure(
+                        IllegalArgumentException("Missing tokenMintAddress in synced upsert policy")
+                    )
+                    val minBalance = payload.minBalance ?: return@withContext Result.failure(
+                        IllegalArgumentException("Missing minBalance in synced upsert policy")
+                    )
+                    val tokenDecimals = payload.tokenDecimals ?: 0
+                    val tokenSymbol = payload.tokenSymbol ?: ""
+
+                    if (payload.policyVersion <= 0) return@withContext Result.failure(
+                        IllegalArgumentException("Invalid policyVersion in synced policy")
+                    )
+
+                    val incoming = TokenGateConfigEntity(
+                        channelKey = payload.channelKey,
+                        gateType = gateType,
+                        tokenMintAddress = mint,
+                        minBalance = minBalance,
+                        tokenSymbol = tokenSymbol,
+                        tokenDecimals = tokenDecimals,
+                        creatorPublicKey = senderCreator,
+                        createdAt = payload.updatedAt,
+                        policyVersion = payload.policyVersion,
+                        gateHash = payload.gateHash
+                    )
+
+                    val computed = computeGateHash(incoming)
+                    if (computed != payload.gateHash) {
+                        return@withContext Result.failure(
+                            IllegalArgumentException("Invalid gateHash in synced policy")
+                        )
+                    }
+
+                    if (incoming.policyVersion <= currentVersion) {
+                        return@withContext Result.success(false)
+                    }
+
+                    tokenGateDao.insertTokenGate(incoming)
+                    tokenGateDao.deleteEligibilityCacheForChannel(payload.channelKey)
+                    tokenGateDao.upsertPolicyState(
+                        TokenGatePolicyStateEntity(
+                            channelKey = payload.channelKey,
+                            creatorPublicKey = senderCreator,
+                            lastPolicyVersion = incoming.policyVersion,
+                            lastGateHash = incoming.gateHash,
+                            updatedAt = now,
+                            isRemoved = false
+                        )
+                    )
+                    return@withContext Result.success(true)
+                }
+
+                else -> {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Unknown token gate policy action: ${payload.action}")
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to apply synced token gate policy: ${e.message}", e)
+            Result.failure(e)
+        }
     }
 
     /**
