@@ -215,6 +215,13 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
 
         if (peerID == myPeerID) return false
 
+        // Keep existing peers alive even if this announce later fails strict validation.
+        // This avoids one-sided "offline" UI when a peer is connected but announce checks fail.
+        val existingPeer = delegate?.getPeerInfo(peerID)
+        if (existingPeer != null) {
+            delegate?.addOrUpdatePeer(peerID, existingPeer.nickname)
+        }
+
         // Ignore stale announcements older than STALE_PEER_TIMEOUT
         val now = System.currentTimeMillis()
         val age = now - packet.timestamp.toLong()
@@ -227,6 +234,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val announcement = IdentityAnnouncement.decode(packet.payload)
         if (announcement == null) {
             Log.w(TAG, "Failed to decode announce from $peerID as iOS-compatible TLV format")
+            if (existingPeer == null) ensurePeerTracked(peerID)
             return false
         }
         
@@ -242,8 +250,6 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
 
         // Check for existing peer with different noise public key
         // If existing peer has a different noise public key, do not consider this verified
-        val existingPeer = delegate?.getPeerInfo(peerID)
-        
         if (existingPeer != null && existingPeer.noisePublicKey != null && !existingPeer.noisePublicKey!!.contentEquals(announcement.noisePublicKey)) {
             Log.w(TAG, "⚠️ Announce key mismatch for ${peerID.take(8)}... — keeping unverified")
             verified = false
@@ -252,6 +258,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         // Require verified announce; ignore otherwise (no backward compatibility)
         if (!verified) {
             Log.w(TAG, "❌ Ignoring unverified announce from ${peerID.take(8)}...")
+            if (existingPeer == null) ensurePeerTracked(peerID)
             return false
         }
         
@@ -436,10 +443,16 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
         
-        // Enforce: only accept public messages from verified peers we know
+        // Enforce verified senders for routed/public mesh traffic.
+        // For directly connected peers, allow messages as a resilience fallback when
+        // ANNOUNCE verification is temporarily failing on one side.
         val peerInfo = delegate?.getPeerInfo(peerID)
-        if (peerInfo == null || !peerInfo.isVerifiedNickname) {
+        if (peerInfo == null) {
             Log.w(TAG, "🚫 Dropping public message from unverified or unknown peer ${peerID.take(8)}...")
+            return
+        }
+        if (!peerInfo.isVerifiedNickname && !peerInfo.isDirectConnection) {
+            Log.w(TAG, "🚫 Dropping public message from unverified routed peer ${peerID.take(8)}...")
             return
         }
         
