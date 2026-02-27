@@ -431,7 +431,14 @@ class SolanaRelayHandler internal constructor(
      * Updates the local transaction status in Room DB.
      */
     fun handleRelayReceipt(receipt: SolanaRelayReceipt): Boolean {
-        val trackedAt = pendingRequests[receipt.requestId] ?: return false
+        val trackedAt = pendingRequests[receipt.requestId]
+        if (trackedAt == null) {
+            Log.d(
+                TAG,
+                "Processing late/untracked relay receipt for ${receipt.requestId.take(8)}... " +
+                    "(status=${receipt.status})"
+            )
+        }
 
         val statusStr = when (receipt.status) {
             RelayReceiptStatus.BROADCAST -> "broadcast"
@@ -479,7 +486,7 @@ class SolanaRelayHandler internal constructor(
             }
         }
 
-        if (isRetryableFailure) {
+        if (isRetryableFailure && trackedAt != null) {
             // Keep request tracked for additional relay attempts and subsequent success receipts.
             pendingRequests[receipt.requestId] = trackedAt
         } else {

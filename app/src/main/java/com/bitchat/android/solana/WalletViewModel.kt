@@ -189,7 +189,12 @@ class WalletViewModel @Inject constructor(
                         lastRefreshViaMesh = true
                         _errorMessage.value = null
                     } else {
-                        _errorMessage.value = "Offline — balance will update when internet is available"
+                        val meshReason = meshResult.exceptionOrNull()?.message.orEmpty()
+                        _errorMessage.value = if (meshReason.contains("relay not available", ignoreCase = true)) {
+                            "Offline — mesh balance sync not available in this screen yet"
+                        } else {
+                            "Offline — balance will update when internet is available"
+                        }
                     }
                 } else {
                     _errorMessage.value = "Balance refresh failed: ${error.message}"

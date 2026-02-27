@@ -67,6 +67,33 @@ class SolanaRelayHandlerTest {
     }
 
     @Test
+    fun handleRelayReceipt_confirmedWithoutPendingTrackingStillMarksConfirmed() = runBlocking {
+        val dao = FakeTransactionDao()
+        val requestId = "tx-confirmed-late-1"
+        dao.insertTransaction(baseTx(requestId).copy(status = TransactionStatus.BROADCASTING.value))
+
+        val handler = createHandler(dao)
+        // Intentionally do not call trackOutgoingRequest(requestId)
+
+        val accepted = handler.handleRelayReceipt(
+            SolanaRelayReceipt(
+                requestId = requestId,
+                status = RelayReceiptStatus.CONFIRMED,
+                txSignature = "sig-late-1",
+                errorMessage = ""
+            )
+        )
+
+        assertTrue(accepted)
+        kotlinx.coroutines.delay(50)
+        val updated = dao.getTransaction(requestId)!!
+        assertEquals(TransactionStatus.CONFIRMED.value, updated.status)
+        assertEquals("sig-late-1", updated.txSignature)
+
+        handler.shutdown()
+    }
+
+    @Test
     fun handleRelayReceipt_retryableFailureRequeues() = runBlocking {
         val dao = FakeTransactionDao()
         val requestId = "tx-retry-1"
@@ -131,6 +158,12 @@ class SolanaRelayHandlerTest {
 
             override suspend fun confirmTransaction(signature: String): Result<Boolean> =
                 Result.success(true)
+
+            override suspend fun getBalance(address: String): Result<Long> =
+                Result.success(1_000_000_000L)
+
+            override suspend fun getCurrentSlot(): Result<Long> =
+                Result.success(1L)
         }
         return SolanaRelayHandler(rpcGateway = rpc, transactionDao = dao)
     }
