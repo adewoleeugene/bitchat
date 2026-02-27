@@ -34,12 +34,24 @@ class SolanaWalletService @Inject constructor(
     companion object {
         private const val TAG = "SolanaWalletService"
         private const val PREFS_NAME = "solana_wallet_secure"
+        private const val AUDIT_PREFS_NAME = "solana_wallet_audit"
         private const val KEY_MNEMONIC = "wallet_mnemonic"
         private const val KEY_PRIVATE_KEY = "wallet_private_key"
         private const val KEY_PUBLIC_KEY = "wallet_public_key"
+        private const val KEY_WALLET_ORIGIN = "wallet_origin"
+        private const val KEY_IDENTITY_FINGERPRINT = "wallet_identity_fingerprint"
+        private const val KEY_EXPORT_LAST_AT = "wallet_export_last_at"
+        private const val KEY_EXPORT_COUNT = "wallet_export_count"
+        private const val KEY_EXPORT_RECENT = "wallet_export_recent"
         private const val IDENTITY_PREFS_NAME = "bitchat_crypto"
         private const val IDENTITY_ED25519_PRIVATE_KEY_PREF = "ed25519_signing_private_key"
         private const val LAMPORTS_PER_SOL = 1_000_000_000L
+        private const val EXPORT_COOLDOWN_MS = 30_000L
+        private const val MAX_AUDIT_RECENT_ENTRIES = 5
+        private const val ORIGIN_IDENTITY_DERIVED = "identity_derived"
+        private const val ORIGIN_MNEMONIC = "mnemonic"
+        private const val ORIGIN_IMPORTED_MNEMONIC = "imported_mnemonic"
+        private const val ORIGIN_IMPORTED_PRIVATE_KEY = "imported_private_key"
     }
 
     private val ed25519Spec = EdDSANamedCurveTable.getByName(EdDSANamedCurveTable.ED_25519)
@@ -67,12 +79,96 @@ class SolanaWalletService @Inject constructor(
         }
     }
 
+    private val auditPrefs by lazy {
+        context.getSharedPreferences(AUDIT_PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
     /**
      * Check if a wallet already exists.
      */
     fun hasWallet(): Boolean {
         ensureWalletInitializedFromIdentity()
         return securePrefs.contains(KEY_PRIVATE_KEY)
+    }
+
+    /**
+     * Explain why wallet bootstrap is unavailable when no wallet exists.
+     * Returns null when wallet material is available.
+     */
+    fun getInitializationIssueMessage(): String? {
+        ensureWalletInitializedFromIdentity()
+        if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) return null
+
+        val identityPrivB64 = context
+            .getSharedPreferences(IDENTITY_PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(IDENTITY_ED25519_PRIVATE_KEY_PREF, null)
+            ?: return "Wallet identity key not found yet. Reopen chat and try again."
+
+        val decoded = try {
+            android.util.Base64.decode(identityPrivB64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) {
+            return "Stored identity key is invalid. Recreate identity or import a wallet key."
+        }
+
+        if (decoded.size != 32) {
+            return "Stored identity key has invalid length. Recreate identity or import a wallet key."
+        }
+
+        return "Wallet could not be initialized from identity. Try importing a private key."
+    }
+
+    fun getWalletSourceLabel(): String? {
+        val origin = securePrefs.getString(KEY_WALLET_ORIGIN, null)
+        return when (origin) {
+            ORIGIN_IDENTITY_DERIVED -> "Identity-Derived Wallet"
+            ORIGIN_MNEMONIC -> "Mnemonic Wallet"
+            ORIGIN_IMPORTED_MNEMONIC -> "Imported Mnemonic Wallet"
+            ORIGIN_IMPORTED_PRIVATE_KEY -> "Imported Private Key Wallet"
+            else -> runBlocking(Dispatchers.IO) { walletDao.getActiveWallet()?.label }
+        }
+    }
+
+    fun getLifecycleWarningMessage(): String? {
+        val origin = securePrefs.getString(KEY_WALLET_ORIGIN, null)
+        if (origin != ORIGIN_IDENTITY_DERIVED) return null
+        val storedFingerprint = securePrefs.getString(KEY_IDENTITY_FINGERPRINT, null) ?: return null
+        val currentFingerprint = currentIdentityFingerprint()
+        return if (currentFingerprint != null && currentFingerprint != storedFingerprint) {
+            "Identity key changed since wallet derivation. Verify backup and address continuity."
+        } else {
+            null
+        }
+    }
+
+    fun canRevealPrivateKeyForExport(nowMs: Long = System.currentTimeMillis()): Result<Unit> {
+        val lastAt = auditPrefs.getLong(KEY_EXPORT_LAST_AT, 0L)
+        val elapsed = nowMs - lastAt
+        if (lastAt > 0L && elapsed in 0 until EXPORT_COOLDOWN_MS) {
+            val remaining = ((EXPORT_COOLDOWN_MS - elapsed) / 1000L).coerceAtLeast(1L)
+            return Result.failure(IllegalStateException("Please wait ${remaining}s before exporting again."))
+        }
+        return Result.success(Unit)
+    }
+
+    fun markPrivateKeyExportRevealed(nowMs: Long = System.currentTimeMillis()) {
+        val currentCount = auditPrefs.getInt(KEY_EXPORT_COUNT, 0)
+        val recentRaw = auditPrefs.getString(KEY_EXPORT_RECENT, "").orEmpty()
+        val updatedRecent = (recentRaw.split(",").filter { it.isNotBlank() } + nowMs.toString())
+            .takeLast(MAX_AUDIT_RECENT_ENTRIES)
+            .joinToString(",")
+        auditPrefs.edit()
+            .putLong(KEY_EXPORT_LAST_AT, nowMs)
+            .putInt(KEY_EXPORT_COUNT, currentCount + 1)
+            .putString(KEY_EXPORT_RECENT, updatedRecent)
+            .apply()
+    }
+
+    fun getPrivateKeyExportAuditSummary(): String {
+        val count = auditPrefs.getInt(KEY_EXPORT_COUNT, 0)
+        val lastAt = auditPrefs.getLong(KEY_EXPORT_LAST_AT, 0L)
+        if (count == 0 || lastAt <= 0L) return "Private key export has not been used."
+        val minutesAgo = ((System.currentTimeMillis() - lastAt) / 60_000L).coerceAtLeast(0L)
+        return "Private key export used $count time(s), last ${minutesAgo}m ago."
     }
 
     /**
@@ -98,6 +194,8 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_MNEMONIC, mnemonicPhrase)
                 .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
                 .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .putString(KEY_WALLET_ORIGIN, ORIGIN_MNEMONIC)
+                .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
 
             // Cache keys
@@ -142,6 +240,8 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_MNEMONIC, mnemonicPhrase)
                 .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
                 .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .putString(KEY_WALLET_ORIGIN, ORIGIN_IMPORTED_MNEMONIC)
+                .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
 
             // Cache keys
@@ -183,6 +283,8 @@ class SolanaWalletService @Inject constructor(
                 .remove(KEY_MNEMONIC)
                 .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
                 .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .putString(KEY_WALLET_ORIGIN, ORIGIN_IMPORTED_PRIVATE_KEY)
+                .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
 
             cacheKeypair(keypair.first)
@@ -336,6 +438,7 @@ class SolanaWalletService @Inject constructor(
     suspend fun deleteWallet() = withContext(Dispatchers.IO) {
         val publicKey = getPublicKeyBase58()
         securePrefs.edit().clear().apply()
+        auditPrefs.edit().clear().apply()
         cachedPrivateKey = null
         cachedPublicKey = null
         if (publicKey != null) {
@@ -385,6 +488,8 @@ class SolanaWalletService @Inject constructor(
             securePrefs.edit()
                 .putString(KEY_PRIVATE_KEY, android.util.Base64.encodeToString(keypair.first, android.util.Base64.NO_WRAP))
                 .putString(KEY_PUBLIC_KEY, android.util.Base64.encodeToString(keypair.second, android.util.Base64.NO_WRAP))
+                .putString(KEY_WALLET_ORIGIN, ORIGIN_IDENTITY_DERIVED)
+                .putString(KEY_IDENTITY_FINGERPRINT, currentIdentityFingerprint())
                 .apply()
 
             cacheKeypair(keypair.first)
@@ -413,6 +518,21 @@ class SolanaWalletService @Inject constructor(
                 }
             }
         } catch (_: Exception) { }
+    }
+
+    private fun currentIdentityFingerprint(): String? {
+        return try {
+            val identityPrivB64 = context
+                .getSharedPreferences(IDENTITY_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(IDENTITY_ED25519_PRIVATE_KEY_PREF, null)
+                ?: return null
+            val identityPrivateKey = android.util.Base64.decode(identityPrivB64, android.util.Base64.DEFAULT)
+            if (identityPrivateKey.size != 32) return null
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(identityPrivateKey)
+            digest.take(8).joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun decodeBase58(input: String): ByteArray {

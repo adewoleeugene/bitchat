@@ -272,11 +272,17 @@ class WalletViewModel @Inject constructor(
     }
 
     fun showPrivateKeyExport() {
+        val gate = walletService.canRevealPrivateKeyForExport()
+        if (gate.isFailure) {
+            _errorMessage.value = gate.exceptionOrNull()?.message ?: "Private key export temporarily locked"
+            return
+        }
         val privateKey = walletService.getPrivateKeyBase58()
         if (privateKey != null) {
+            walletService.markPrivateKeyExportRevealed()
             _privateKeyBase58.value = privateKey
         } else {
-            _errorMessage.value = "Private key not available"
+            _errorMessage.value = walletService.getInitializationIssueMessage() ?: "Private key not available"
         }
     }
 
@@ -350,7 +356,12 @@ class WalletViewModel @Inject constructor(
                 kotlinx.coroutines.delay(5000)
                 silentRefreshBalance()
             }.onFailure { error ->
-                _errorMessage.value = "Send failed: ${error.message}"
+                val issue = walletService.getInitializationIssueMessage()
+                _errorMessage.value = if ((error.message ?: "").contains("No wallet found", ignoreCase = true) && issue != null) {
+                    "Send failed: $issue"
+                } else {
+                    "Send failed: ${error.message}"
+                }
             }
             _isSending.value = false
         }

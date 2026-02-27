@@ -6,6 +6,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.text.format.DateUtils
 import android.widget.Toast
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -35,6 +37,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -146,7 +150,7 @@ fun WalletScreen(
                         onDelete = { viewModel.deleteWallet() },
                         onCreateMnemonicWallet = { viewModel.createWallet() },
                         onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
-                        onExportPrivateKey = { viewModel.showPrivateKeyExport() },
+                        onExportPrivateKey = { authenticateThenExportPrivateKey(context, viewModel) },
                         onExportRecoveryPhrase = { viewModel.showMnemonicBackup() },
                         onSend = { viewModel.showSendDialog() },
                         onTransactionHistory = { viewModel.showTransactionHistory() }
@@ -220,6 +224,57 @@ fun WalletScreen(
             onDismiss = { viewModel.dismissImportPrivateKeyDialog() }
         )
     }
+}
+
+private fun authenticateThenExportPrivateKey(context: Context, viewModel: WalletViewModel) {
+    val activity = context.findFragmentActivity()
+    if (activity == null) {
+        Toast.makeText(context, "Authentication unavailable on this screen", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val allowed = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    val biometric = BiometricManager.from(context)
+    when (biometric.canAuthenticate(allowed)) {
+        BiometricManager.BIOMETRIC_SUCCESS -> {
+            val executor = ContextCompat.getMainExecutor(context)
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        viewModel.showPrivateKeyExport()
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Authenticate to export private key")
+                .setSubtitle("Protect your wallet backup")
+                .setAllowedAuthenticators(allowed)
+                .build()
+            prompt.authenticate(info)
+        }
+        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+            Toast.makeText(context, "Set up biometrics or device lock to export private key", Toast.LENGTH_LONG).show()
+        }
+        else -> {
+            Toast.makeText(context, "Biometric authentication not available", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+private fun Context.findFragmentActivity(): FragmentActivity? {
+    var current = this
+    while (current is android.content.ContextWrapper) {
+        if (current is FragmentActivity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 @Composable
@@ -344,6 +399,19 @@ private fun WalletReadyContent(
                     color = BitchatColors.TextTertiary
                 )
             }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Source: ${state.label}",
+                fontFamily = CourierPrimeFamily,
+                fontSize = 11.sp,
+                color = BitchatColors.TextTertiary
+            )
+            Text(
+                text = "Creating or importing a wallet replaces the active one",
+                fontFamily = CourierPrimeFamily,
+                fontSize = 10.sp,
+                color = BitchatColors.TextTertiary
+            )
         }
     }
 
