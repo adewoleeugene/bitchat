@@ -376,8 +376,33 @@ class ChatViewModel(
                 }
             }
 
-            // Keep payment progress internals off the main chat timeline to avoid spam.
-            paymentManager.onStatusEvent = null
+            // Surface high-signal payment progress so mesh/offline flow does not
+            // look stalled, while still keeping relay-debug chatter out of chat.
+            paymentManager.onStatusEvent = { event ->
+                val lowered = event.lowercase()
+                val shouldShow = lowered.contains("offline") ||
+                    lowered.contains("requesting blockhash") ||
+                    lowered.contains("signed tx sent") ||
+                    lowered.contains("relay not available") ||
+                    lowered.contains("blockhash request failed") ||
+                    lowered.contains("received empty blockhash") ||
+                    lowered.contains("payment confirmed")
+                if (shouldShow) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        val dedupKey = "status:$event"
+                        if (notifiedStatusEvents.contains(dedupKey)) return@launch
+                        notifiedStatusEvents.add(dedupKey)
+                        messageManager.addMessage(
+                            BitchatMessage(
+                                sender = "system",
+                                content = "payment status: $event",
+                                timestamp = java.util.Date(),
+                                isRelay = false
+                            )
+                        )
+                    }
+                }
+            }
 
             // Wire up message notarization service
             notarizationService = solanaEntryPoint.messageNotarizationService()
@@ -1373,6 +1398,7 @@ class ChatViewModel(
      * Track confirmed/failed transaction IDs to avoid duplicate system messages.
      */
     private val notifiedTransactionIds = mutableSetOf<String>()
+    private val notifiedStatusEvents = mutableSetOf<String>()
 
     private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
         val paymentManager = entryPoint.solanaPaymentManager()
@@ -1389,6 +1415,10 @@ class ChatViewModel(
                         } else tx.recipientPublicKey
 
                         val statusMessage = when (tx.status) {
+                            com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
+                                notifiedTransactionIds.add(key)
+                                "payment preparing: $amountSol SOL to $shortRecipient (awaiting blockhash)"
+                            }
                             com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
                                 notifiedTransactionIds.add(key)
                                 "payment broadcasting: $amountSol SOL to $shortRecipient"
