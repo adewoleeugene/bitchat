@@ -385,8 +385,7 @@ class ChatViewModel(
                     lowered.contains("signed tx sent") ||
                     lowered.contains("relay not available") ||
                     lowered.contains("blockhash request failed") ||
-                    lowered.contains("received empty blockhash") ||
-                    lowered.contains("payment confirmed")
+                    lowered.contains("received empty blockhash")
                 if (shouldShow) {
                     viewModelScope.launch(Dispatchers.Main) {
                         val dedupKey = "status:$event"
@@ -417,6 +416,7 @@ class ChatViewModel(
 
             // Observe transaction status changes and show updates in chat
             observeTransactionStatus(solanaEntryPoint)
+            observeIncomingBalanceCredits(solanaEntryPoint)
         } catch (e: Exception) {
             Log.w(TAG, "Solana services not available: ${e.message}")
         }
@@ -1399,9 +1399,13 @@ class ChatViewModel(
      */
     private val notifiedTransactionIds = mutableSetOf<String>()
     private val notifiedStatusEvents = mutableSetOf<String>()
+    private var lastObservedWalletAddress: String? = null
+    private var lastObservedWalletLamports: Long? = null
+    private val notifiedIncomingCreditKeys = mutableSetOf<String>()
 
     private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
         val paymentManager = entryPoint.solanaPaymentManager()
+        val myWalletAddress = entryPoint.solanaWalletService().getPublicKeyBase58()
         viewModelScope.launch {
             paymentManager.observeRecentTransactions()
                 .collect { transactions ->
@@ -1413,6 +1417,9 @@ class ChatViewModel(
                         val shortRecipient = if (tx.recipientPublicKey.length > 12) {
                             "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
                         } else tx.recipientPublicKey
+                        val shortSender = if (tx.senderPublicKey.length > 12) {
+                            "${tx.senderPublicKey.take(8)}...${tx.senderPublicKey.takeLast(4)}"
+                        } else tx.senderPublicKey
 
                         val statusMessage = when (tx.status) {
                             com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
@@ -1425,8 +1432,16 @@ class ChatViewModel(
                             }
                             com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment confirmed: $amountSol SOL to $shortRecipient" +
-                                    if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                val isIncoming = myWalletAddress != null &&
+                                    tx.recipientPublicKey == myWalletAddress &&
+                                    tx.senderPublicKey != myWalletAddress
+                                if (isIncoming) {
+                                    "payment received: $amountSol SOL from $shortSender" +
+                                        if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                } else {
+                                    "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                        if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                }
                             }
                             com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
                                 notifiedTransactionIds.add(key)
@@ -1450,6 +1465,48 @@ class ChatViewModel(
                         }
                     }
                 }
+        }
+    }
+
+    private fun observeIncomingBalanceCredits(entryPoint: SolanaEntryPoint) {
+        val walletService = entryPoint.solanaWalletService()
+        val paymentManager = entryPoint.solanaPaymentManager()
+        viewModelScope.launch {
+            walletService.observeActiveWallet().collect { wallet ->
+                if (wallet == null) {
+                    lastObservedWalletAddress = null
+                    lastObservedWalletLamports = null
+                    return@collect
+                }
+
+                if (lastObservedWalletAddress != wallet.publicKey) {
+                    lastObservedWalletAddress = wallet.publicKey
+                    lastObservedWalletLamports = wallet.lastBalanceLamports
+                    return@collect
+                }
+
+                val previous = lastObservedWalletLamports
+                val current = wallet.lastBalanceLamports
+                if (previous != null && current > previous) {
+                    val delta = current - previous
+                    val dedupKey = "credit:${wallet.publicKey}:${wallet.lastBalanceUpdatedAt}:$current"
+                    if (!notifiedIncomingCreditKeys.contains(dedupKey)) {
+                        notifiedIncomingCreditKeys.add(dedupKey)
+                        val deltaSol = paymentManager.lamportsToSolDisplay(delta)
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            messageManager.addMessage(
+                                BitchatMessage(
+                                    sender = "system",
+                                    content = "payment received: $deltaSol SOL",
+                                    timestamp = Date(),
+                                    isRelay = false
+                                )
+                            )
+                        }
+                    }
+                }
+                lastObservedWalletLamports = current
+            }
         }
     }
 
