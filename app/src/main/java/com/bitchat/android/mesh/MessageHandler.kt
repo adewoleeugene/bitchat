@@ -41,6 +41,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleNoiseEncrypted(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         
         Log.d(TAG, "Processing Noise encrypted message from $peerID (${packet.payload.size} bytes)")
         
@@ -354,6 +355,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleNoiseHandshake(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         
         Log.d(TAG, "Processing Noise handshake from $peerID (${packet.payload.size} bytes)")
         
@@ -407,6 +409,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleMessage(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         if (peerID == myPeerID) return
         val senderNickname = delegate?.getPeerNickname(peerID)
         if (senderNickname != null) {
@@ -633,6 +636,18 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         } catch (_: Exception) {
             // Best-effort; ignore errors
         }
+    }
+
+    /**
+     * Ensure a peer appears in local peer tracking even before a verified ANNOUNCE
+     * is processed. This prevents one-sided "invisible peer" states when Noise/private
+     * traffic is already flowing.
+     */
+    private fun ensurePeerTracked(peerID: String) {
+        if (peerID == "unknown" || peerID == myPeerID) return
+        if (delegate?.getPeerInfo(peerID) != null) return
+        val fallbackNickname = "peer-${peerID.take(4)}"
+        delegate?.addOrUpdatePeer(peerID, fallbackNickname)
     }
 }
 

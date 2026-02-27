@@ -335,6 +335,15 @@ private fun WalletReadyContent(
                 fontSize = 12.sp,
                 color = BitchatColors.TextSecondary
             )
+            if (state.usdEstimateFromLastKnownPrice) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "USD estimate (last known price)",
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 11.sp,
+                    color = BitchatColors.TextTertiary
+                )
+            }
         }
     }
 

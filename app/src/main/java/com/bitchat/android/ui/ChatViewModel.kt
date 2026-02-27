@@ -334,17 +334,8 @@ class ChatViewModel(
             relayHandler.onSendRelayAck = { ack ->
                 meshService.broadcastSolanaRelayAck(ack)
             }
-            relayHandler.onRelayEvent = { event ->
-                viewModelScope.launch(Dispatchers.Main) {
-                    val msg = BitchatMessage(
-                        sender = "system",
-                        content = "solana relay: $event",
-                        timestamp = java.util.Date(),
-                        isRelay = false
-                    )
-                    messageManager.addMessage(msg)
-                }
-            }
+            // Keep relay internals off the main chat timeline to avoid spam.
+            relayHandler.onRelayEvent = null
 
             // Wire mesh relay fallback into payment manager
             val paymentManager = solanaEntryPoint.solanaPaymentManager()
@@ -385,18 +376,8 @@ class ChatViewModel(
                 }
             }
 
-            // Wire payment manager status events to system messages in chat
-            paymentManager.onStatusEvent = { event ->
-                viewModelScope.launch(Dispatchers.Main) {
-                    val msg = BitchatMessage(
-                        sender = "system",
-                        content = "solana: $event",
-                        timestamp = java.util.Date(),
-                        isRelay = false
-                    )
-                    messageManager.addMessage(msg)
-                }
-            }
+            // Keep payment progress internals off the main chat timeline to avoid spam.
+            paymentManager.onStatusEvent = null
 
             // Wire up message notarization service
             notarizationService = solanaEntryPoint.messageNotarizationService()
@@ -1408,13 +1389,9 @@ class ChatViewModel(
                         } else tx.recipientPublicKey
 
                         val statusMessage = when (tx.status) {
-                            com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
-                                notifiedTransactionIds.add(key)
-                                "payment: $amountSol SOL to $shortRecipient — requesting blockhash from mesh peer..."
-                            }
                             com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment: $amountSol SOL to $shortRecipient — broadcasting via relay peer..."
+                                "payment broadcasting: $amountSol SOL to $shortRecipient"
                             }
                             com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
                                 notifiedTransactionIds.add(key)

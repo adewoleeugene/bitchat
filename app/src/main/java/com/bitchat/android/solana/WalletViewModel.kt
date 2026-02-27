@@ -75,6 +75,7 @@ class WalletViewModel @Inject constructor(
     // Cached SOL/USD price
     private var cachedSolPrice: Double? = null
     private var lastRefreshViaMesh: Boolean = false
+    private var usdEstimateFromLastKnownPrice: Boolean = false
 
     init {
         loadWalletState()
@@ -100,7 +101,8 @@ class WalletViewModel @Inject constructor(
                             balanceUsd = usdString,
                             lastUpdated = wallet.lastBalanceUpdatedAt,
                             label = wallet.label,
-                            lastRefreshViaMesh = lastRefreshViaMesh
+                            lastRefreshViaMesh = lastRefreshViaMesh,
+                            usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
                         )
                     } else {
                         _walletState.value = WalletUiState.NoWallet
@@ -166,10 +168,14 @@ class WalletViewModel @Inject constructor(
     fun refreshBalance() {
         viewModelScope.launch {
             _isRefreshing.value = true
+            val usedFallbackPrice = ensureFallbackSolPriceFromCurrentState()
+            var fetchedFreshPrice = false
             // Fetch price and balance in parallel
             val priceJob = launch {
                 rpcService.getSolPrice().onSuccess { price ->
                     cachedSolPrice = price
+                    fetchedFreshPrice = true
+                    usdEstimateFromLastKnownPrice = false
                 }
             }
             val result = walletService.refreshBalance()
@@ -191,6 +197,9 @@ class WalletViewModel @Inject constructor(
                 Log.e(TAG, "Balance refresh failed", error)
             }
             priceJob.join()
+            if (usedFallbackPrice && !fetchedFreshPrice) {
+                usdEstimateFromLastKnownPrice = true
+            }
             refreshUsdFromCachedPrice()
             _isRefreshing.value = false
         }
@@ -219,8 +228,33 @@ class WalletViewModel @Inject constructor(
         if (current is WalletUiState.Ready) {
             val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
             val usd = solAmount * price
-            _walletState.value = current.copy(balanceUsd = "$${"%,.0f".format(usd)}")
+            _walletState.value = current.copy(
+                balanceUsd = "$${"%,.0f".format(usd)}",
+                usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
+            )
         }
+    }
+
+    /**
+     * If we cannot fetch price while offline, reuse an implied local price from
+     * the currently displayed wallet state so USD can still refresh with new SOL balance.
+     */
+    private fun ensureFallbackSolPriceFromCurrentState(): Boolean {
+        if (cachedSolPrice != null) return false
+        val current = _walletState.value as? WalletUiState.Ready ?: return false
+        val usdString = current.balanceUsd ?: return false
+        val numericUsd = usdString
+            .replace("$", "")
+            .replace(",", "")
+            .trim()
+            .toDoubleOrNull() ?: return false
+        if (current.balanceLamports <= 0L || numericUsd <= 0.0) return false
+
+        val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
+        if (solAmount <= 0.0) return false
+
+        cachedSolPrice = numericUsd / solAmount
+        return true
     }
 
     fun showMnemonicBackup() {
@@ -352,6 +386,7 @@ sealed class WalletUiState {
         val balanceUsd: String? = null,
         val lastUpdated: Long,
         val label: String,
-        val lastRefreshViaMesh: Boolean = false
+        val lastRefreshViaMesh: Boolean = false,
+        val usdEstimateFromLastKnownPrice: Boolean = false
     ) : WalletUiState()
 }
