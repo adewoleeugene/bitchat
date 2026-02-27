@@ -55,7 +55,6 @@ fun AboutSheet(
             val walletService = entryPoint.solanaWalletService()
             WalletAboutSummary(
                 address = walletService.getPublicKeyBase58(),
-                sourceLabel = walletService.getWalletSourceLabel(),
                 initIssue = walletService.getInitializationIssueMessage(),
                 lifecycleWarning = walletService.getLifecycleWarningMessage(),
                 exportAudit = walletService.getPrivateKeyExportAuditSummary()
@@ -63,7 +62,6 @@ fun AboutSheet(
         } catch (_: Exception) {
             WalletAboutSummary(
                 address = null,
-                sourceLabel = null,
                 initIssue = "Wallet service unavailable",
                 lifecycleWarning = null,
                 exportAudit = null
@@ -547,14 +545,6 @@ fun AboutSheet(
                                                 color = colorScheme.onSurface.copy(alpha = 0.6f)
                                             )
                                         }
-                                        walletSummary.sourceLabel?.let { source ->
-                                            Text(
-                                                text = "Source: $source",
-                                                fontSize = 11.sp,
-                                                fontFamily = CourierPrimeFamily,
-                                                color = colorScheme.onSurface.copy(alpha = 0.6f)
-                                            )
-                                        }
                                         walletSummary.lifecycleWarning?.let { warning ->
                                             Text(
                                                 text = warning,
@@ -691,7 +681,6 @@ fun AboutSheet(
 
 private data class WalletAboutSummary(
     val address: String?,
-    val sourceLabel: String?,
     val initIssue: String?,
     val lifecycleWarning: String?,
     val exportAudit: String?

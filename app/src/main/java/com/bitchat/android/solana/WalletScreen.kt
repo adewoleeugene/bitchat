@@ -40,6 +40,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bitchat.android.data.local.entities.WalletEntity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.bitchat.android.ui.theme.BitchatColors
@@ -68,6 +69,7 @@ fun WalletScreen(
     val sendSuccess by viewModel.sendSuccess.collectAsState()
     val showTxHistory by viewModel.showTransactionHistory.collectAsState()
     val transactions by viewModel.recentTransactions.collectAsState()
+    val allWallets by viewModel.allWallets.collectAsState()
     val context = LocalContext.current
 
     // Transaction history screen (full screen overlay)
@@ -145,10 +147,12 @@ fun WalletScreen(
                     val state = walletState as WalletUiState.Ready
                     WalletReadyContent(
                         state = state,
+                        wallets = allWallets,
                         isRefreshing = isRefreshing,
                         onRefresh = { viewModel.refreshBalance() },
                         onDelete = { viewModel.deleteWallet() },
                         onCreateMnemonicWallet = { viewModel.createWallet() },
+                        onSwitchWallet = { publicKey -> viewModel.switchActiveWallet(publicKey) },
                         onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
                         onExportPrivateKey = { authenticateThenExportPrivateKey(context, viewModel) },
                         onExportRecoveryPhrase = { viewModel.showMnemonicBackup() },
@@ -335,10 +339,12 @@ private fun NoWalletContent(
 @Composable
 private fun WalletReadyContent(
     state: WalletUiState.Ready,
+    wallets: List<WalletEntity>,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
     onCreateMnemonicWallet: () -> Unit,
+    onSwitchWallet: (String) -> Unit,
     onImportPrivateKey: () -> Unit,
     onExportPrivateKey: () -> Unit,
     onExportRecoveryPhrase: () -> Unit,
@@ -349,7 +355,9 @@ private fun WalletReadyContent(
     var showQr by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showCreateMnemonicConfirm by remember { mutableStateOf(false) }
+    var showSwitchWalletDialog by remember { mutableStateOf(false) }
     var autoPaymentsEnabled by remember { mutableStateOf(true) }
+    val canCreateMnemonicWallet = state.label.equals("Identity-Derived Wallet", ignoreCase = true)
 
     Spacer(modifier = Modifier.height(24.dp))
 
@@ -399,15 +407,8 @@ private fun WalletReadyContent(
                     color = BitchatColors.TextTertiary
                 )
             }
-            Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Source: ${state.label}",
-                fontFamily = CourierPrimeFamily,
-                fontSize = 11.sp,
-                color = BitchatColors.TextTertiary
-            )
-            Text(
-                text = "Creating or importing a wallet replaces the active one",
+                text = "Creating or importing a wallet sets a new active wallet",
                 fontFamily = CourierPrimeFamily,
                 fontSize = 10.sp,
                 color = BitchatColors.TextTertiary
@@ -524,19 +525,37 @@ private fun WalletReadyContent(
         }
     )
 
-    WalletMenuItem(
-        title = "Create Mnemonic Wallet",
-        subtitle = "Replace with a new 24-word wallet",
-        onClick = { showCreateMnemonicConfirm = true },
-        trailing = {
-            Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
-                contentDescription = null,
-                tint = BitchatColors.TextDisabled,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    )
+    if (wallets.size > 1) {
+        WalletMenuItem(
+            title = "Switch Wallet",
+            subtitle = "Use a different saved wallet",
+            onClick = { showSwitchWalletDialog = true },
+            trailing = {
+                Icon(
+                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    contentDescription = null,
+                    tint = BitchatColors.TextDisabled,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        )
+    }
+
+    if (canCreateMnemonicWallet) {
+        WalletMenuItem(
+            title = "Create Mnemonic Wallet",
+            subtitle = "Replace with a new 24-word wallet",
+            onClick = { showCreateMnemonicConfirm = true },
+            trailing = {
+                Icon(
+                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    contentDescription = null,
+                    tint = BitchatColors.TextDisabled,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        )
+    }
 
     WalletMenuItem(
         title = "Import Private Key",
@@ -621,7 +640,7 @@ private fun WalletReadyContent(
         )
     }
 
-    if (showCreateMnemonicConfirm) {
+    if (canCreateMnemonicWallet && showCreateMnemonicConfirm) {
         AlertDialog(
             onDismissRequest = { showCreateMnemonicConfirm = false },
             title = {
@@ -633,7 +652,7 @@ private fun WalletReadyContent(
             },
             text = {
                 Text(
-                    "This creates a new mnemonic wallet and replaces the current active wallet. Back up existing secrets first.",
+                    "This creates a new mnemonic wallet and makes it active. Your other wallets stay saved and can be switched later.",
                     fontFamily = CourierPrimeFamily,
                     color = BitchatColors.TextSecondary
                 )
@@ -651,6 +670,51 @@ private fun WalletReadyContent(
             dismissButton = {
                 TextButton(onClick = { showCreateMnemonicConfirm = false }) {
                     Text("Cancel", fontFamily = CourierPrimeFamily)
+                }
+            }
+        )
+    }
+
+    if (showSwitchWalletDialog) {
+        AlertDialog(
+            onDismissRequest = { showSwitchWalletDialog = false },
+            title = {
+                Text(
+                    "Switch Wallet",
+                    fontFamily = CourierPrimeFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    wallets.forEach { wallet ->
+                        OutlinedButton(
+                            onClick = {
+                                showSwitchWalletDialog = false
+                                onSwitchWallet(wallet.publicKey)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = wallet.publicKey != state.address,
+                            shape = BitchatShapes.Button,
+                            border = BorderStroke(1.dp, BitchatColors.Border),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BitchatColors.TextPrimary)
+                        ) {
+                            val short = if (wallet.publicKey.length > 12) {
+                                "${wallet.publicKey.take(6)}...${wallet.publicKey.takeLast(4)}"
+                            } else {
+                                wallet.publicKey
+                            }
+                            Text(
+                                text = if (wallet.publicKey == state.address) "$short (Active)" else short,
+                                fontFamily = CourierPrimeFamily
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSwitchWalletDialog = false }) {
+                    Text("Close", fontFamily = CourierPrimeFamily)
                 }
             }
         )

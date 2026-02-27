@@ -9,6 +9,7 @@ import com.bitchat.android.data.local.entities.WalletEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import net.i2p.crypto.eddsa.EdDSAPrivateKey
@@ -40,6 +41,11 @@ class SolanaWalletService @Inject constructor(
         private const val KEY_PUBLIC_KEY = "wallet_public_key"
         private const val KEY_WALLET_ORIGIN = "wallet_origin"
         private const val KEY_IDENTITY_FINGERPRINT = "wallet_identity_fingerprint"
+        private const val STORE_PREFIX_PRIVATE_KEY = "wallet_store_priv_"
+        private const val STORE_PREFIX_PUBLIC_KEY = "wallet_store_pub_"
+        private const val STORE_PREFIX_MNEMONIC = "wallet_store_mnemonic_"
+        private const val STORE_PREFIX_ORIGIN = "wallet_store_origin_"
+        private const val STORE_PREFIX_IDENTITY_FINGERPRINT = "wallet_store_identity_fp_"
         private const val KEY_EXPORT_LAST_AT = "wallet_export_last_at"
         private const val KEY_EXPORT_COUNT = "wallet_export_count"
         private const val KEY_EXPORT_RECENT = "wallet_export_recent"
@@ -53,6 +59,15 @@ class SolanaWalletService @Inject constructor(
         private const val ORIGIN_IMPORTED_MNEMONIC = "imported_mnemonic"
         private const val ORIGIN_IMPORTED_PRIVATE_KEY = "imported_private_key"
     }
+
+    private data class StoredWalletMaterial(
+        val publicKeyBase58: String,
+        val privateKeyBase64: String,
+        val publicKeyBase64: String,
+        val mnemonic: String?,
+        val origin: String?,
+        val identityFingerprint: String?
+    )
 
     private val ed25519Spec = EdDSANamedCurveTable.getByName(EdDSANamedCurveTable.ED_25519)
 
@@ -88,6 +103,7 @@ class SolanaWalletService @Inject constructor(
      */
     fun hasWallet(): Boolean {
         ensureWalletInitializedFromIdentity()
+        ensureLegacyActiveBackedUp()
         return securePrefs.contains(KEY_PRIVATE_KEY)
     }
 
@@ -97,6 +113,7 @@ class SolanaWalletService @Inject constructor(
      */
     fun getInitializationIssueMessage(): String? {
         ensureWalletInitializedFromIdentity()
+        ensureLegacyActiveBackedUp()
         if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) return null
 
         val identityPrivB64 = context
@@ -177,6 +194,7 @@ class SolanaWalletService @Inject constructor(
      */
     suspend fun createWallet(): Result<String> = withContext(Dispatchers.IO) {
         try {
+            backupCurrentWalletMaterial()
             // Generate 24-word mnemonic (256 bits of entropy)
             val mnemonicCode = Mnemonics.MnemonicCode(Mnemonics.WordCount.COUNT_24)
             val mnemonicPhrase = String(mnemonicCode.chars)
@@ -197,6 +215,7 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_WALLET_ORIGIN, ORIGIN_MNEMONIC)
                 .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
+            backupCurrentWalletMaterial()
 
             // Cache keys
             cacheKeypair(keypair.first)
@@ -225,6 +244,7 @@ class SolanaWalletService @Inject constructor(
      */
     suspend fun restoreWallet(mnemonicPhrase: String): Result<String> = withContext(Dispatchers.IO) {
         try {
+            backupCurrentWalletMaterial()
             // Validate mnemonic
             val mnemonicCode = Mnemonics.MnemonicCode(mnemonicPhrase)
             mnemonicCode.validate()
@@ -243,6 +263,7 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_WALLET_ORIGIN, ORIGIN_IMPORTED_MNEMONIC)
                 .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
+            backupCurrentWalletMaterial()
 
             // Cache keys
             cacheKeypair(keypair.first)
@@ -271,6 +292,7 @@ class SolanaWalletService @Inject constructor(
      */
     suspend fun restoreWalletFromPrivateKeyBase58(privateKeyBase58: String): Result<String> = withContext(Dispatchers.IO) {
         try {
+            backupCurrentWalletMaterial()
             val privateKeyBytes = decodeBase58(privateKeyBase58.trim())
             if (privateKeyBytes.size != 32) {
                 return@withContext Result.failure(IllegalArgumentException("Private key must decode to 32 bytes"))
@@ -286,6 +308,7 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_WALLET_ORIGIN, ORIGIN_IMPORTED_PRIVATE_KEY)
                 .remove(KEY_IDENTITY_FINGERPRINT)
                 .apply()
+            backupCurrentWalletMaterial()
 
             cacheKeypair(keypair.first)
 
@@ -374,6 +397,31 @@ class SolanaWalletService @Inject constructor(
         return walletDao.observeActiveWallet()
     }
 
+    fun observeAllWallets(): Flow<List<WalletEntity>> {
+        return walletDao.observeAllWallets().map { wallets ->
+            wallets.filter { wallet ->
+                hasStoredWalletMaterial(wallet.publicKey)
+            }
+        }
+    }
+
+    suspend fun setActiveWallet(publicKeyBase58: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val material = getStoredWalletMaterial(publicKeyBase58)
+                ?: return@withContext Result.failure(
+                    IllegalStateException("Wallet key material unavailable for selected wallet")
+                )
+
+            applyAsActiveWallet(material)
+            val publicKeyBytes = android.util.Base64.decode(material.publicKeyBase64, android.util.Base64.NO_WRAP)
+            ensureWalletMetadata(publicKeyBytes, defaultLabel = "Wallet")
+            walletDao.setActiveWallet(publicKeyBase58)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /**
      * Convert lamports to SOL display string.
      */
@@ -436,15 +484,21 @@ class SolanaWalletService @Inject constructor(
      * Delete wallet data (mnemonic, keys, Room entry).
      */
     suspend fun deleteWallet() = withContext(Dispatchers.IO) {
-        val publicKey = getPublicKeyBase58()
-        securePrefs.edit().clear().apply()
-        auditPrefs.edit().clear().apply()
-        cachedPrivateKey = null
-        cachedPublicKey = null
-        if (publicKey != null) {
-            walletDao.deleteWallet(publicKey)
+        val activePublicKey = getPublicKeyBase58() ?: return@withContext
+        deleteStoredWalletMaterial(activePublicKey)
+        walletDao.deleteWallet(activePublicKey)
+
+        val nextWallet = walletDao.getAllWallets().firstOrNull()
+        if (nextWallet != null) {
+            setActiveWallet(nextWallet.publicKey)
+            Log.d(TAG, "Deleted wallet $activePublicKey and switched to ${nextWallet.publicKey}")
+        } else {
+            securePrefs.edit().clear().apply()
+            auditPrefs.edit().clear().apply()
+            cachedPrivateKey = null
+            cachedPublicKey = null
+            Log.d(TAG, "Deleted final wallet and cleared secure wallet state")
         }
-        Log.d(TAG, "Wallet deleted")
     }
 
     // --- Internal helpers ---
@@ -471,7 +525,10 @@ class SolanaWalletService @Inject constructor(
      * when no legacy wallet exists. This keeps legacy mnemonic wallets untouched.
      */
     private fun ensureWalletInitializedFromIdentity() {
-        if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) return
+        if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) {
+            ensureLegacyActiveBackedUp()
+            return
+        }
 
         try {
             val identityPrivB64 = context
@@ -491,6 +548,7 @@ class SolanaWalletService @Inject constructor(
                 .putString(KEY_WALLET_ORIGIN, ORIGIN_IDENTITY_DERIVED)
                 .putString(KEY_IDENTITY_FINGERPRINT, currentIdentityFingerprint())
                 .apply()
+            backupCurrentWalletMaterial()
 
             cacheKeypair(keypair.first)
             ensureWalletMetadata(keypair.second, "Identity-Derived Wallet")
@@ -518,6 +576,82 @@ class SolanaWalletService @Inject constructor(
                 }
             }
         } catch (_: Exception) { }
+    }
+
+    private fun ensureLegacyActiveBackedUp() {
+        try {
+            backupCurrentWalletMaterial()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun backupCurrentWalletMaterial() {
+        val privateKeyBase64 = securePrefs.getString(KEY_PRIVATE_KEY, null) ?: return
+        val publicKeyBase64 = securePrefs.getString(KEY_PUBLIC_KEY, null) ?: return
+        val publicKeyBytes = android.util.Base64.decode(publicKeyBase64, android.util.Base64.NO_WRAP)
+        val publicKeyBase58 = SolanaKeyDerivation.encodeBase58(publicKeyBytes)
+        val mnemonic = securePrefs.getString(KEY_MNEMONIC, null)
+        val origin = securePrefs.getString(KEY_WALLET_ORIGIN, null)
+        val identityFingerprint = securePrefs.getString(KEY_IDENTITY_FINGERPRINT, null)
+
+        securePrefs.edit()
+            .putString("$STORE_PREFIX_PRIVATE_KEY$publicKeyBase58", privateKeyBase64)
+            .putString("$STORE_PREFIX_PUBLIC_KEY$publicKeyBase58", publicKeyBase64)
+            .putString("$STORE_PREFIX_ORIGIN$publicKeyBase58", origin)
+            .putString("$STORE_PREFIX_IDENTITY_FINGERPRINT$publicKeyBase58", identityFingerprint)
+            .apply()
+
+        if (!mnemonic.isNullOrBlank()) {
+            securePrefs.edit().putString("$STORE_PREFIX_MNEMONIC$publicKeyBase58", mnemonic).apply()
+        } else {
+            securePrefs.edit().remove("$STORE_PREFIX_MNEMONIC$publicKeyBase58").apply()
+        }
+    }
+
+    private fun getStoredWalletMaterial(publicKeyBase58: String): StoredWalletMaterial? {
+        val privateKeyBase64 = securePrefs.getString("$STORE_PREFIX_PRIVATE_KEY$publicKeyBase58", null) ?: return null
+        val publicKeyBase64 = securePrefs.getString("$STORE_PREFIX_PUBLIC_KEY$publicKeyBase58", null) ?: return null
+        return StoredWalletMaterial(
+            publicKeyBase58 = publicKeyBase58,
+            privateKeyBase64 = privateKeyBase64,
+            publicKeyBase64 = publicKeyBase64,
+            mnemonic = securePrefs.getString("$STORE_PREFIX_MNEMONIC$publicKeyBase58", null),
+            origin = securePrefs.getString("$STORE_PREFIX_ORIGIN$publicKeyBase58", null),
+            identityFingerprint = securePrefs.getString("$STORE_PREFIX_IDENTITY_FINGERPRINT$publicKeyBase58", null)
+        )
+    }
+
+    private fun hasStoredWalletMaterial(publicKeyBase58: String): Boolean {
+        return securePrefs.contains("$STORE_PREFIX_PRIVATE_KEY$publicKeyBase58") &&
+            securePrefs.contains("$STORE_PREFIX_PUBLIC_KEY$publicKeyBase58")
+    }
+
+    private fun applyAsActiveWallet(material: StoredWalletMaterial) {
+        securePrefs.edit()
+            .putString(KEY_PRIVATE_KEY, material.privateKeyBase64)
+            .putString(KEY_PUBLIC_KEY, material.publicKeyBase64)
+            .putString(KEY_WALLET_ORIGIN, material.origin)
+            .putString(KEY_IDENTITY_FINGERPRINT, material.identityFingerprint)
+            .apply()
+
+        if (!material.mnemonic.isNullOrBlank()) {
+            securePrefs.edit().putString(KEY_MNEMONIC, material.mnemonic).apply()
+        } else {
+            securePrefs.edit().remove(KEY_MNEMONIC).apply()
+        }
+
+        val privateKeyBytes = android.util.Base64.decode(material.privateKeyBase64, android.util.Base64.NO_WRAP)
+        cacheKeypair(privateKeyBytes)
+    }
+
+    private fun deleteStoredWalletMaterial(publicKeyBase58: String) {
+        securePrefs.edit()
+            .remove("$STORE_PREFIX_PRIVATE_KEY$publicKeyBase58")
+            .remove("$STORE_PREFIX_PUBLIC_KEY$publicKeyBase58")
+            .remove("$STORE_PREFIX_MNEMONIC$publicKeyBase58")
+            .remove("$STORE_PREFIX_ORIGIN$publicKeyBase58")
+            .remove("$STORE_PREFIX_IDENTITY_FINGERPRINT$publicKeyBase58")
+            .apply()
     }
 
     private fun currentIdentityFingerprint(): String? {

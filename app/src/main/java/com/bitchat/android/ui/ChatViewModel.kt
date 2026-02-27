@@ -35,6 +35,7 @@ class ChatViewModel(
     private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
     private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
+    private var lastAnnouncedWalletAddress: String? = null
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -253,6 +254,7 @@ class ChatViewModel(
             val walletService = solanaEntryPoint.solanaWalletService()
             // Set local Solana address on mesh service for identity announcements
             meshService.solanaAddress = walletService.getPublicKeyBase58()
+            lastAnnouncedWalletAddress = meshService.solanaAddress
             // Build automatic wallet-link proof for announcements (username <-> wallet binding)
             meshService.buildSolanaLinkProof = { nickname, signingPublicKey ->
                 try {
@@ -319,6 +321,19 @@ class ChatViewModel(
                     proofs
                 } catch (_: Exception) {
                     emptyList()
+                }
+            }
+
+            // Keep username->wallet mapping current when active wallet changes.
+            // We only re-announce when address changes (not for balance updates).
+            viewModelScope.launch {
+                walletService.observeActiveWallet().collect { activeWallet ->
+                    val newAddress = activeWallet?.publicKey
+                    if (newAddress != null && newAddress != lastAnnouncedWalletAddress) {
+                        meshService.solanaAddress = newAddress
+                        lastAnnouncedWalletAddress = newAddress
+                        meshService.sendBroadcastAnnounce()
+                    }
                 }
             }
 
@@ -763,7 +778,13 @@ class ChatViewModel(
     // MARK: - Utility Functions
 
     fun getPeerIDForNickname(nickname: String): String? {
-        return meshService.getPeerNicknames().entries.find { it.value == nickname }?.key
+        val displayMatch = (state.peerNicknames.value ?: emptyMap()).entries
+            .firstOrNull { it.value == nickname }
+            ?.key
+        if (displayMatch != null) return displayMatch
+
+        val base = nickname.substringBefore("#")
+        return meshService.getPeerNicknames().entries.find { it.value == base }?.key
     }
     
     fun toggleFavorite(peerID: String) {
@@ -878,7 +899,7 @@ class ChatViewModel(
         state.setPeerFingerprints(fingerprints)
 
         val nicknames = meshService.getPeerNicknames()
-        state.setPeerNicknames(nicknames)
+        state.setPeerNicknames(buildCollisionAwarePeerNicknames(nicknames, currentPeers))
 
         val rssiValues = meshService.getPeerRSSI()
         state.setPeerRSSI(rssiValues)
@@ -1136,17 +1157,59 @@ class ChatViewModel(
      * Look up a peer's Solana address by nickname.
      */
     fun getPeerSolanaAddress(nickname: String): String? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
-        return meshService.getPeerInfo(peerID)?.solanaAddress
+        return when (val resolution = resolveTipRecipient(nickname)) {
+            is TipRecipientResolution.Unique -> resolution.address
+            else -> null
+        }
+    }
+
+    sealed class TipRecipientResolution {
+        data class Unique(val nickname: String, val peerID: String, val address: String) : TipRecipientResolution()
+        data class Ambiguous(val nickname: String, val options: List<String>) : TipRecipientResolution()
+        data object NotFound : TipRecipientResolution()
+    }
+
+    fun resolveTipRecipient(rawTarget: String): TipRecipientResolution {
+        val target = rawTarget.removePrefix("@").trim()
+        if (target.isBlank()) return TipRecipientResolution.NotFound
+
+        val parts = target.split("#", limit = 2)
+        val nickname = parts[0]
+        val explicitTag = parts.getOrNull(1)?.uppercase()
+
+        val candidates = getWalletCandidatesForNickname(nickname)
+        if (candidates.isEmpty()) return TipRecipientResolution.NotFound
+
+        if (explicitTag != null) {
+            val matched = candidates.firstOrNull { it.tag == explicitTag }
+                ?: return TipRecipientResolution.NotFound
+            return TipRecipientResolution.Unique(
+                nickname = nickname,
+                peerID = matched.peerID,
+                address = matched.address
+            )
+        }
+
+        if (candidates.size == 1) {
+            val only = candidates.first()
+            return TipRecipientResolution.Unique(
+                nickname = nickname,
+                peerID = only.peerID,
+                address = only.address
+            )
+        }
+
+        return TipRecipientResolution.Ambiguous(
+            nickname = nickname,
+            options = candidates.map { "${nickname}#${it.tag}" }
+        )
     }
 
     /**
      * Get a peer's verified Solana ownership proofs by nickname.
      */
     fun getPeerOwnershipProofs(nickname: String): List<com.bitchat.android.model.SolanaOwnershipProof> {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return emptyList()
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return emptyList()
         return meshService.getPeerInfo(peerID)?.solanaOwnershipProofs ?: emptyList()
     }
 
@@ -1154,8 +1217,7 @@ class ChatViewModel(
      * Look up a peer's NFT profile mint by nickname.
      */
     fun getPeerNftProfileMint(nickname: String): String? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return null
         return meshService.getPeerInfo(peerID)?.nftProfileMint
     }
 
@@ -1164,8 +1226,7 @@ class ChatViewModel(
      * or if the image is unavailable.
      */
     suspend fun getPeerNftAvatar(nickname: String): android.graphics.Bitmap? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return null
         val peerInfo = meshService.getPeerInfo(peerID) ?: return null
         val mint = peerInfo.nftProfileMint ?: return null
         val owner = peerInfo.solanaAddress ?: return null
@@ -1198,6 +1259,96 @@ class ChatViewModel(
             val addr = meshService.getPeerInfo(peerID)?.solanaAddress
             if (addr != null) Pair(nickname, addr) else null
         }
+    }
+
+    private fun getMostRecentPeerIdForNickname(nickname: String): String? {
+        return getWalletCandidatesForNickname(nickname).firstOrNull()?.peerID
+    }
+
+    private data class WalletCandidate(
+        val peerID: String,
+        val address: String,
+        val lastSeen: Long,
+        val tag: String
+    )
+
+    private fun getWalletCandidatesForNickname(nickname: String): List<WalletCandidate> {
+        val nicknames = meshService.getPeerNicknames()
+        val baseCandidates = nicknames.entries
+            .asSequence()
+            .filter { it.value == nickname }
+            .mapNotNull { entry ->
+                val info = meshService.getPeerInfo(entry.key) ?: return@mapNotNull null
+                val address = info.solanaAddress ?: return@mapNotNull null
+                WalletCandidate(
+                    peerID = entry.key,
+                    address = address,
+                    lastSeen = info.lastSeen,
+                    tag = buildPeerTag(entry.key, 4)
+                )
+            }
+            .sortedByDescending { it.lastSeen }
+            .toList()
+
+        val hasTagCollision = baseCandidates
+            .map { it.tag }
+            .groupingBy { it }
+            .eachCount()
+            .any { it.value > 1 }
+
+        if (!hasTagCollision) return baseCandidates
+
+        return baseCandidates.map { candidate ->
+            candidate.copy(tag = buildPeerTag(candidate.peerID, 6))
+        }
+    }
+
+    private fun buildPeerTag(peerID: String, length: Int): String {
+        val clean = peerID.filter { it.isLetterOrDigit() }
+        return clean.takeLast(length).uppercase().ifBlank { "0".repeat(length) }
+    }
+
+    private fun buildCollisionAwarePeerNicknames(
+        rawNicknames: Map<String, String>,
+        connectedPeerIds: List<String>
+    ): Map<String, String> {
+        if (rawNicknames.isEmpty()) return emptyMap()
+
+        val connectedSet = connectedPeerIds.toSet()
+        val connectedEntries = rawNicknames.entries.filter { connectedSet.contains(it.key) }
+        val grouped = connectedEntries.groupBy { it.value }
+        val decorated = mutableMapOf<String, String>()
+
+        grouped.forEach { (nickname, entries) ->
+            if (entries.size <= 1) {
+                val only = entries.firstOrNull()
+                if (only != null) decorated[only.key] = nickname
+                return@forEach
+            }
+
+            // Duplicate nicknames in this mesh: suffix with 4 chars; expand to 6 only on collision.
+            val fourTags = entries.associate { it.key to buildPeerTag(it.key, 4) }
+            val hasTagCollision = fourTags.values.groupingBy { it }.eachCount().any { it.value > 1 }
+            val tags = if (hasTagCollision) {
+                entries.associate { it.key to buildPeerTag(it.key, 6) }
+            } else {
+                fourTags
+            }
+
+            entries.forEach { entry ->
+                val suffix = tags[entry.key] ?: buildPeerTag(entry.key, if (hasTagCollision) 6 else 4)
+                decorated[entry.key] = "$nickname#$suffix"
+            }
+        }
+
+        // Preserve non-connected peers as plain names for fallback callers.
+        rawNicknames.forEach { (peerID, nickname) ->
+            if (!decorated.containsKey(peerID)) {
+                decorated[peerID] = nickname
+            }
+        }
+
+        return decorated
     }
 
     // MARK: - Message Notarization

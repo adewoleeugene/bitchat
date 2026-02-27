@@ -26,8 +26,17 @@ interface WalletDao {
     @Query("SELECT * FROM wallets ORDER BY createdAt DESC")
     fun observeAllWallets(): Flow<List<WalletEntity>>
 
+    @Query("SELECT * FROM wallets ORDER BY createdAt DESC")
+    suspend fun getAllWallets(): List<WalletEntity>
+
+    @Query("SELECT * FROM wallets WHERE publicKey = :publicKey LIMIT 1")
+    suspend fun getWalletByPublicKey(publicKey: String): WalletEntity?
+
     @Query("UPDATE wallets SET isActive = 0")
     suspend fun deactivateAll()
+
+    @Query("UPDATE wallets SET isActive = CASE WHEN publicKey = :publicKey THEN 1 ELSE 0 END")
+    suspend fun setActiveWallet(publicKey: String)
 
     @Query("UPDATE wallets SET lastBalanceLamports = :lamports, lastBalanceUpdatedAt = :updatedAt WHERE publicKey = :publicKey")
     suspend fun updateBalance(publicKey: String, lamports: Long, updatedAt: Long)

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
+import com.bitchat.android.data.local.entities.WalletEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -67,6 +68,10 @@ class WalletViewModel @Inject constructor(
     // Transaction history
     val recentTransactions: StateFlow<List<QueuedTransactionEntity>> =
         paymentManager.observeRecentTransactions()
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val allWallets: StateFlow<List<WalletEntity>> =
+        walletService.observeAllWallets()
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _showTransactionHistory = MutableStateFlow(false)
@@ -364,6 +369,15 @@ class WalletViewModel @Inject constructor(
                 }
             }
             _isSending.value = false
+        }
+    }
+
+    fun switchActiveWallet(publicKey: String) {
+        viewModelScope.launch {
+            val result = walletService.setActiveWallet(publicKey)
+            result.onFailure { error ->
+                _errorMessage.value = "Failed to switch wallet: ${error.message}"
+            }
         }
     }
 

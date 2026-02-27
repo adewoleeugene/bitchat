@@ -129,9 +129,20 @@ private class FakeWalletDao : WalletDao {
 
     override fun observeAllWallets(): Flow<List<WalletEntity>> = all
 
+    override suspend fun getAllWallets(): List<WalletEntity> = all.value
+
+    override suspend fun getWalletByPublicKey(publicKey: String): WalletEntity? {
+        return all.value.firstOrNull { it.publicKey == publicKey }
+    }
+
     override suspend fun deactivateAll() {
         state.value = null
         all.value = all.value.map { it.copy(isActive = false) }
+    }
+
+    override suspend fun setActiveWallet(publicKey: String) {
+        all.value = all.value.map { it.copy(isActive = it.publicKey == publicKey) }
+        state.value = all.value.firstOrNull { it.publicKey == publicKey }
     }
 
     override suspend fun updateBalance(publicKey: String, lamports: Long, updatedAt: Long) {

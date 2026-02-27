@@ -56,7 +56,7 @@ class CommandProcessor(
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel)
-            "/m", "/msg" -> handleMessageCommand(parts, meshService)
+            "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
             "/tip" -> handleTipCommand(parts, meshService, viewModel)
             "/w" -> { handleWhoCommand(meshService, viewModel); null }
             "/clear" -> { handleClearCommand(); null }
@@ -382,10 +382,10 @@ class CommandProcessor(
         return null
     }
 
-    private fun handleMessageCommand(parts: List<String>, meshService: BluetoothMeshService): CommandResult? {
+    private fun handleMessageCommand(parts: List<String>, meshService: BluetoothMeshService, viewModel: ChatViewModel? = null): CommandResult? {
         if (parts.size > 1) {
             val targetName = parts[1].removePrefix("@")
-            val peerID = getPeerIDForNickname(targetName, meshService)
+            val peerID = getPeerIDForNickname(targetName, meshService, viewModel)
 
             if (peerID != null) {
                 val success = privateChatManager.startPrivateChat(peerID, meshService)
@@ -393,7 +393,7 @@ class CommandProcessor(
                 if (success) {
                     if (parts.size > 2) {
                         val messageContent = parts.drop(2).joinToString(" ")
-                        val recipientNickname = getPeerNickname(peerID, meshService)
+                        val recipientNickname = getPeerNickname(peerID, meshService, viewModel)
                         privateChatManager.sendPrivateMessage(
                             messageContent,
                             peerID,
@@ -432,7 +432,7 @@ class CommandProcessor(
                     // Mesh channel: show Bluetooth-connected peers
                     val connectedPeers = state.getConnectedPeersValue()
                     val peerList = connectedPeers.joinToString(", ") { peerID ->
-                        getPeerNickname(peerID, meshService)
+                        getPeerNickname(peerID, meshService, viewModel)
                     }
                     Pair(peerList, "online users")
                 }
@@ -459,7 +459,7 @@ class CommandProcessor(
             // Fallback to mesh behavior
             val connectedPeers = state.getConnectedPeersValue()
             val peerList = connectedPeers.joinToString(", ") { peerID ->
-                getPeerNickname(peerID, meshService)
+                getPeerNickname(peerID, meshService, viewModel)
             }
             Pair(peerList, "online users")
         }
@@ -641,7 +641,7 @@ class CommandProcessor(
             return CommandResult(prefillText = prefill, hintText = "how much SOL?")
         }
 
-        val targetName = parts[1].removePrefix("@")
+        val targetInput = parts[1].removePrefix("@")
         val amountStr = parts[2]
         val memo = if (parts.size > 3) parts.drop(3).joinToString(" ") else null
 
@@ -653,32 +653,42 @@ class CommandProcessor(
 
         // Look up the peer's Solana address
         // Check if target looks like a base58 Solana address, or resolve by nickname
-        val recipientAddress: String = if (targetName.length >= 32 && targetName.all { it.isLetterOrDigit() }) {
+        val recipientAddress: String = if (targetInput.length >= 32 && targetInput.all { it.isLetterOrDigit() }) {
             // Looks like a Solana address
-            targetName
+            targetInput
         } else {
             // Look up peer's Solana address from mesh identity announcements
-            val peerAddress = viewModel?.getPeerSolanaAddress(targetName)
-            if (peerAddress != null) {
-                peerAddress
-            } else {
-                // Check if peer exists at all
-                val peerExists = meshService.getPeerNicknames().values.any { it == targetName }
-                if (peerExists) {
-                    addSystemMessage("$targetName hasn't set up a wallet yet.")
-                } else {
-                    addSystemMessage("can't find '$targetName' — are they online? check /w")
+            val resolution = viewModel?.resolveTipRecipient(targetInput)
+            when (resolution) {
+                is ChatViewModel.TipRecipientResolution.Unique -> resolution.address
+                is ChatViewModel.TipRecipientResolution.Ambiguous -> {
+                    addSystemMessage(
+                        "multiple users named ${resolution.nickname}. choose one: ${
+                            resolution.options.joinToString(", ") { "@$it" }
+                        }"
+                    )
+                    return null
                 }
-                return null
+                is ChatViewModel.TipRecipientResolution.NotFound, null -> {
+                    // Check if peer exists at all
+                    val baseName = targetInput.substringBefore("#")
+                    val peerExists = meshService.getPeerNicknames().values.any { it == baseName }
+                    if (peerExists) {
+                        addSystemMessage("$targetInput hasn't set up a wallet yet.")
+                    } else {
+                        addSystemMessage("can't find '$targetInput' — are they online? check /w")
+                    }
+                    return null
+                }
             }
         }
 
-        addSystemMessage("sending $amount SOL to $targetName...")
+        addSystemMessage("sending $amount SOL to $targetInput...")
 
         commandScope.launch {
             val result = pm.queuePayment(recipientAddress, amount, memo)
             result.onSuccess { txId ->
-                addSystemMessage("$amount SOL sent to $targetName! confirming...")
+                addSystemMessage("$amount SOL sent to $targetInput! confirming...")
             }.onFailure { error ->
                 addSystemMessage("couldn't send payment: ${error.message}")
             }
@@ -848,7 +858,13 @@ class CommandProcessor(
                 is com.bitchat.android.geohash.ChannelID.Mesh,
                 null -> {
                     // Mesh channel: use Bluetooth mesh peer nicknames
-                    meshService.getPeerNicknames().values.filter { it != meshService.getPeerNicknames()[meshService.myPeerID] }
+                    val displayNames = viewModel?.peerNicknames?.value ?: meshService.getPeerNicknames()
+                    val myName = displayNames[meshService.myPeerID]
+                    displayNames.values.filter { candidate ->
+                        candidate != myName &&
+                            candidate != state.getNicknameValue() &&
+                            !candidate.startsWith("${state.getNicknameValue()}#")
+                    }
                 }
                 
                 is com.bitchat.android.geohash.ChannelID.Location -> {
@@ -903,12 +919,19 @@ class CommandProcessor(
     
     // MARK: - Utility Functions
     
-    private fun getPeerIDForNickname(nickname: String, meshService: BluetoothMeshService): String? {
-        return meshService.getPeerNicknames().entries.find { it.value == nickname }?.key
+    private fun getPeerIDForNickname(nickname: String, meshService: BluetoothMeshService, viewModel: ChatViewModel? = null): String? {
+        val displayNames = viewModel?.peerNicknames?.value ?: meshService.getPeerNicknames()
+        val exact = displayNames.entries.find { it.value == nickname }?.key
+        if (exact != null) return exact
+
+        val base = nickname.substringBefore("#")
+        return meshService.getPeerNicknames().entries.find { it.value == base }?.key
     }
     
-    private fun getPeerNickname(peerID: String, meshService: BluetoothMeshService): String {
-        return meshService.getPeerNicknames()[peerID] ?: peerID
+    private fun getPeerNickname(peerID: String, meshService: BluetoothMeshService, viewModel: ChatViewModel? = null): String {
+        return (viewModel?.peerNicknames?.value?.get(peerID))
+            ?: meshService.getPeerNicknames()[peerID]
+            ?: peerID
     }
     
     private fun getMyPeerID(meshService: BluetoothMeshService): String {
