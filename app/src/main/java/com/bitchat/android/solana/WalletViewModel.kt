@@ -54,6 +54,8 @@ class WalletViewModel @Inject constructor(
     val showRestoreDialog: StateFlow<Boolean> = _showRestoreDialog.asStateFlow()
     private val _showImportPrivateKeyDialog = MutableStateFlow(false)
     val showImportPrivateKeyDialog: StateFlow<Boolean> = _showImportPrivateKeyDialog.asStateFlow()
+    private val _initializationIssue = MutableStateFlow<String?>(null)
+    val initializationIssue: StateFlow<String?> = _initializationIssue.asStateFlow()
 
     // Send dialog state
     private val _showSendDialog = MutableStateFlow(false)
@@ -93,6 +95,7 @@ class WalletViewModel @Inject constructor(
                 // Observe active wallet from Room
                 walletService.observeActiveWallet().collect { wallet ->
                     if (wallet != null) {
+                        _initializationIssue.value = null
                         val solAmount = wallet.lastBalanceLamports.toDouble() / 1_000_000_000.0
                         val usdString = cachedSolPrice?.let { price ->
                             val usd = solAmount * price
@@ -106,14 +109,19 @@ class WalletViewModel @Inject constructor(
                             balanceUsd = usdString,
                             lastUpdated = wallet.lastBalanceUpdatedAt,
                             label = wallet.label,
+                            sourceLabel = walletService.getWalletSourceLabel(),
+                            lifecycleWarning = walletService.getLifecycleWarningMessage(),
+                            exportAuditSummary = walletService.getPrivateKeyExportAuditSummary(),
                             lastRefreshViaMesh = lastRefreshViaMesh,
                             usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
                         )
                     } else {
+                        _initializationIssue.value = walletService.getInitializationIssueMessage()
                         _walletState.value = WalletUiState.NoWallet
                     }
                 }
             } else {
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
             }
         }
@@ -130,6 +138,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Failed to create wallet: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Wallet creation failed", error)
             }
@@ -147,6 +156,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Invalid recovery phrase: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Wallet restore failed", error)
             }
@@ -164,6 +174,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Invalid private key: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Private key import failed", error)
             }
@@ -286,6 +297,7 @@ class WalletViewModel @Inject constructor(
         if (privateKey != null) {
             walletService.markPrivateKeyExportRevealed()
             _privateKeyBase58.value = privateKey
+            loadWalletState()
         } else {
             _errorMessage.value = walletService.getInitializationIssueMessage() ?: "Private key not available"
         }
@@ -295,6 +307,7 @@ class WalletViewModel @Inject constructor(
         viewModelScope.launch {
             walletService.deleteWallet()
             _mnemonicPhrase.value = null
+            _initializationIssue.value = walletService.getInitializationIssueMessage()
             _walletState.value = WalletUiState.NoWallet
             Log.d(TAG, "Wallet deleted")
         }
@@ -416,6 +429,9 @@ sealed class WalletUiState {
         val balanceUsd: String? = null,
         val lastUpdated: Long,
         val label: String,
+        val sourceLabel: String? = null,
+        val lifecycleWarning: String? = null,
+        val exportAuditSummary: String? = null,
         val lastRefreshViaMesh: Boolean = false,
         val usdEstimateFromLastKnownPrice: Boolean = false
     ) : WalletUiState()

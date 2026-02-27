@@ -70,6 +70,7 @@ fun WalletScreen(
     val showTxHistory by viewModel.showTransactionHistory.collectAsState()
     val transactions by viewModel.recentTransactions.collectAsState()
     val allWallets by viewModel.allWallets.collectAsState()
+    val initializationIssue by viewModel.initializationIssue.collectAsState()
     val context = LocalContext.current
 
     // Transaction history screen (full screen overlay)
@@ -139,7 +140,9 @@ fun WalletScreen(
                 is WalletUiState.NoWallet -> {
                     NoWalletContent(
                         onCreateWallet = { viewModel.createWallet() },
-                        onRestoreWallet = { viewModel.showRestoreDialog() }
+                        onRestoreWallet = { viewModel.showRestoreDialog() },
+                        onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
+                        initializationIssue = initializationIssue
                     )
                 }
 
@@ -284,7 +287,9 @@ private fun Context.findFragmentActivity(): FragmentActivity? {
 @Composable
 private fun NoWalletContent(
     onCreateWallet: () -> Unit,
-    onRestoreWallet: () -> Unit
+    onRestoreWallet: () -> Unit,
+    onImportPrivateKey: () -> Unit,
+    initializationIssue: String?
 ) {
     Spacer(modifier = Modifier.height(48.dp))
 
@@ -306,6 +311,18 @@ private fun NoWalletContent(
         color = BitchatColors.TextSecondary,
         modifier = Modifier.padding(horizontal = 24.dp)
     )
+
+    if (!initializationIssue.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = initializationIssue,
+            fontFamily = CourierPrimeFamily,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            color = BitchatColors.StatusError,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
+    }
 
     Spacer(modifier = Modifier.height(32.dp))
 
@@ -333,6 +350,20 @@ private fun NoWalletContent(
         shape = BitchatShapes.Button
     ) {
         Text("Restore from Recovery Phrase", fontFamily = CourierPrimeFamily)
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Button(
+        onClick = onImportPrivateKey,
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = BitchatColors.ButtonGhostBg,
+            contentColor = BitchatColors.TextPrimary
+        ),
+        shape = BitchatShapes.Button
+    ) {
+        Text("Import Private Key", fontFamily = CourierPrimeFamily)
     }
 }
 
@@ -413,6 +444,73 @@ private fun WalletReadyContent(
                 fontSize = 10.sp,
                 color = BitchatColors.TextTertiary
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = state.sourceLabel ?: state.label,
+                fontFamily = CourierPrimeFamily,
+                fontSize = 11.sp,
+                color = BitchatColors.TextSecondary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Public Address",
+                fontFamily = CourierPrimeFamily,
+                fontSize = 11.sp,
+                color = BitchatColors.TextTertiary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = state.shortAddress,
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp,
+                color = BitchatColors.TextPrimary
+            )
+            Text(
+                text = state.address,
+                fontFamily = CourierPrimeFamily,
+                fontSize = 10.sp,
+                color = BitchatColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", state.address))
+                    Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
+                },
+                border = BorderStroke(1.dp, BitchatColors.Border),
+                shape = BitchatShapes.Button,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = BitchatColors.TextPrimary
+                )
+            ) {
+                Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Copy Address", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
+            }
+            if (!state.lifecycleWarning.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = state.lifecycleWarning,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 10.sp,
+                    color = BitchatColors.StatusError,
+                    textAlign = TextAlign.Center
+                )
+            }
+            if (!state.exportAuditSummary.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = state.exportAuditSummary,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 10.sp,
+                    color = BitchatColors.TextTertiary,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 

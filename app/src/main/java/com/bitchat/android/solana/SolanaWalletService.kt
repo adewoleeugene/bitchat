@@ -74,6 +74,11 @@ class SolanaWalletService @Inject constructor(
     // Cached keypair for signing
     private var cachedPrivateKey: EdDSAPrivateKey? = null
     private var cachedPublicKey: EdDSAPublicKey? = null
+    private var secureStorageDegraded: Boolean = false
+    private var secureStorageErrorMessage: String? = null
+    private val allowInsecureStorageFallback: Boolean by lazy {
+        isRobolectricRuntime() || isHostJvmRuntime()
+    }
 
     private val securePrefs by lazy {
         try {
@@ -89,7 +94,13 @@ class SolanaWalletService @Inject constructor(
                 androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create encrypted prefs, falling back to standard: ${e.message}")
+            secureStorageDegraded = true
+            secureStorageErrorMessage = "Secure wallet storage unavailable on this device."
+            if (allowInsecureStorageFallback) {
+                Log.w(TAG, "Secure prefs unavailable in debug/test mode; using standard prefs fallback: ${e.message}")
+            } else {
+                Log.e(TAG, "Secure prefs unavailable in production; wallet operations blocked: ${e.message}")
+            }
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         }
     }
@@ -102,6 +113,7 @@ class SolanaWalletService @Inject constructor(
      * Check if a wallet already exists.
      */
     fun hasWallet(): Boolean {
+        if (!isWalletStorageUsable()) return false
         ensureWalletInitializedFromIdentity()
         ensureLegacyActiveBackedUp()
         return securePrefs.contains(KEY_PRIVATE_KEY)
@@ -112,6 +124,7 @@ class SolanaWalletService @Inject constructor(
      * Returns null when wallet material is available.
      */
     fun getInitializationIssueMessage(): String? {
+        if (!isWalletStorageUsable()) return secureStorageUnavailableMessage()
         ensureWalletInitializedFromIdentity()
         ensureLegacyActiveBackedUp()
         if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) return null
@@ -135,6 +148,7 @@ class SolanaWalletService @Inject constructor(
     }
 
     fun getWalletSourceLabel(): String? {
+        if (!isWalletStorageUsable()) return "Secure Storage Unavailable"
         val origin = securePrefs.getString(KEY_WALLET_ORIGIN, null)
         return when (origin) {
             ORIGIN_IDENTITY_DERIVED -> "Identity-Derived Wallet"
@@ -146,6 +160,7 @@ class SolanaWalletService @Inject constructor(
     }
 
     fun getLifecycleWarningMessage(): String? {
+        if (!isWalletStorageUsable()) return secureStorageUnavailableMessage()
         val origin = securePrefs.getString(KEY_WALLET_ORIGIN, null)
         if (origin != ORIGIN_IDENTITY_DERIVED) return null
         val storedFingerprint = securePrefs.getString(KEY_IDENTITY_FINGERPRINT, null) ?: return null
@@ -193,6 +208,9 @@ class SolanaWalletService @Inject constructor(
      * Returns the mnemonic phrase for the user to back up.
      */
     suspend fun createWallet(): Result<String> = withContext(Dispatchers.IO) {
+        if (!isWalletStorageUsable()) {
+            return@withContext Result.failure(IllegalStateException(secureStorageUnavailableMessage()))
+        }
         try {
             backupCurrentWalletMaterial()
             // Generate 24-word mnemonic (256 bits of entropy)
@@ -243,6 +261,9 @@ class SolanaWalletService @Inject constructor(
      * Restore wallet from an existing BIP39 mnemonic phrase.
      */
     suspend fun restoreWallet(mnemonicPhrase: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!isWalletStorageUsable()) {
+            return@withContext Result.failure(IllegalStateException(secureStorageUnavailableMessage()))
+        }
         try {
             backupCurrentWalletMaterial()
             // Validate mnemonic
@@ -291,6 +312,9 @@ class SolanaWalletService @Inject constructor(
      * Restore wallet from a raw 32-byte Ed25519 private key encoded as Base58.
      */
     suspend fun restoreWalletFromPrivateKeyBase58(privateKeyBase58: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!isWalletStorageUsable()) {
+            return@withContext Result.failure(IllegalStateException(secureStorageUnavailableMessage()))
+        }
         try {
             backupCurrentWalletMaterial()
             val privateKeyBytes = decodeBase58(privateKeyBase58.trim())
@@ -334,6 +358,7 @@ class SolanaWalletService @Inject constructor(
      * Get the active wallet's public key (Base58 encoded).
      */
     fun getPublicKeyBase58(): String? {
+        if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         val pubKeyBase64 = securePrefs.getString(KEY_PUBLIC_KEY, null) ?: return null
         val pubKeyBytes = android.util.Base64.decode(pubKeyBase64, android.util.Base64.NO_WRAP)
@@ -345,6 +370,7 @@ class SolanaWalletService @Inject constructor(
      * Get the raw 32-byte public key.
      */
     fun getPublicKeyBytes(): ByteArray? {
+        if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         val pubKeyBase64 = securePrefs.getString(KEY_PUBLIC_KEY, null) ?: return null
         val pubKeyBytes = android.util.Base64.decode(pubKeyBase64, android.util.Base64.NO_WRAP)
@@ -356,6 +382,9 @@ class SolanaWalletService @Inject constructor(
      * Fetch balance from the Solana devnet and update Room cache.
      */
     suspend fun refreshBalance(): Result<Long> {
+        if (!isWalletStorageUsable()) {
+            return Result.failure(IllegalStateException(secureStorageUnavailableMessage()))
+        }
         val publicKey = getPublicKeyBase58() ?: return Result.failure(
             IllegalStateException("No wallet found")
         )
@@ -406,6 +435,9 @@ class SolanaWalletService @Inject constructor(
     }
 
     suspend fun setActiveWallet(publicKeyBase58: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isWalletStorageUsable()) {
+            return@withContext Result.failure(IllegalStateException(secureStorageUnavailableMessage()))
+        }
         try {
             val material = getStoredWalletMaterial(publicKeyBase58)
                 ?: return@withContext Result.failure(
@@ -446,6 +478,7 @@ class SolanaWalletService @Inject constructor(
      * Get the stored mnemonic phrase for backup/export.
      */
     fun getMnemonic(): String? {
+        if (!isWalletStorageUsable()) return null
         return securePrefs.getString(KEY_MNEMONIC, null)
     }
 
@@ -453,6 +486,7 @@ class SolanaWalletService @Inject constructor(
      * Get the raw private key as Base58 for explicit private-key backup.
      */
     fun getPrivateKeyBase58(): String? {
+        if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         val privKeyBase64 = securePrefs.getString(KEY_PRIVATE_KEY, null) ?: return null
         val privKeyBytes = android.util.Base64.decode(privKeyBase64, android.util.Base64.NO_WRAP)
@@ -463,6 +497,7 @@ class SolanaWalletService @Inject constructor(
      * Sign arbitrary data with the wallet's Ed25519 private key.
      */
     fun sign(data: ByteArray): ByteArray? {
+        if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         val privKey = getOrLoadPrivateKey() ?: return null
         return try {
@@ -484,6 +519,7 @@ class SolanaWalletService @Inject constructor(
      * Delete wallet data (mnemonic, keys, Room entry).
      */
     suspend fun deleteWallet() = withContext(Dispatchers.IO) {
+        if (!isWalletStorageUsable()) return@withContext
         val activePublicKey = getPublicKeyBase58() ?: return@withContext
         deleteStoredWalletMaterial(activePublicKey)
         walletDao.deleteWallet(activePublicKey)
@@ -511,6 +547,7 @@ class SolanaWalletService @Inject constructor(
     }
 
     private fun getOrLoadPrivateKey(): EdDSAPrivateKey? {
+        if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         cachedPrivateKey?.let { return it }
 
@@ -525,6 +562,7 @@ class SolanaWalletService @Inject constructor(
      * when no legacy wallet exists. This keeps legacy mnemonic wallets untouched.
      */
     private fun ensureWalletInitializedFromIdentity() {
+        if (!isWalletStorageUsable()) return
         if (securePrefs.contains(KEY_PRIVATE_KEY) && securePrefs.contains(KEY_PUBLIC_KEY)) {
             ensureLegacyActiveBackedUp()
             return
@@ -684,6 +722,30 @@ class SolanaWalletService @Inject constructor(
         val bytes = num.toByteArray()
         val stripped = if (bytes.isNotEmpty() && bytes[0] == 0.toByte()) bytes.drop(1).toByteArray() else bytes
         return ByteArray(leadingZeros) + stripped
+    }
+
+    private fun isWalletStorageUsable(): Boolean {
+        if (!secureStorageDegraded) return true
+        return allowInsecureStorageFallback
+    }
+
+    private fun secureStorageUnavailableMessage(): String {
+        return secureStorageErrorMessage ?: "Secure wallet storage unavailable on this device."
+    }
+
+    private fun isRobolectricRuntime(): Boolean {
+        return try {
+            Class.forName("org.robolectric.RuntimeEnvironment")
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun isHostJvmRuntime(): Boolean {
+        val vm = System.getProperty("java.vm.name").orEmpty()
+        val isAndroidVm = vm.contains("Dalvik", ignoreCase = true) || vm.contains("ART", ignoreCase = true)
+        return !isAndroidVm
     }
 
 }

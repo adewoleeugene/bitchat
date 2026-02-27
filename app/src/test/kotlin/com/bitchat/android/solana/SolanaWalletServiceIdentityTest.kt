@@ -46,9 +46,13 @@ class SolanaWalletServiceIdentityTest {
 
         val address = walletService.getPublicKeyBase58()
         val privateKey = walletService.getPrivateKeyBase58()
+        val expectedAddress = SolanaKeyDerivation.encodeBase58(
+            SolanaKeyDerivation.derivePublicKey(SolanaKeyDerivation.derivePrivateKeyFromIdentity(identity))
+        )
 
         assertNotNull(address)
         assertNotNull(privateKey)
+        assertEquals(expectedAddress, address)
         assertTrue(walletService.hasWallet())
         assertEquals("Identity-Derived Wallet", walletService.getWalletSourceLabel())
 
@@ -105,6 +109,40 @@ class SolanaWalletServiceIdentityTest {
         val warning = walletService.getLifecycleWarningMessage()
         assertNotNull(warning)
         assertTrue(warning!!.contains("Identity key changed", ignoreCase = true))
+    }
+
+    @Test
+    fun identityDerivedWalletSignatureVerifiesAgainstDerivedPublicKey() {
+        val identity = ByteArray(32) { (it + 11).toByte() }
+        context.getSharedPreferences("bitchat_crypto", Context.MODE_PRIVATE)
+            .edit()
+            .putString("ed25519_signing_private_key", Base64.encodeToString(identity, Base64.NO_WRAP))
+            .commit()
+
+        walletService.getPublicKeyBase58()
+        val payload = "bitchat-solana-wallet-signing-check".toByteArray()
+        val signature = walletService.sign(payload)
+
+        assertNotNull(signature)
+        val signatureBytes = signature ?: throw AssertionError("Signature expected")
+
+        val derivedPrivate = SolanaKeyDerivation.derivePrivateKeyFromIdentity(identity)
+        val derivedPublic = SolanaKeyDerivation.derivePublicKey(derivedPrivate)
+        val pubSpec = net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec(
+            derivedPublic,
+            net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable.getByName(
+                net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable.ED_25519
+            )
+        )
+        val publicKey = net.i2p.crypto.eddsa.EdDSAPublicKey(pubSpec)
+
+        if (java.security.Security.getProvider("EdDSA") == null) {
+            java.security.Security.addProvider(net.i2p.crypto.eddsa.EdDSASecurityProvider())
+        }
+        val verifier = java.security.Signature.getInstance("NONEwithEdDSA", "EdDSA")
+        verifier.initVerify(publicKey)
+        verifier.update(payload)
+        assertTrue(verifier.verify(signatureBytes))
     }
 }
 
