@@ -674,7 +674,7 @@ class CommandProcessor(
                     val baseName = targetInput.substringBefore("#")
                     val peerExists = meshService.getPeerNicknames().values.any { it == baseName }
                     if (peerExists) {
-                        addSystemMessage("$targetInput hasn't set up a wallet yet.")
+                        addSystemMessage("wallet link for $baseName is updating. try again in 2-3 seconds.")
                     } else {
                         addSystemMessage("can't find '$targetInput' — are they online? check /w")
                     }

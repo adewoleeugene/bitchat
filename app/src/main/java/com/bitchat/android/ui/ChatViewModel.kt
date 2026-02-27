@@ -36,6 +36,7 @@ class ChatViewModel(
     private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
     private var lastAnnouncedWalletAddress: String? = null
+    private var walletLinkAnnounceJob: kotlinx.coroutines.Job? = null
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -332,7 +333,15 @@ class ChatViewModel(
                     if (newAddress != null && newAddress != lastAnnouncedWalletAddress) {
                         meshService.solanaAddress = newAddress
                         lastAnnouncedWalletAddress = newAddress
-                        meshService.sendBroadcastAnnounce()
+                        walletLinkAnnounceJob?.cancel()
+                        walletLinkAnnounceJob = viewModelScope.launch {
+                            // Burst announce to reduce stale username->wallet windows after a switch.
+                            meshService.sendBroadcastAnnounce()
+                            delay(1_000)
+                            if (lastAnnouncedWalletAddress == newAddress) meshService.sendBroadcastAnnounce()
+                            delay(2_000)
+                            if (lastAnnouncedWalletAddress == newAddress) meshService.sendBroadcastAnnounce()
+                        }
                     }
                 }
             }
@@ -1182,7 +1191,22 @@ class ChatViewModel(
 
         if (explicitTag != null) {
             val matched = candidates.firstOrNull { it.tag == explicitTag }
-                ?: return TipRecipientResolution.NotFound
+            if (matched == null) {
+                // Tag can become stale shortly after re-announce or collision-length expansion.
+                return if (candidates.size == 1) {
+                    val only = candidates.first()
+                    TipRecipientResolution.Unique(
+                        nickname = nickname,
+                        peerID = only.peerID,
+                        address = only.address
+                    )
+                } else {
+                    TipRecipientResolution.Ambiguous(
+                        nickname = nickname,
+                        options = candidates.map { "${nickname}#${it.tag}" }
+                    )
+                }
+            }
             return TipRecipientResolution.Unique(
                 nickname = nickname,
                 peerID = matched.peerID,
