@@ -172,12 +172,16 @@ class WalletViewModel @Inject constructor(
             }
             val result = walletService.refreshBalance()
             result.onFailure { error ->
-                val message = if (isNetworkError(error)) {
-                    "Offline — balance will update when internet is available"
+                if (isNetworkError(error)) {
+                    val meshResult = paymentManager.requestBalanceViaMesh()
+                    if (meshResult.isSuccess) {
+                        _errorMessage.value = null
+                    } else {
+                        _errorMessage.value = "Offline — balance will update when internet is available"
+                    }
                 } else {
-                    "Balance refresh failed: ${error.message}"
+                    _errorMessage.value = "Balance refresh failed: ${error.message}"
                 }
-                _errorMessage.value = message
                 Log.e(TAG, "Balance refresh failed", error)
             }
             priceJob.join()

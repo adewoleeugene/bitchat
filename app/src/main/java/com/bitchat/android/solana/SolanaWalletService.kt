@@ -242,6 +242,22 @@ class SolanaWalletService @Inject constructor(
     }
 
     /**
+     * Update cached balance from a mesh-relayed response.
+     * This updates local cache only; it does not prove canonical on-chain state.
+     */
+    suspend fun updateCachedBalanceFromMesh(lamports: Long, updatedAtMs: Long = System.currentTimeMillis()): Result<Unit> {
+        val publicKey = getPublicKeyBase58() ?: return Result.failure(
+            IllegalStateException("No wallet found")
+        )
+        return try {
+            walletDao.updateBalance(publicKey, lamports, updatedAtMs)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get cached balance from Room (lamports).
      */
     suspend fun getCachedBalanceLamports(): Long {

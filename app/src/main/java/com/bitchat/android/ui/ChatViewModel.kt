@@ -33,6 +33,7 @@ class ChatViewModel(
 ) : AndroidViewModel(application), BluetoothMeshDelegate {
     private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
     private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
+    private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
 
     companion object {
@@ -364,12 +365,23 @@ class ChatViewModel(
             paymentManager.onRequestBlockhashIntent = { intent ->
                 meshService.broadcastSolanaIntentRequest(intent)
             }
+            paymentManager.onRequestBalanceIntent = { intent ->
+                meshService.broadcastSolanaBalanceIntent(intent)
+            }
             relayHandler.onSendBlockhashResponse = { response ->
                 meshService.broadcastSolanaBlockhashResponse(response)
+            }
+            relayHandler.onSendBalanceResponse = { response ->
+                meshService.broadcastSolanaBalanceResponse(response)
             }
             meshService.onBlockhashResponseReceived = { response ->
                 viewModelScope.launch {
                     paymentManager.handleBlockhashResponse(response)
+                }
+            }
+            meshService.onBalanceResponseReceived = { response ->
+                viewModelScope.launch {
+                    paymentManager.handleBalanceResponse(response)
                 }
             }
 
@@ -388,6 +400,14 @@ class ChatViewModel(
 
             // Wire up message notarization service
             notarizationService = solanaEntryPoint.messageNotarizationService()
+
+            // Wire up NFT avatar service
+            nftAvatarService = solanaEntryPoint.nftAvatarService()
+
+            // Restore persisted NFT profile mint selection
+            val nftPrefs = getApplication<android.app.Application>()
+                .getSharedPreferences("nft_profile", android.content.Context.MODE_PRIVATE)
+            meshService.nftProfileMint = nftPrefs.getString("nft_profile_mint", null)
 
             // Observe transaction status changes and show updates in chat
             observeTransactionStatus(solanaEntryPoint)
@@ -1122,6 +1142,44 @@ class ChatViewModel(
         val peerID = meshService.getPeerNicknames().entries
             .firstOrNull { it.value == nickname }?.key ?: return emptyList()
         return meshService.getPeerInfo(peerID)?.solanaOwnershipProofs ?: emptyList()
+    }
+
+    /**
+     * Look up a peer's NFT profile mint by nickname.
+     */
+    fun getPeerNftProfileMint(nickname: String): String? {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return null
+        return meshService.getPeerInfo(peerID)?.nftProfileMint
+    }
+
+    /**
+     * Fetch NFT avatar bitmap for a peer. Returns null if peer has no NFT profile
+     * or if the image is unavailable.
+     */
+    suspend fun getPeerNftAvatar(nickname: String): android.graphics.Bitmap? {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerInfo = meshService.getPeerInfo(peerID) ?: return null
+        val mint = peerInfo.nftProfileMint ?: return null
+        val owner = peerInfo.solanaAddress ?: return null
+        return nftAvatarService?.getAvatar(mint, owner)
+    }
+
+    /**
+     * Set the NFT mint address for our profile avatar.
+     * Persists the selection and triggers a re-announce to propagate.
+     */
+    fun setNftProfileMint(mintAddress: String?) {
+        meshService.nftProfileMint = mintAddress
+        val prefs = getApplication<android.app.Application>()
+            .getSharedPreferences("nft_profile", android.content.Context.MODE_PRIVATE)
+        if (mintAddress != null) {
+            prefs.edit().putString("nft_profile_mint", mintAddress).apply()
+        } else {
+            prefs.edit().remove("nft_profile_mint").apply()
+        }
+        meshService.sendBroadcastAnnounce()
     }
 
     /**

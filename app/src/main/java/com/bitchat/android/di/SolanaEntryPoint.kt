@@ -1,6 +1,7 @@
 package com.bitchat.android.di
 
 import com.bitchat.android.solana.MessageNotarizationService
+import com.bitchat.android.solana.NftAvatarService
 import com.bitchat.android.solana.SolanaPaymentManager
 import com.bitchat.android.solana.SolanaRelayHandler
 import com.bitchat.android.solana.SolanaWalletService
@@ -21,4 +22,5 @@ interface SolanaEntryPoint {
     fun tokenGateService(): TokenGateService
     fun solanaRelayHandler(): SolanaRelayHandler
     fun messageNotarizationService(): MessageNotarizationService
+    fun nftAvatarService(): NftAvatarService
 }

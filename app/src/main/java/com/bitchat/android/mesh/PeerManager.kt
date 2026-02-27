@@ -20,6 +20,7 @@ data class PeerInfo(
     var isVerifiedNickname: Boolean,       // Verification status flag
     var solanaAddress: String? = null,     // Solana wallet address (Base58) from ANNOUNCE
     var solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(), // Verified ownership claims from ANNOUNCE
+    var nftProfileMint: String? = null,  // NFT mint address for profile avatar (Base58) from ANNOUNCE
     var lastSeen: Long  // Using Long instead of Date for simplicity
 ) {
     override fun equals(other: Any?): Boolean {
@@ -43,6 +44,7 @@ data class PeerInfo(
         if (isVerifiedNickname != other.isVerifiedNickname) return false
         if (solanaAddress != other.solanaAddress) return false
         if (solanaOwnershipProofs != other.solanaOwnershipProofs) return false
+        if (nftProfileMint != other.nftProfileMint) return false
         if (lastSeen != other.lastSeen) return false
 
         return true
@@ -58,6 +60,7 @@ data class PeerInfo(
         result = 31 * result + isVerifiedNickname.hashCode()
         result = 31 * result + (solanaAddress?.hashCode() ?: 0)
         result = 31 * result + solanaOwnershipProofs.hashCode()
+        result = 31 * result + (nftProfileMint?.hashCode() ?: 0)
         result = 31 * result + lastSeen.hashCode()
         return result
     }
@@ -113,7 +116,8 @@ class PeerManager {
         signingPublicKey: ByteArray,
         isVerified: Boolean,
         solanaAddress: String? = null,
-        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(),
+        nftProfileMint: String? = null
     ): Boolean {
         if (peerID == "unknown") return false
 
@@ -132,6 +136,7 @@ class PeerManager {
             isVerifiedNickname = isVerified,
             solanaAddress = solanaAddress ?: existingPeer?.solanaAddress,
             solanaOwnershipProofs = if (solanaOwnershipProofs.isNotEmpty()) solanaOwnershipProofs else (existingPeer?.solanaOwnershipProofs ?: emptyList()),
+            nftProfileMint = nftProfileMint ?: existingPeer?.nftProfileMint,
             lastSeen = now
         )
         

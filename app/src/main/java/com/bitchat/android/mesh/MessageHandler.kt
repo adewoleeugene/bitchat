@@ -310,6 +310,19 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             )
         }
 
+        // Validate NFT profile mint: only accept if peer has a verified Solana address
+        // and the mint looks like a valid Base58 Solana address (32-44 chars, valid charset)
+        val validatedNftProfileMint: String? = announcement.nftProfileMint?.let { mint ->
+            if (!verifiedSolanaAddress.isNullOrBlank() &&
+                mint.length in 32..44 &&
+                mint.all { it in "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" }
+            ) {
+                mint
+            } else {
+                null
+            }
+        }
+
         // Update peer info with verification status through new method
         val isFirstAnnounce = delegate?.updatePeerInfo(
             peerID = peerID,
@@ -318,7 +331,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             signingPublicKey = signingPublicKey,
             isVerified = true,
             solanaAddress = verifiedSolanaAddress,
-            solanaOwnershipProofs = verifiedOwnershipProofs
+            solanaOwnershipProofs = verifiedOwnershipProofs,
+            nftProfileMint = validatedNftProfileMint
         ) ?: false
 
         // Update peer ID binding with noise public key for identity management
@@ -641,7 +655,8 @@ interface MessageHandlerDelegate {
         signingPublicKey: ByteArray,
         isVerified: Boolean,
         solanaAddress: String? = null,
-        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(),
+        nftProfileMint: String? = null
     ): Boolean
     
     // Packet operations

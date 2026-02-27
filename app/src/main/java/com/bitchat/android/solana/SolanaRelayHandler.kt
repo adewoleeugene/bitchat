@@ -17,6 +17,8 @@ interface RelayRpcGateway {
     suspend fun sendTransaction(signedTxBase64: String): Result<String>
     suspend fun getLatestBlockhash(): Result<BlockhashInfo>
     suspend fun confirmTransaction(signature: String): Result<Boolean>
+    suspend fun getBalance(address: String): Result<Long>
+    suspend fun getCurrentSlot(): Result<Long>
 }
 
 /**
@@ -49,6 +51,12 @@ class SolanaRelayHandler internal constructor(
 
             override suspend fun confirmTransaction(signature: String): Result<Boolean> =
                 rpcService.confirmTransaction(signature)
+
+            override suspend fun getBalance(address: String): Result<Long> =
+                rpcService.getBalance(address)
+
+            override suspend fun getCurrentSlot(): Result<Long> =
+                rpcService.getCurrentSlot()
         },
         transactionDao = transactionDao
     )
@@ -81,6 +89,8 @@ class SolanaRelayHandler internal constructor(
     // Track processed intent requests to avoid duplicates (intentId -> timestamp)
     private val processedIntents = ConcurrentHashMap<String, Long>()
     private val inflightIntents = ConcurrentHashMap<String, Long>()
+    private val processedBalanceIntents = ConcurrentHashMap<String, Long>()
+    private val inflightBalanceIntents = ConcurrentHashMap<String, Long>()
 
     // Track relay ownership claims to prevent multiple gateways processing same request
     private val relayClaims = ConcurrentHashMap<String, RelayClaimLock>()
@@ -90,6 +100,7 @@ class SolanaRelayHandler internal constructor(
 
     // Callback for sending blockhash responses back through the mesh (2-step handshake)
     var onSendBlockhashResponse: ((SolanaBlockhashResponse) -> Unit)? = null
+    var onSendBalanceResponse: ((SolanaBalanceResponse) -> Unit)? = null
 
     // Callback for sending relay ownership claims through the mesh
     var onSendRelayClaim: ((SolanaRelayClaim) -> Unit)? = null
@@ -313,9 +324,108 @@ class SolanaRelayHandler internal constructor(
         return true
     }
 
+    /**
+     * Handle incoming balance intent from an offline peer (0x36).
+     * Online peer queries RPC and sends back a balance response (0x37).
+     */
+    fun handleBalanceIntent(
+        intent: SolanaBalanceIntent,
+        fromPeerID: String,
+        context: Context
+    ): Boolean {
+        cleanup()
+
+        if (inflightBalanceIntents.containsKey(intent.intentId)) {
+            Log.d(TAG, "Already processing balance intent ${intent.intentId}, ignoring duplicate")
+            return false
+        }
+
+        val recentProcessedAt = processedBalanceIntents[intent.intentId]
+        if (recentProcessedAt != null && (System.currentTimeMillis() - recentProcessedAt) < INTENT_DEDUP_WINDOW_MS) {
+            Log.d(TAG, "Ignoring duplicate recent balance intent ${intent.intentId} within dedup window")
+            return false
+        }
+
+        if (!checkRateLimit(fromPeerID)) {
+            sendBalanceResponse(intent.intentId, intent.requesterPubKey, 0L, 0L, "Rate limit exceeded")
+            return false
+        }
+
+        if (!hasSufficientBattery(context)) {
+            sendBalanceResponse(intent.intentId, intent.requesterPubKey, 0L, 0L, "Relay peer battery too low")
+            return false
+        }
+
+        if (!hasInternetConnectivity(context)) {
+            sendBalanceResponse(intent.intentId, intent.requesterPubKey, 0L, 0L, "Relay peer has no internet")
+            return false
+        }
+
+        inflightBalanceIntents[intent.intentId] = System.currentTimeMillis()
+        onRelayEvent?.invoke("fetching balance for ${fromPeerID.take(8)}...")
+
+        scope.launch {
+            try {
+                val balanceResult = rpcGateway.getBalance(intent.requesterPubKey)
+                balanceResult.onSuccess { lamports ->
+                    val slot = rpcGateway.getCurrentSlot().getOrElse { 0L }
+                    processedBalanceIntents[intent.intentId] = System.currentTimeMillis()
+                    sendBalanceResponse(
+                        intentId = intent.intentId,
+                        walletPubKey = intent.requesterPubKey,
+                        lamports = lamports,
+                        slot = slot,
+                        errorMessage = ""
+                    )
+                    onRelayEvent?.invoke("sent balance to ${fromPeerID.take(8)}...")
+                }.onFailure { error ->
+                    sendBalanceResponse(
+                        intentId = intent.intentId,
+                        walletPubKey = intent.requesterPubKey,
+                        lamports = 0L,
+                        slot = 0L,
+                        errorMessage = error.message ?: "RPC error"
+                    )
+                    onRelayEvent?.invoke("balance fetch failed for ${fromPeerID.take(8)}...: ${error.message}")
+                }
+            } catch (e: Exception) {
+                sendBalanceResponse(
+                    intentId = intent.intentId,
+                    walletPubKey = intent.requesterPubKey,
+                    lamports = 0L,
+                    slot = 0L,
+                    errorMessage = e.message ?: "Unknown error"
+                )
+            } finally {
+                inflightBalanceIntents.remove(intent.intentId)
+            }
+        }
+
+        return true
+    }
+
     private fun sendBlockhashResponse(intentId: String, blockhash: String, blockHeight: Long, errorMessage: String) {
         val response = SolanaBlockhashResponse(intentId, blockhash, blockHeight, errorMessage)
         onSendBlockhashResponse?.invoke(response)
+    }
+
+    private fun sendBalanceResponse(
+        intentId: String,
+        walletPubKey: String,
+        lamports: Long,
+        slot: Long,
+        errorMessage: String
+    ) {
+        onSendBalanceResponse?.invoke(
+            SolanaBalanceResponse(
+                intentId = intentId,
+                walletPubKey = walletPubKey,
+                lamports = lamports,
+                slot = slot,
+                fetchedAtMs = System.currentTimeMillis(),
+                errorMessage = errorMessage
+            )
+        )
     }
 
     /**
@@ -481,6 +591,8 @@ class SolanaRelayHandler internal constructor(
         processedRelays.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         processedIntents.entries.removeAll { (now - it.value) > INTENT_DEDUP_WINDOW_MS }
         inflightIntents.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
+        processedBalanceIntents.entries.removeAll { (now - it.value) > INTENT_DEDUP_WINDOW_MS }
+        inflightBalanceIntents.entries.removeAll { (now - it.value) > REQUEST_EXPIRY_MS }
         relayClaims.entries.removeAll { it.value.expiresAtMs <= now }
     }
 

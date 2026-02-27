@@ -43,6 +43,8 @@ class SolanaPaymentManager @Inject constructor(
         private const val RECOVERY_TICK_MS = 20_000L
         private const val CONFIRMATION_POLL_MS = 5_000L
         private const val MAX_CONFIRMATION_POLLS = 24
+        private const val BALANCE_MESH_TIMEOUT_MS = 30_000L
+        private const val BALANCE_MESH_STALE_MS = 90_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,12 +54,15 @@ class SolanaPaymentManager @Inject constructor(
     private val confirmationJobs = ConcurrentHashMap<String, Job>()
     private val relayClaimTimestamps = ConcurrentHashMap<String, Long>()
     private val relayAckTimestamps = ConcurrentHashMap<String, Long>()
+    private val pendingBalanceRequests = ConcurrentHashMap<String, CompletableDeferred<Result<Long>>>()
+    private val pendingBalanceRequestPublicKeys = ConcurrentHashMap<String, String>()
 
     // Callback for mesh relay when direct RPC is unavailable
     var onRequestMeshRelay: ((SolanaRelayRequest) -> Unit)? = null
 
     // Callback for 2-step handshake: send unsigned intent to request blockhash from online peer
     var onRequestBlockhashIntent: ((SolanaTransferIntent) -> Unit)? = null
+    var onRequestBalanceIntent: ((SolanaBalanceIntent) -> Unit)? = null
 
     // Callback for posting status events to the UI (system messages in chat)
     var onStatusEvent: ((String) -> Unit)? = null
@@ -162,6 +167,37 @@ class SolanaPaymentManager @Inject constructor(
             Result.success(txId)
         } catch (e: Exception) {
             Log.e(TAG, "Mesh relay request failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Request a relayed balance lookup via nearby online mesh peers.
+     * Returns the fetched lamport balance on success.
+     */
+    suspend fun requestBalanceViaMesh(): Result<Long> = withContext(Dispatchers.IO) {
+        try {
+            val publicKey = walletService.getPublicKeyBase58()
+                ?: return@withContext Result.failure(IllegalStateException("No wallet found"))
+
+            val callback = onRequestBalanceIntent
+                ?: return@withContext Result.failure(IllegalStateException("Mesh balance relay not available"))
+
+            val intentId = UUID.randomUUID().toString()
+            val deferred = CompletableDeferred<Result<Long>>()
+            pendingBalanceRequests[intentId] = deferred
+            pendingBalanceRequestPublicKeys[intentId] = publicKey
+
+            callback(SolanaBalanceIntent(intentId = intentId, requesterPubKey = publicKey))
+            safeStatusEvent("requesting balance from mesh peers...")
+
+            val result = withTimeoutOrNull(BALANCE_MESH_TIMEOUT_MS) { deferred.await() }
+                ?: Result.failure(IllegalStateException("Mesh balance request timed out"))
+
+            pendingBalanceRequests.remove(intentId)
+            pendingBalanceRequestPublicKeys.remove(intentId)
+            result
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }
@@ -554,6 +590,50 @@ class SolanaPaymentManager @Inject constructor(
     }
 
     /**
+     * Handle relayed balance response from mesh peers.
+     */
+    suspend fun handleBalanceResponse(response: SolanaBalanceResponse) = withContext(Dispatchers.IO) {
+        val deferred = pendingBalanceRequests[response.intentId] ?: return@withContext
+        val expectedPubKey = pendingBalanceRequestPublicKeys[response.intentId]
+        if (expectedPubKey != null && response.walletPubKey != expectedPubKey) {
+            deferred.complete(Result.failure(IllegalStateException("Mismatched wallet in balance response")))
+            pendingBalanceRequests.remove(response.intentId)
+            pendingBalanceRequestPublicKeys.remove(response.intentId)
+            return@withContext
+        }
+
+        if (response.errorMessage.isNotEmpty()) {
+            deferred.complete(Result.failure(IllegalStateException(response.errorMessage)))
+            pendingBalanceRequests.remove(response.intentId)
+            pendingBalanceRequestPublicKeys.remove(response.intentId)
+            return@withContext
+        }
+
+        val ageMs = System.currentTimeMillis() - response.fetchedAtMs
+        if (response.fetchedAtMs > 0 && ageMs > BALANCE_MESH_STALE_MS) {
+            deferred.complete(Result.failure(IllegalStateException("Stale mesh balance response")))
+            pendingBalanceRequests.remove(response.intentId)
+            pendingBalanceRequestPublicKeys.remove(response.intentId)
+            return@withContext
+        }
+
+        val cacheResult = walletService.updateCachedBalanceFromMesh(
+            lamports = response.lamports,
+            updatedAtMs = response.fetchedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+        )
+        if (cacheResult.isFailure) {
+            deferred.complete(Result.failure(cacheResult.exceptionOrNull() ?: IllegalStateException("Failed to cache mesh balance")))
+            pendingBalanceRequests.remove(response.intentId)
+            pendingBalanceRequestPublicKeys.remove(response.intentId)
+            return@withContext
+        }
+        safeStatusEvent("mesh balance updated (${response.lamports} lamports)")
+        deferred.complete(Result.success(response.lamports))
+        pendingBalanceRequests.remove(response.intentId)
+        pendingBalanceRequestPublicKeys.remove(response.intentId)
+    }
+
+    /**
      * Build a Solana transfer transaction and sign it.
      * Returns base64-encoded signed transaction.
      */
@@ -722,6 +802,9 @@ class SolanaPaymentManager @Inject constructor(
         relayMonitorJobs.clear()
         confirmationJobs.values.forEach { it.cancel() }
         confirmationJobs.clear()
+        pendingBalanceRequests.values.forEach { it.cancel() }
+        pendingBalanceRequests.clear()
+        pendingBalanceRequestPublicKeys.clear()
         scope.cancel()
     }
 }

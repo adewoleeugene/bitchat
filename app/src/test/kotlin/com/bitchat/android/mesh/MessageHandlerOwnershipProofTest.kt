@@ -19,6 +19,7 @@ import net.i2p.crypto.eddsa.spec.EdDSAPrivateKeySpec
 import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,6 +96,104 @@ class MessageHandlerOwnershipProofTest {
         assertFalse(delegate.lastSolanaOwnershipProofs.any { it.expiresAtMs <= now })
     }
 
+    @Test
+    fun handleAnnounce_nftProfileMintPassedWhenSolanaAddressPresent() = runBlocking {
+        val signingPrivateKey = ByteArray(32) { (it + 40).toByte() }
+        val signingPublicKey = SolanaKeyDerivation.derivePublicKey(signingPrivateKey)
+        val walletPrivateKey = ByteArray(32) { (it + 70).toByte() }
+        val walletPublicKey = SolanaKeyDerivation.derivePublicKey(walletPrivateKey)
+        val walletAddress = SolanaKeyDerivation.encodeBase58(walletPublicKey)
+
+        val nickname = "nftUser"
+        val nftMint = "DRpbCBMxVnDK7maPMoGcfEaS3oxNQH6Aog6Hy7KVD8qv"
+        val linkProof = sign(
+            privateKey = walletPrivateKey,
+            data = SolanaIdentityProofUtil.buildLinkMessage(
+                nickname = nickname,
+                solanaAddress = walletAddress,
+                signingPublicKey = signingPublicKey
+            )
+        )
+
+        val announcement = IdentityAnnouncement(
+            nickname = nickname,
+            noisePublicKey = ByteArray(32) { (it + 2).toByte() },
+            signingPublicKey = signingPublicKey,
+            solanaAddress = walletAddress,
+            solanaLinkProofSignature = linkProof,
+            nftProfileMint = nftMint
+        )
+
+        val announcePacket = BitchatPacket(
+            version = 1u,
+            type = MessageType.ANNOUNCE.value,
+            senderID = ByteArray(8) { (it + 1).toByte() },
+            recipientID = null,
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = announcement.encode()!!,
+            signature = null,
+            ttl = 7u
+        )
+        announcePacket.signature = sign(signingPrivateKey, announcePacket.toBinaryDataForSigning()!!)
+
+        val delegate = CapturingDelegate()
+        val handler = MessageHandler(
+            myPeerID = "self-peer",
+            appContext = Application()
+        )
+        handler.delegate = delegate
+
+        handler.handleAnnounce(
+            RoutedPacket(packet = announcePacket, peerID = "peer-02")
+        )
+
+        assertEquals(walletAddress, delegate.lastSolanaAddress)
+        assertEquals(nftMint, delegate.lastNftProfileMint)
+    }
+
+    @Test
+    fun handleAnnounce_nftProfileMintRejectedWithoutSolanaAddress() = runBlocking {
+        val signingPrivateKey = ByteArray(32) { (it + 40).toByte() }
+        val signingPublicKey = SolanaKeyDerivation.derivePublicKey(signingPrivateKey)
+
+        val nickname = "noWallet"
+        val nftMint = "DRpbCBMxVnDK7maPMoGcfEaS3oxNQH6Aog6Hy7KVD8qv"
+
+        val announcement = IdentityAnnouncement(
+            nickname = nickname,
+            noisePublicKey = ByteArray(32) { (it + 2).toByte() },
+            signingPublicKey = signingPublicKey,
+            // No solanaAddress, no linkProof
+            nftProfileMint = nftMint
+        )
+
+        val announcePacket = BitchatPacket(
+            version = 1u,
+            type = MessageType.ANNOUNCE.value,
+            senderID = ByteArray(8) { (it + 1).toByte() },
+            recipientID = null,
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = announcement.encode()!!,
+            signature = null,
+            ttl = 7u
+        )
+        announcePacket.signature = sign(signingPrivateKey, announcePacket.toBinaryDataForSigning()!!)
+
+        val delegate = CapturingDelegate()
+        val handler = MessageHandler(
+            myPeerID = "self-peer",
+            appContext = Application()
+        )
+        handler.delegate = delegate
+
+        handler.handleAnnounce(
+            RoutedPacket(packet = announcePacket, peerID = "peer-03")
+        )
+
+        // nftProfileMint should be null because there's no verified Solana address
+        assertNull(delegate.lastNftProfileMint)
+    }
+
     private fun buildSignedOwnershipProof(
         nickname: String,
         solanaAddress: String,
@@ -153,6 +252,7 @@ class MessageHandlerOwnershipProofTest {
     private inner class CapturingDelegate : MessageHandlerDelegate {
         var lastSolanaAddress: String? = null
         var lastSolanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList()
+        var lastNftProfileMint: String? = null
 
         override fun addOrUpdatePeer(peerID: String, nickname: String): Boolean = false
         override fun removePeer(peerID: String) = Unit
@@ -169,10 +269,12 @@ class MessageHandlerOwnershipProofTest {
             signingPublicKey: ByteArray,
             isVerified: Boolean,
             solanaAddress: String?,
-            solanaOwnershipProofs: List<SolanaOwnershipProof>
+            solanaOwnershipProofs: List<SolanaOwnershipProof>,
+            nftProfileMint: String?
         ): Boolean {
             lastSolanaAddress = solanaAddress
             lastSolanaOwnershipProofs = solanaOwnershipProofs
+            lastNftProfileMint = nftProfileMint
             return true
         }
 

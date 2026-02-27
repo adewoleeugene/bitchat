@@ -15,7 +15,8 @@ data class IdentityAnnouncement(
     val signingPublicKey: ByteArray,  // Ed25519 public key for signing
     val solanaAddress: String? = null, // Optional Solana wallet address (Base58)
     val solanaLinkProofSignature: ByteArray? = null, // Optional Ed25519 proof signed by Solana wallet key
-    val solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList() // Optional signed NFT/token holding claims
+    val solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(), // Optional signed NFT/token holding claims
+    val nftProfileMint: String? = null // Optional NFT mint address for profile avatar (Base58)
 ) : Parcelable {
     /**
      * TLV types matching iOS implementation
@@ -26,7 +27,8 @@ data class IdentityAnnouncement(
         SIGNING_PUBLIC_KEY(0x03u),
         SOLANA_ADDRESS(0x05u),       // Solana wallet address (Base58 string)
         SOLANA_LINK_PROOF(0x06u),    // Signature proving wallet controls nickname+signing key link
-        SOLANA_OWNERSHIP_PROOF(0x07u); // Signed ownership claim (repeated)
+        SOLANA_OWNERSHIP_PROOF(0x07u), // Signed ownership claim (repeated)
+        NFT_PROFILE_MINT(0x08u);      // NFT mint address for profile avatar (Base58 string)
 
         companion object {
             fun fromValue(value: UByte): TLVType? {
@@ -93,6 +95,16 @@ data class IdentityAnnouncement(
             }
         }
 
+        // TLV for NFT profile mint (optional)
+        nftProfileMint?.let { mint ->
+            val mintData = mint.toByteArray(Charsets.UTF_8)
+            if (mintData.isNotEmpty() && mintData.size <= 255) {
+                result.add(TLVType.NFT_PROFILE_MINT.value.toByte())
+                result.add(mintData.size.toByte())
+                result.addAll(mintData.toList())
+            }
+        }
+
         return result.toByteArray()
     }
     
@@ -113,6 +125,7 @@ data class IdentityAnnouncement(
             var solanaAddress: String? = null
             var solanaLinkProofSignature: ByteArray? = null
             val solanaOwnershipProofs = mutableListOf<SolanaOwnershipProof>()
+            var nftProfileMint: String? = null
 
             while (offset + 2 <= dataCopy.size) {
                 // Read TLV type
@@ -151,6 +164,9 @@ data class IdentityAnnouncement(
                     TLVType.SOLANA_OWNERSHIP_PROOF -> {
                         SolanaOwnershipProof.decode(value)?.let { solanaOwnershipProofs.add(it) }
                     }
+                    TLVType.NFT_PROFILE_MINT -> {
+                        nftProfileMint = String(value, Charsets.UTF_8)
+                    }
                     null -> {
                         // Unknown TLV; skip (tolerant decoder for forward compatibility)
                         continue
@@ -166,7 +182,8 @@ data class IdentityAnnouncement(
                     signingPublicKey = signingPublicKey,
                     solanaAddress = solanaAddress,
                     solanaLinkProofSignature = solanaLinkProofSignature,
-                    solanaOwnershipProofs = solanaOwnershipProofs.toList()
+                    solanaOwnershipProofs = solanaOwnershipProofs.toList(),
+                    nftProfileMint = nftProfileMint
                 )
             } else {
                 null
@@ -190,6 +207,7 @@ data class IdentityAnnouncement(
             if (!solanaLinkProofSignature.contentEquals(other.solanaLinkProofSignature)) return false
         } else if (other.solanaLinkProofSignature != null) return false
         if (solanaOwnershipProofs != other.solanaOwnershipProofs) return false
+        if (nftProfileMint != other.nftProfileMint) return false
 
         return true
     }
@@ -201,11 +219,13 @@ data class IdentityAnnouncement(
         result = 31 * result + (solanaAddress?.hashCode() ?: 0)
         result = 31 * result + (solanaLinkProofSignature?.contentHashCode() ?: 0)
         result = 31 * result + solanaOwnershipProofs.hashCode()
+        result = 31 * result + (nftProfileMint?.hashCode() ?: 0)
         return result
     }
 
     override fun toString(): String {
         val solSuffix = solanaAddress?.let { ", solana=${it.take(8)}..." } ?: ""
-        return "IdentityAnnouncement(nickname='$nickname', noisePublicKey=${noisePublicKey.joinToString("") { "%02x".format(it) }.take(16)}..., signingPublicKey=${signingPublicKey.joinToString("") { "%02x".format(it) }.take(16)}...$solSuffix)"
+        val nftSuffix = nftProfileMint?.let { ", nftProfile=${it.take(8)}..." } ?: ""
+        return "IdentityAnnouncement(nickname='$nickname', noisePublicKey=${noisePublicKey.joinToString("") { "%02x".format(it) }.take(16)}..., signingPublicKey=${signingPublicKey.joinToString("") { "%02x".format(it) }.take(16)}...$solSuffix$nftSuffix)"
     }
 }

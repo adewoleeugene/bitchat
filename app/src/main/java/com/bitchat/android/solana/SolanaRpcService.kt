@@ -63,6 +63,19 @@ class SolanaRpcService @Inject constructor(
     }
 
     /**
+     * Get the current slot from RPC.
+     */
+    suspend fun getCurrentSlot(): Result<Long> = withContext(Dispatchers.IO) {
+        try {
+            val response = rpcCall("getSlot", """[]""")
+            val slot = response.get("result").asLong
+            Result.success(slot)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get a recent blockhash for transaction construction.
      * Blockhashes expire after ~60 seconds, so fetch immediately before broadcast.
      */
@@ -420,6 +433,71 @@ class SolanaRpcService @Inject constructor(
         }
     }
 
+    /**
+     * Fetch NFT image URI from DAS getAsset content.links.image.
+     * Returns the direct image URL, or the json_uri as fallback.
+     */
+    suspend fun getNftImageUri(mintAddress: String): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val response = rpcCall("getAsset", """{"id":"$mintAddress"}""")
+            if (response.has("error")) return@withContext Result.success(null)
+            val result = response.getAsJsonObject("result") ?: return@withContext Result.success(null)
+            val content = result.getAsJsonObject("content") ?: return@withContext Result.success(null)
+            val links = content.getAsJsonObject("links")
+            val imageUrl = links?.get("image")?.asString
+            if (!imageUrl.isNullOrBlank()) return@withContext Result.success(imageUrl)
+            // Fallback to json_uri (caller can fetch JSON for image field)
+            val jsonUri = content.get("json_uri")?.asString
+            Result.success(jsonUri)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetch owned NFTs with image URIs for avatar selection.
+     * Returns list of NftInfo(mintAddress, name, imageUri). Capped at 100 items.
+     */
+    suspend fun getOwnedNftsWithImages(ownerPublicKey: String): Result<List<NftInfo>> = withContext(Dispatchers.IO) {
+        try {
+            val nfts = mutableListOf<NftInfo>()
+            var page = 1
+            val limit = 50
+
+            while (nfts.size < 100) {
+                val response = rpcCall(
+                    "getAssetsByOwner",
+                    """{"ownerAddress":"$ownerPublicKey","page":$page,"limit":$limit}"""
+                )
+                if (response.has("error")) break
+                val result = response.getAsJsonObject("result") ?: break
+                val items = result.getAsJsonArray("items") ?: break
+                if (items.size() == 0) break
+
+                for (item in items) {
+                    if (!item.isJsonObject) continue
+                    val obj = item.asJsonObject
+                    val id = obj.get("id")?.asString ?: continue
+                    val content = obj.getAsJsonObject("content") ?: continue
+                    val links = content.getAsJsonObject("links")
+                    val imageUrl = links?.get("image")?.asString
+                    val metadata = content.getAsJsonObject("metadata")
+                    val name = metadata?.get("name")?.asString ?: "Unnamed NFT"
+                    if (!imageUrl.isNullOrBlank()) {
+                        nfts.add(NftInfo(id, name, imageUrl))
+                    }
+                }
+
+                val total = result.get("total")?.asInt ?: 0
+                if (items.size() < limit || page * limit >= total) break
+                page++
+            }
+            Result.success(nfts)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun rpcCall(method: String, params: String): JsonObject {
         val id = requestId++
         val body = """{"jsonrpc":"2.0","id":$id,"method":"$method","params":$params}"""
@@ -435,6 +513,12 @@ class SolanaRpcService @Inject constructor(
         return JsonParser.parseString(responseBody).asJsonObject
     }
 }
+
+data class NftInfo(
+    val mintAddress: String,
+    val name: String,
+    val imageUri: String
+)
 
 data class BlockhashInfo(
     val blockhash: String,
