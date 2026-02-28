@@ -237,6 +237,9 @@ class TokenGateService @Inject constructor(
             TokenGateType.SPL_TOKEN -> {
                 rpcService.getTokenBalance(walletAddress, config.tokenMintAddress)
             }
+            TokenGateType.SOL_BALANCE -> {
+                rpcService.getBalance(walletAddress)
+            }
             TokenGateType.NFT_SPECIFIC -> {
                 // NFT by specific mint: any balance > 0 of that mint means holder.
                 rpcService.getTokenBalance(walletAddress, config.tokenMintAddress)
@@ -487,7 +490,9 @@ class TokenGateService @Inject constructor(
     }
 
     fun formatRequirementText(result: TokenGateValidationResult): String {
-        val symbol = result.tokenSymbol.ifEmpty { "tokens" }
+        val symbol = result.tokenSymbol.ifEmpty {
+            if (result.tokenDecimals == 9) "SOL" else "tokens"
+        }
         val required = formatTokenAmount(result.requiredBalance, result.tokenDecimals)
         return if (result.userBalance >= 0) {
             val actual = formatTokenAmount(result.userBalance, result.tokenDecimals)

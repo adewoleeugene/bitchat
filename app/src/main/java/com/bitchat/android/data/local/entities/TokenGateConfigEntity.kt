@@ -11,8 +11,8 @@ import androidx.room.PrimaryKey
 data class TokenGateConfigEntity(
     @PrimaryKey
     val channelKey: String,              // Composite channel key (e.g., "mesh:#premium")
-    val gateType: String,                // SPL_TOKEN, NFT_COLLECTION, NFT_SPECIFIC
-    val tokenMintAddress: String,        // SPL token mint or NFT collection address (Base58)
+    val gateType: String,                // SPL_TOKEN, NFT_COLLECTION, NFT_SPECIFIC, SOL_BALANCE
+    val tokenMintAddress: String,        // SPL/NFT mint (Base58) or "SOL" for SOL_BALANCE
     val minBalance: Long,                // Minimum token balance required (in smallest unit)
     val tokenSymbol: String = "",        // Display symbol (e.g., "$CHAT", "USDC")
     val tokenDecimals: Int = 0,          // Token decimals for display formatting
@@ -32,4 +32,5 @@ object TokenGateType {
     const val SPL_TOKEN = "SPL_TOKEN"
     const val NFT_COLLECTION = "NFT_COLLECTION"
     const val NFT_SPECIFIC = "NFT_SPECIFIC"
+    const val SOL_BALANCE = "SOL_BALANCE"
 }

@@ -303,6 +303,31 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    fun hasExportPasscodeConfigured(): Boolean {
+        return walletService.hasExportPasscode()
+    }
+
+    fun setExportPasscode(passcode: String): Result<Unit> {
+        val result = walletService.setExportPasscode(passcode)
+        if (result.isFailure) {
+            _errorMessage.value = result.exceptionOrNull()?.message ?: "Failed to set passcode"
+        }
+        return result
+    }
+
+    fun unlockPrivateKeyExportWithPasscode(passcode: String) {
+        val gate = walletService.canRevealPrivateKeyForExport()
+        if (gate.isFailure) {
+            _errorMessage.value = gate.exceptionOrNull()?.message ?: "Private key export temporarily locked"
+            return
+        }
+        if (!walletService.verifyExportPasscode(passcode)) {
+            _errorMessage.value = "Incorrect passcode"
+            return
+        }
+        showPrivateKeyExport()
+    }
+
     fun deleteWallet() {
         viewModelScope.launch {
             walletService.deleteWallet()

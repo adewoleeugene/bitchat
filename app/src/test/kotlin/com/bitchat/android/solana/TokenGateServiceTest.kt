@@ -171,6 +171,40 @@ class TokenGateServiceTest {
     }
 
     @Test
+    fun validateEligibility_solBalanceGate_usesNativeSolBalance() {
+        runBlocking {
+            val channelKey = "mesh:#sol-gated"
+            val gateHash = "hash_sol_v1"
+            val config = TokenGateConfigEntity(
+                channelKey = channelKey,
+                gateType = TokenGateType.SOL_BALANCE,
+                tokenMintAddress = "SOL",
+                minBalance = 2_000_000_000L, // 2 SOL
+                tokenSymbol = "SOL",
+                tokenDecimals = 9,
+                creatorPublicKey = "Creator1111111111111111111111111111111111",
+                policyVersion = 1,
+                gateHash = gateHash
+            )
+            whenever(tokenGateDao.getTokenGate(channelKey)).thenReturn(config)
+            whenever(tokenGateDao.getEligibilityCache(channelKey, "Wallet111111111111111111111111111111111", gateHash)).thenReturn(null)
+            whenever(context.getSystemService(Context.CONNECTIVITY_SERVICE)).thenReturn(connectivityManager)
+            whenever(connectivityManager.activeNetwork).thenReturn(network)
+            whenever(connectivityManager.getNetworkCapabilities(network)).thenReturn(networkCapabilities)
+            whenever(networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+            whenever(networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+            whenever(rpcService.getBalance("Wallet111111111111111111111111111111111"))
+                .thenReturn(Result.success(3_000_000_000L))
+
+            val result = service.validateEligibility(channelKey, ValidationMode.STRICT_ONLINE).getOrThrow()
+
+            assertEquals(GateDecision.ALLOW, result.decision)
+            verify(rpcService).getBalance("Wallet111111111111111111111111111111111")
+            verify(rpcService, never()).getTokenBalance(any(), any())
+        }
+    }
+
+    @Test
     fun applySyncedPolicy_upsertWithValidHash_insertsPolicy() {
         runBlocking {
             val channelKey = "mesh:#vip"

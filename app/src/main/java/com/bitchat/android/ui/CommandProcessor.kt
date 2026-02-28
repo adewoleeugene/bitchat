@@ -84,7 +84,7 @@ class CommandProcessor(
                 if (parts.size < 4) {
                     return CommandResult(
                         prefillText = "/gate create #",
-                        hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ..."
+                        hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ..."
                     )
                 }
                 val channel = parts[2]
@@ -100,6 +100,15 @@ class CommandProcessor(
                             )
                         }
                         createArgs.addAll(parts.drop(3))
+                    }
+                    "sol" -> {
+                        if (parts.size < 5) {
+                            return CommandResult(
+                                prefillText = "/gate create #",
+                                hintText = "usage: /gate create #vip sol <min_sol>"
+                            )
+                        }
+                        createArgs.addAll(listOf("sol", parts[4]))
                     }
                     "nft-specific", "nft_specific" -> {
                         if (parts.size < 5) {
@@ -122,7 +131,7 @@ class CommandProcessor(
                     else -> {
                         return CommandResult(
                             prefillText = "/gate create #",
-                            hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ..."
+                            hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ..."
                         )
                     }
                 }
@@ -145,10 +154,15 @@ class CommandProcessor(
                     val symbol = config.tokenSymbol.ifEmpty { "tokens" }
                     val required = tgs.formatTokenAmount(config.minBalance, config.tokenDecimals)
                     val hashShort = if (config.gateHash.length >= 12) config.gateHash.take(12) else config.gateHash
+                    val mintDescriptor = if (config.gateType == TokenGateType.SOL_BALANCE) {
+                        "native SOL balance gate"
+                    } else {
+                        "${config.tokenMintAddress.take(8)}..."
+                    }
                     addSystemMessage(
                         "gate status for $channelTag\n" +
                             "requirement: $required $symbol\n" +
-                            "mint: ${config.tokenMintAddress.take(8)}...\n" +
+                            "mint: $mintDescriptor\n" +
                             "policy: v${config.policyVersion} ($hashShort...)"
                     )
                 }
@@ -285,17 +299,19 @@ class CommandProcessor(
 
             // Parse:
             // SPL: --token-gate spl <mint_address> <min_amount> [symbol] [decimals]
+            // SOL: --token-gate sol <min_sol>
             // SPL (legacy): --token-gate <mint_address> <min_amount> [symbol] [decimals]
             // NFT specific: --token-gate nft-specific <mint_address>
             // NFT collection: --token-gate nft-collection <collection_mint>
             if (parts.size < tokenGateIndex + 2) {
-                addSystemMessage("usage:\n/create #vip --token-gate spl <mint> <amount> [symbol] [decimals]\n/create #vip --token-gate nft-specific <mint>\n/create #vip --token-gate nft-collection <collection_mint>")
+                addSystemMessage("usage:\n/create #vip --token-gate spl <mint> <amount> [symbol] [decimals]\n/create #vip --token-gate sol <min_sol>\n/create #vip --token-gate nft-specific <mint>\n/create #vip --token-gate nft-collection <collection_mint>")
                 return null
             }
 
             val firstArg = parts[tokenGateIndex + 1]
             val parsedGateType = when (firstArg.lowercase()) {
                 "spl" -> TokenGateType.SPL_TOKEN
+                "sol" -> TokenGateType.SOL_BALANCE
                 "nft-specific", "nft_specific" -> TokenGateType.NFT_SPECIFIC
                 "nft-collection", "nft_collection" -> TokenGateType.NFT_COLLECTION
                 else -> TokenGateType.SPL_TOKEN // legacy format
@@ -306,8 +322,11 @@ class CommandProcessor(
             } else {
                 tokenGateIndex + 2
             }
-            val mintAddress = parts.getOrNull(mintArgIndex)
-            if (mintAddress.isNullOrBlank()) {
+            val mintAddress = when (parsedGateType) {
+                TokenGateType.SOL_BALANCE -> "SOL"
+                else -> parts.getOrNull(mintArgIndex).orEmpty()
+            }
+            if (parsedGateType != TokenGateType.SOL_BALANCE && mintAddress.isBlank()) {
                 addSystemMessage("missing mint/collection address for token gate.")
                 return null
             }
@@ -327,6 +346,16 @@ class CommandProcessor(
                     minAmount = parsedAmount
                     symbol = parts.getOrNull(amountIndex + 1) ?: ""
                     decimals = parts.getOrNull(amountIndex + 2)?.toIntOrNull() ?: 0
+                }
+                TokenGateType.SOL_BALANCE -> {
+                    val amountSol = parts.getOrNull(tokenGateIndex + 2)?.toDoubleOrNull()
+                    if (amountSol == null || amountSol <= 0.0) {
+                        addSystemMessage("invalid SOL amount: ${parts.getOrNull(tokenGateIndex + 2) ?: "(missing)"}")
+                        return null
+                    }
+                    minAmount = (amountSol * 1_000_000_000.0).toLong()
+                    symbol = "SOL"
+                    decimals = 9
                 }
                 TokenGateType.NFT_SPECIFIC -> {
                     minAmount = 1L
@@ -367,6 +396,10 @@ class CommandProcessor(
                         TokenGateType.SPL_TOKEN -> {
                             val displaySymbol = symbol.ifEmpty { "tokens" }
                             "requires $minAmount $displaySymbol"
+                        }
+                        TokenGateType.SOL_BALANCE -> {
+                            val requiredSol = tgs.formatTokenAmount(minAmount, 9)
+                            "requires at least $requiredSol SOL"
                         }
                         TokenGateType.NFT_SPECIFIC -> "requires holding NFT mint ${mintAddress.take(8)}..."
                         TokenGateType.NFT_COLLECTION -> "requires holding any NFT in collection ${mintAddress.take(8)}..."
@@ -820,8 +853,8 @@ class CommandProcessor(
         // Pre-fill with contextual hint based on what the command expects
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
-            "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ...")
-            "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ...")
+            "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
+            "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
             "/gate refresh" -> CommandResult(prefillText = "/gate refresh #", hintText = "or use /gate refresh in current channel")
             "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")

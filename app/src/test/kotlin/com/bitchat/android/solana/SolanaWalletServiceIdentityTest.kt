@@ -141,6 +141,15 @@ class SolanaWalletServiceIdentityTest {
         verifier.update(payload)
         assertTrue(verifier.verify(signatureBytes))
     }
+
+    @Test
+    fun exportPasscode_canBeSetAndVerified() {
+        val setResult = walletService.setExportPasscode("1234")
+        assertTrue(setResult.isSuccess)
+        assertTrue(walletService.hasExportPasscode())
+        assertTrue(walletService.verifyExportPasscode("1234"))
+        assertTrue(!walletService.verifyExportPasscode("9999"))
+    }
 }
 
 private class FakeWalletDao : WalletDao {

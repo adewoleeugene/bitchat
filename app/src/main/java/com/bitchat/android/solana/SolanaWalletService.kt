@@ -50,6 +50,7 @@ class SolanaWalletService @Inject constructor(
         private const val KEY_EXPORT_LAST_AT = "wallet_export_last_at"
         private const val KEY_EXPORT_COUNT = "wallet_export_count"
         private const val KEY_EXPORT_RECENT = "wallet_export_recent"
+        private const val KEY_EXPORT_PASSCODE_HASH = "wallet_export_passcode_hash"
         private const val IDENTITY_PREFS_NAME = "bitchat_crypto"
         private const val IDENTITY_ED25519_PRIVATE_KEY_PREF = "ed25519_signing_private_key"
         private const val LAMPORTS_PER_SOL = 1_000_000_000L
@@ -202,6 +203,31 @@ class SolanaWalletService @Inject constructor(
         if (count == 0 || lastAt <= 0L) return "Private key export has not been used."
         val minutesAgo = ((System.currentTimeMillis() - lastAt) / 60_000L).coerceAtLeast(0L)
         return "Private key export used $count time(s), last ${minutesAgo}m ago."
+    }
+
+    fun hasExportPasscode(): Boolean {
+        return securePrefs.getString(KEY_EXPORT_PASSCODE_HASH, null)?.isNotBlank() == true
+    }
+
+    fun setExportPasscode(passcode: String): Result<Unit> {
+        val normalized = passcode.trim()
+        if (normalized.length < 4) {
+            return Result.failure(IllegalArgumentException("Passcode must be at least 4 characters."))
+        }
+        if (normalized.length > 32) {
+            return Result.failure(IllegalArgumentException("Passcode must be 32 characters or fewer."))
+        }
+        return try {
+            securePrefs.edit().putString(KEY_EXPORT_PASSCODE_HASH, sha256Hex(normalized)).apply()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun verifyExportPasscode(passcode: String): Boolean {
+        val storedHash = securePrefs.getString(KEY_EXPORT_PASSCODE_HASH, null) ?: return false
+        return sha256Hex(passcode.trim()) == storedHash
     }
 
     /**
@@ -703,6 +729,12 @@ class SolanaWalletService @Inject constructor(
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun decodeBase58(input: String): ByteArray {

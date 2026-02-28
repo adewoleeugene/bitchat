@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,9 @@ fun WalletScreen(
     val allWallets by viewModel.allWallets.collectAsState()
     val initializationIssue by viewModel.initializationIssue.collectAsState()
     val context = LocalContext.current
+    var showExportAuthMethodDialog by remember { mutableStateOf(false) }
+    var showSetExportPasscodeDialog by remember { mutableStateOf(false) }
+    var showVerifyExportPasscodeDialog by remember { mutableStateOf(false) }
 
     // Transaction history screen (full screen overlay)
     if (showTxHistory) {
@@ -157,7 +161,7 @@ fun WalletScreen(
                         onCreateMnemonicWallet = { viewModel.createWallet() },
                         onSwitchWallet = { publicKey -> viewModel.switchActiveWallet(publicKey) },
                         onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
-                        onExportPrivateKey = { authenticateThenExportPrivateKey(context, viewModel) },
+                        onExportPrivateKey = { showExportAuthMethodDialog = true },
                         onExportRecoveryPhrase = { viewModel.showMnemonicBackup() },
                         onSend = { viewModel.showSendDialog() },
                         onTransactionHistory = { viewModel.showTransactionHistory() }
@@ -231,12 +235,67 @@ fun WalletScreen(
             onDismiss = { viewModel.dismissImportPrivateKeyDialog() }
         )
     }
+
+    if (showExportAuthMethodDialog) {
+        ExportAuthMethodDialog(
+            onDismiss = { showExportAuthMethodDialog = false },
+            onUseDeviceAuth = {
+                showExportAuthMethodDialog = false
+                authenticateThenExportPrivateKey(
+                    context = context,
+                    viewModel = viewModel,
+                    onFallbackToPasscode = {
+                        if (viewModel.hasExportPasscodeConfigured()) {
+                            showVerifyExportPasscodeDialog = true
+                        } else {
+                            showSetExportPasscodeDialog = true
+                        }
+                    }
+                )
+            },
+            onUsePasscode = {
+                showExportAuthMethodDialog = false
+                if (viewModel.hasExportPasscodeConfigured()) {
+                    showVerifyExportPasscodeDialog = true
+                } else {
+                    showSetExportPasscodeDialog = true
+                }
+            }
+        )
+    }
+
+    if (showSetExportPasscodeDialog) {
+        SetExportPasscodeDialog(
+            onDismiss = { showSetExportPasscodeDialog = false },
+            onSetPasscode = { passcode ->
+                val result = viewModel.setExportPasscode(passcode)
+                if (result.isSuccess) {
+                    showSetExportPasscodeDialog = false
+                    showVerifyExportPasscodeDialog = true
+                }
+            }
+        )
+    }
+
+    if (showVerifyExportPasscodeDialog) {
+        VerifyExportPasscodeDialog(
+            onDismiss = { showVerifyExportPasscodeDialog = false },
+            onVerify = { passcode ->
+                viewModel.unlockPrivateKeyExportWithPasscode(passcode)
+                showVerifyExportPasscodeDialog = false
+            }
+        )
+    }
 }
 
-private fun authenticateThenExportPrivateKey(context: Context, viewModel: WalletViewModel) {
+private fun authenticateThenExportPrivateKey(
+    context: Context,
+    viewModel: WalletViewModel,
+    onFallbackToPasscode: () -> Unit
+) {
     val activity = context.findFragmentActivity()
     if (activity == null) {
-        Toast.makeText(context, "Authentication unavailable on this screen", Toast.LENGTH_SHORT).show()
+        onFallbackToPasscode()
         return
     }
 
@@ -267,12 +326,147 @@ private fun authenticateThenExportPrivateKey(context: Context, viewModel: Wallet
             prompt.authenticate(info)
         }
         BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
-            Toast.makeText(context, "Set up biometrics or device lock to export private key", Toast.LENGTH_LONG).show()
+            onFallbackToPasscode()
         }
         else -> {
-            Toast.makeText(context, "Biometric authentication not available", Toast.LENGTH_SHORT).show()
+            onFallbackToPasscode()
         }
     }
+}
+
+@Composable
+private fun ExportAuthMethodDialog(
+    onDismiss: () -> Unit,
+    onUseDeviceAuth: () -> Unit,
+    onUsePasscode: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Authenticate Export",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                "Choose how to unlock private key export.",
+                fontFamily = CourierPrimeFamily,
+                color = BitchatColors.TextSecondary
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onUseDeviceAuth) {
+                Text("Device Security", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onUsePasscode) {
+                Text("App Passcode", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
+@Composable
+private fun SetExportPasscodeDialog(
+    onDismiss: () -> Unit,
+    onSetPasscode: (String) -> Unit
+) {
+    var passcode by remember { mutableStateOf("") }
+    var confirmPasscode by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Set App Passcode",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Create a passcode for private key export fallback.",
+                    fontFamily = CourierPrimeFamily,
+                    color = BitchatColors.TextSecondary
+                )
+                OutlinedTextField(
+                    value = passcode,
+                    onValueChange = { passcode = it },
+                    label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = confirmPasscode,
+                    onValueChange = { confirmPasscode = it },
+                    label = { Text("Confirm Passcode", fontFamily = CourierPrimeFamily) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (passcode == confirmPasscode && passcode.isNotBlank()) {
+                        onSetPasscode(passcode)
+                    }
+                },
+                enabled = passcode.isNotBlank() && confirmPasscode.isNotBlank() && passcode == confirmPasscode
+            ) {
+                Text("Save", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
+@Composable
+private fun VerifyExportPasscodeDialog(
+    onDismiss: () -> Unit,
+    onVerify: (String) -> Unit
+) {
+    var passcode by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Enter App Passcode",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value = passcode,
+                onValueChange = { passcode = it },
+                label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                visualTransformation = PasswordVisualTransformation()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onVerify(passcode) }, enabled = passcode.isNotBlank()) {
+                Text("Unlock", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
 }
 
 private fun Context.findFragmentActivity(): FragmentActivity? {
