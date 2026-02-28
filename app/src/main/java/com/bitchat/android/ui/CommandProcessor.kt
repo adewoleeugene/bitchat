@@ -58,6 +58,7 @@ class CommandProcessor(
             "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
             "/leave" -> handleLeaveCommand(parts, myPeerID, meshService, viewModel)
+            "/users" -> handleUsersCommand(parts, myPeerID, meshService, viewModel)
             "/kick" -> handleKickCommand(parts, myPeerID, meshService, viewModel)
             "/transfer" -> handleTransferCommand(parts, myPeerID, meshService, viewModel)
             "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
@@ -331,6 +332,17 @@ class CommandProcessor(
         viewModel: ChatViewModel?
     ): CommandResult? {
         val bridged = mutableListOf("/channel", "exit")
+        parts.getOrNull(1)?.let { bridged.add(it) }
+        return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
+    }
+
+    private fun handleUsersCommand(
+        parts: List<String>,
+        myPeerID: String,
+        meshService: BluetoothMeshService,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val bridged = mutableListOf("/channel", "users")
         parts.getOrNull(1)?.let { bridged.add(it) }
         return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
     }
@@ -1164,8 +1176,12 @@ class CommandProcessor(
 
         // Channel context: do not show global commands.
         val commands = mutableListOf(
-            CommandSuggestion("/channel", emptyList(), "<action>", "channel tools"),
             CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
+            CommandSuggestion("/users", emptyList(), "[#channel]", "list tracked users in channel"),
+            CommandSuggestion("/gm", emptyList(), "@user", "send a gm"),
+            CommandSuggestion("/tip", emptyList(), "@user <amount>", "send SOL"),
+            CommandSuggestion("/w", emptyList(), null, "who's online"),
+            CommandSuggestion("/wallet", emptyList(), null, "your wallet"),
             CommandSuggestion("/channel exit", emptyList(), "[#channel]", "leave channel"),
             CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel"),
             CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings")
@@ -1177,6 +1193,7 @@ class CommandProcessor(
         if (isAdmin) {
             commands.addAll(
                 listOf(
+                    CommandSuggestion("/channel", emptyList(), "<action>", "channel tools"),
                     CommandSuggestion("/kick", emptyList(), "[@user|#channel @user]", "remove member from channel (admin)"),
                     CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "alias: channel gate set (admin)"),
                     CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show"),
@@ -1226,6 +1243,7 @@ class CommandProcessor(
             "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")
             "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | gate show | exit")
             "/leave" -> CommandResult(prefillText = "/leave", hintText = "or /leave #channel")
+            "/users" -> CommandResult(prefillText = "/users ", hintText = "or use /users #channel")
             "/channel exit" -> CommandResult(prefillText = "/channel exit", hintText = "or /channel exit #channel")
             "/channel users" -> CommandResult(prefillText = "/channel users #", hintText = "or use in current channel")
             "/channel member remove" -> CommandResult(prefillText = "/channel member remove @", hintText = "or /channel member remove #channel @name")
