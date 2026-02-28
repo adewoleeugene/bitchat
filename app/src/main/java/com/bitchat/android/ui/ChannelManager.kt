@@ -310,6 +310,22 @@ class ChannelManager(
         return transferred
     }
 
+    fun setChannelAdmin(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        val changed = dataManager.setChannelAdmin(channel, actorPeerID, targetPeerID)
+        if (changed) {
+            saveChannelData()
+        }
+        return changed
+    }
+
+    fun setChannelMember(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        val changed = dataManager.setChannelMember(channel, actorPeerID, targetPeerID)
+        if (changed) {
+            saveChannelData()
+        }
+        return changed
+    }
+
     fun hasChannelCreator(channel: String): Boolean {
         return dataManager.hasChannelCreator(channel)
     }

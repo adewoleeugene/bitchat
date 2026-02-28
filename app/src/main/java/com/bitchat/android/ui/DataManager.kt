@@ -184,6 +184,22 @@ class DataManager(private val context: Context) {
         addChannelMember(channel, newOwnerPeerID)
         return true
     }
+
+    fun setChannelAdmin(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        if (!isChannelAdmin(channel, actorPeerID)) return false
+        if (isChannelCreator(channel, targetPeerID)) return false
+        addChannelMember(channel, targetPeerID)
+        setChannelRole(channel, targetPeerID, ChannelRoles.ADMIN)
+        return true
+    }
+
+    fun setChannelMember(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        if (!isChannelAdmin(channel, actorPeerID)) return false
+        if (isChannelCreator(channel, targetPeerID)) return false
+        addChannelMember(channel, targetPeerID)
+        setChannelRole(channel, targetPeerID, ChannelRoles.MEMBER)
+        return true
+    }
     
     // MARK: - Channel Members Management
     
@@ -225,7 +241,7 @@ class DataManager(private val context: Context) {
         }
     }
 
-    fun setChannelRole(channel: String, peerID: String, role: String) {
+    private fun setChannelRole(channel: String, peerID: String, role: String) {
         val normalized = when (role) {
             ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.MEMBER -> role
             else -> ChannelRoles.MEMBER
