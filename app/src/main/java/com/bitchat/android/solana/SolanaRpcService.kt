@@ -31,10 +31,15 @@ class SolanaRpcService @Inject constructor(
     private var lastBlockhashTimestamp: Long = 0L
     @Volatile
     private var cachedNftApiSupport: Boolean? = null
+    @Volatile
+    private var cachedNftApiSupportCheckedAt: Long = 0L
 
     companion object {
         // Solana blockhashes are valid for ~60-90 seconds; cache for up to 60s
         private const val BLOCKHASH_CACHE_TTL_MS = 60_000L
+        // Capability probe cache TTLs: keep true longer, recheck false sooner.
+        private const val NFT_API_SUPPORT_TTL_MS = 10 * 60_000L
+        private const val NFT_API_UNSUPPORTED_TTL_MS = 60_000L
     }
 
     /**
@@ -179,18 +184,27 @@ class SolanaRpcService @Inject constructor(
             )
             val result = response.getAsJsonObject("result")
             val accounts = result.getAsJsonArray("value")
-            if (accounts.size() > 0) {
-                val account = accounts[0].asJsonObject
-                val parsed = account.getAsJsonObject("account")
-                    .getAsJsonObject("data")
-                    .getAsJsonObject("parsed")
-                    .getAsJsonObject("info")
-                    .getAsJsonObject("tokenAmount")
-                val amount = parsed.get("amount").asString.toLongOrNull() ?: 0L
-                Result.success(amount)
-            } else {
-                Result.success(0L)
+            if (accounts.size() == 0) return@withContext Result.success(0L)
+
+            var total = 0L
+            for (accountEl in accounts) {
+                if (!accountEl.isJsonObject) continue
+                val tokenAmount = accountEl.asJsonObject
+                    .getAsJsonObject("account")
+                    ?.getAsJsonObject("data")
+                    ?.getAsJsonObject("parsed")
+                    ?.getAsJsonObject("info")
+                    ?.getAsJsonObject("tokenAmount")
+                    ?: continue
+
+                val amount = tokenAmount.get("amount")?.asString?.toLongOrNull() ?: 0L
+                total = try {
+                    Math.addExact(total, amount)
+                } catch (_: ArithmeticException) {
+                    Long.MAX_VALUE
+                }
             }
+            Result.success(total)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -255,7 +269,15 @@ class SolanaRpcService @Inject constructor(
      * for collection gates. Cached after first successful probe.
      */
     suspend fun supportsNftCollectionGates(): Boolean = withContext(Dispatchers.IO) {
-        cachedNftApiSupport?.let { return@withContext it }
+        val now = System.currentTimeMillis()
+        val cached = cachedNftApiSupport
+        if (cached != null) {
+            val age = now - cachedNftApiSupportCheckedAt
+            val ttl = if (cached) NFT_API_SUPPORT_TTL_MS else NFT_API_UNSUPPORTED_TTL_MS
+            if (age in 0..ttl) {
+                return@withContext cached
+            }
+        }
         val supported = try {
             // Probe DAS getAsset existence with a known public key string.
             // "Asset not found" still means method exists; "method not found" means unsupported.
@@ -270,6 +292,7 @@ class SolanaRpcService @Inject constructor(
             false
         }
         cachedNftApiSupport = supported
+        cachedNftApiSupportCheckedAt = now
         supported
     }
 

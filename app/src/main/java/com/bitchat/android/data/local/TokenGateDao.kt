@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
 import com.bitchat.android.data.local.entities.TokenGateEligibilityCacheEntity
+import com.bitchat.android.data.local.entities.TokenGatePolicyStateEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -53,4 +54,10 @@ interface TokenGateDao {
 
     @Query("DELETE FROM token_gate_eligibility_cache WHERE channelKey = :channelKey")
     suspend fun deleteEligibilityCacheForChannel(channelKey: String)
+
+    @Query("SELECT * FROM token_gate_policy_state WHERE channelKey = :channelKey")
+    suspend fun getPolicyState(channelKey: String): TokenGatePolicyStateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPolicyState(state: TokenGatePolicyStateEntity)
 }

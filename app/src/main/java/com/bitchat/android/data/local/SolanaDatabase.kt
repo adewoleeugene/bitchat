@@ -11,6 +11,7 @@ import com.bitchat.android.data.local.entities.MessageNotarizationEntity
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
 import com.bitchat.android.data.local.entities.TokenGateEligibilityCacheEntity
+import com.bitchat.android.data.local.entities.TokenGatePolicyStateEntity
 import com.bitchat.android.data.local.entities.WalletEntity
 
 @Database(
@@ -19,12 +20,13 @@ import com.bitchat.android.data.local.entities.WalletEntity
         QueuedTransactionEntity::class,
         TokenGateConfigEntity::class,
         TokenGateEligibilityCacheEntity::class,
+        TokenGatePolicyStateEntity::class,
         MessageNotarizationEntity::class,
         FeedPostEntity::class,
         FeedReactionEntity::class,
         FeedReplyEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -143,6 +145,37 @@ abstract class SolanaDatabase : RoomDatabase() {
                         PRIMARY KEY(`channelKey`, `walletAddress`, `gateHash`)
                     )
                 """.trimIndent())
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `token_gate_policy_state` (
+                        `channelKey` TEXT NOT NULL PRIMARY KEY,
+                        `creatorPublicKey` TEXT NOT NULL,
+                        `lastPolicyVersion` INTEGER NOT NULL,
+                        `lastGateHash` TEXT NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `isRemoved` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT OR REPLACE INTO `token_gate_policy_state`
+                    (`channelKey`, `creatorPublicKey`, `lastPolicyVersion`, `lastGateHash`, `updatedAt`, `isRemoved`)
+                    SELECT
+                        `channelKey`,
+                        `creatorPublicKey`,
+                        `policyVersion`,
+                        `gateHash`,
+                        `createdAt`,
+                        0
+                    FROM `token_gate_configs`
+                    """.trimIndent()
+                )
             }
         }
     }

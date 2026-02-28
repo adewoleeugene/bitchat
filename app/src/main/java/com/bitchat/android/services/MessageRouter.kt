@@ -75,6 +75,14 @@ class MessageRouter private constructor(
         if (hasMesh && hasEstablished) {
             Log.d(TAG, "Routing PM via mesh to ${toPeerID} msg_id=${messageID.take(8)}…")
             mesh.sendPrivateMessage(content, toPeerID, recipientNickname, messageID)
+        } else if (hasMesh) {
+            // Peer is online on mesh but session is not established yet.
+            // Do not detour to Nostr; queue and force mesh handshake to avoid one-way delivery.
+            Log.d(TAG, "Queued PM for ${toPeerID} (mesh connected, handshake pending) msg_id=${messageID.take(8)}…")
+            val q = outbox.getOrPut(toPeerID) { mutableListOf() }
+            q.add(Triple(content, recipientNickname, messageID))
+            runCatching { mesh.sendAnnouncementToPeer(toPeerID) }
+            mesh.initiateNoiseHandshake(toPeerID)
         } else if (canSendViaNostr(toPeerID)) {
             Log.d(TAG, "Routing PM via Nostr to ${toPeerID.take(32)}… msg_id=${messageID.take(8)}…")
             nostr.sendPrivateMessage(content, toPeerID, recipientNickname, messageID)

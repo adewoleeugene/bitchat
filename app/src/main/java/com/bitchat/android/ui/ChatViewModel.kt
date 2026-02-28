@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.bitchat.android.util.NotificationIntervalManager
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import java.util.Date
 import kotlin.random.Random
 
@@ -35,9 +35,17 @@ class ChatViewModel(
     private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
     private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
+    private var lastAnnouncedWalletAddress: String? = null
+    private var walletLinkAnnounceJob: kotlinx.coroutines.Job? = null
+    private var tokenGateRevalidationJob: kotlinx.coroutines.Job? = null
+    private var tokenGatePolicySyncJob: kotlinx.coroutines.Job? = null
+    private val tokenGateDenyStrikes = mutableMapOf<String, Int>()
 
     companion object {
         private const val TAG = "ChatViewModel"
+        private const val TOKEN_GATE_REVALIDATION_INTERVAL_MS = 60_000L
+        private const val TOKEN_GATE_POLICY_SYNC_INTERVAL_MS = 5 * 60_000L
+        private const val TOKEN_GATE_DENY_STRIKES_TO_KICK = 2
     }
 
     fun sendVoiceNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
@@ -249,10 +257,25 @@ class ChatViewModel(
 
             // Wire up token gate service to channel manager for join validation
             channelManager.tokenGateService = tokenGateService
+            startTokenGateRevalidationLoop(tokenGateService)
+            startTokenGatePolicySyncLoop(tokenGateService)
+            meshService.onTokenGatePolicyReceived = { fromPeer, payload ->
+                viewModelScope.launch {
+                    val senderSolanaAddress = meshService.getPeerInfo(fromPeer)?.solanaAddress
+                    tokenGateService.applySyncedPolicy(
+                        payload = payload,
+                        senderSolanaAddress = senderSolanaAddress
+                    )
+                        .onFailure { error ->
+                            Log.d(TAG, "Failed applying token-gate policy sync: ${error.message}")
+                        }
+                }
+            }
 
             val walletService = solanaEntryPoint.solanaWalletService()
             // Set local Solana address on mesh service for identity announcements
             meshService.solanaAddress = walletService.getPublicKeyBase58()
+            lastAnnouncedWalletAddress = meshService.solanaAddress
             // Build automatic wallet-link proof for announcements (username <-> wallet binding)
             meshService.buildSolanaLinkProof = { nickname, signingPublicKey ->
                 try {
@@ -319,6 +342,27 @@ class ChatViewModel(
                     proofs
                 } catch (_: Exception) {
                     emptyList()
+                }
+            }
+
+            // Keep username->wallet mapping current when active wallet changes.
+            // We only re-announce when address changes (not for balance updates).
+            viewModelScope.launch {
+                walletService.observeActiveWallet().collect { activeWallet ->
+                    val newAddress = activeWallet?.publicKey
+                    if (newAddress != null && newAddress != lastAnnouncedWalletAddress) {
+                        meshService.solanaAddress = newAddress
+                        lastAnnouncedWalletAddress = newAddress
+                        walletLinkAnnounceJob?.cancel()
+                        walletLinkAnnounceJob = viewModelScope.launch {
+                            // Burst announce to reduce stale username->wallet windows after a switch.
+                            meshService.sendBroadcastAnnounce()
+                            delay(1_000)
+                            if (lastAnnouncedWalletAddress == newAddress) meshService.sendBroadcastAnnounce()
+                            delay(2_000)
+                            if (lastAnnouncedWalletAddress == newAddress) meshService.sendBroadcastAnnounce()
+                        }
+                    }
                 }
             }
 
@@ -452,7 +496,78 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        tokenGateRevalidationJob?.cancel()
+        tokenGatePolicySyncJob?.cancel()
+        walletLinkAnnounceJob?.cancel()
+        tokenGateDenyStrikes.clear()
+        meshService.onTokenGatePolicyReceived = null
         // Note: Mesh service lifecycle is now managed by MainActivity
+    }
+
+    private fun startTokenGateRevalidationLoop(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        tokenGateRevalidationJob?.cancel()
+        tokenGateRevalidationJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    revalidateJoinedTokenGatedChannels(tokenGateService)
+                }.onFailure { error ->
+                    Log.d(TAG, "Token gate revalidation skipped: ${error.message}")
+                }
+                delay(TOKEN_GATE_REVALIDATION_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun revalidateJoinedTokenGatedChannels(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        val joinedSnapshot = state.getJoinedChannelsValue().toList()
+        if (joinedSnapshot.isEmpty()) return
+
+        for (channelKey in joinedSnapshot) {
+            val isGated = runCatching { tokenGateService.isTokenGated(channelKey) }.getOrDefault(false)
+            if (!isGated) continue
+
+            val validation = tokenGateService.validateEligibility(
+                channelKey = channelKey,
+                mode = com.bitchat.android.solana.ValidationMode.STRICT_ONLINE
+            ).getOrNull() ?: continue
+
+            if (validation.decision == com.bitchat.android.solana.GateDecision.DENY) {
+                val strikes = (tokenGateDenyStrikes[channelKey] ?: 0) + 1
+                tokenGateDenyStrikes[channelKey] = strikes
+                if (strikes < TOKEN_GATE_DENY_STRIKES_TO_KICK) continue
+            } else {
+                tokenGateDenyStrikes.remove(channelKey)
+                continue
+            }
+            if (!state.getJoinedChannelsValue().contains(channelKey)) continue
+
+            channelManager.leaveChannel(channelKey)
+            tokenGateDenyStrikes.remove(channelKey)
+            val channelTag = ChannelKeys.parseChannelName(channelKey)
+            val reason = tokenGateService.formatRequirementText(validation)
+            messageManager.addSystemMessage(
+                "auto-removed from $channelTag: token gate no longer satisfied ($reason)."
+            )
+        }
+    }
+
+    private fun startTokenGatePolicySyncLoop(tokenGateService: com.bitchat.android.solana.TokenGateService) {
+        tokenGatePolicySyncJob?.cancel()
+        tokenGatePolicySyncJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    val policies = tokenGateService.getAllTokenGates()
+                    for (config in policies) {
+                        meshService.broadcastTokenGatePolicy(
+                            com.bitchat.android.solana.TokenGatePolicyPayload.fromConfig(config)
+                        )
+                    }
+                }.onFailure { error ->
+                    Log.d(TAG, "Token gate policy sync skipped: ${error.message}")
+                }
+                delay(TOKEN_GATE_POLICY_SYNC_INTERVAL_MS)
+            }
+        }
     }
     
     // MARK: - Nickname Management
@@ -763,7 +878,13 @@ class ChatViewModel(
     // MARK: - Utility Functions
 
     fun getPeerIDForNickname(nickname: String): String? {
-        return meshService.getPeerNicknames().entries.find { it.value == nickname }?.key
+        val displayMatch = (state.peerNicknames.value ?: emptyMap()).entries
+            .firstOrNull { it.value == nickname }
+            ?.key
+        if (displayMatch != null) return displayMatch
+
+        val base = nickname.substringBefore("#")
+        return meshService.getPeerNicknames().entries.find { it.value == base }?.key
     }
     
     fun toggleFavorite(peerID: String) {
@@ -878,7 +999,7 @@ class ChatViewModel(
         state.setPeerFingerprints(fingerprints)
 
         val nicknames = meshService.getPeerNicknames()
-        state.setPeerNicknames(nicknames)
+        state.setPeerNicknames(buildCollisionAwarePeerNicknames(nicknames, currentPeers))
 
         val rssiValues = meshService.getPeerRSSI()
         state.setPeerRSSI(rssiValues)
@@ -936,7 +1057,7 @@ class ChatViewModel(
     // MARK: - Command Autocomplete (delegated)
     
     fun updateCommandSuggestions(input: String) {
-        commandProcessor.updateCommandSuggestions(input)
+        commandProcessor.updateCommandSuggestions(input, meshService.myPeerID)
     }
     
     fun selectCommandSuggestion(suggestion: CommandSuggestion): CommandResult {
@@ -1136,17 +1257,74 @@ class ChatViewModel(
      * Look up a peer's Solana address by nickname.
      */
     fun getPeerSolanaAddress(nickname: String): String? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
-        return meshService.getPeerInfo(peerID)?.solanaAddress
+        return when (val resolution = resolveTipRecipient(nickname)) {
+            is TipRecipientResolution.Unique -> resolution.address
+            else -> null
+        }
+    }
+
+    sealed class TipRecipientResolution {
+        data class Unique(val nickname: String, val peerID: String, val address: String) : TipRecipientResolution()
+        data class Ambiguous(val nickname: String, val options: List<String>) : TipRecipientResolution()
+        data object NotFound : TipRecipientResolution()
+    }
+
+    fun resolveTipRecipient(rawTarget: String): TipRecipientResolution {
+        val target = rawTarget.removePrefix("@").trim()
+        if (target.isBlank()) return TipRecipientResolution.NotFound
+
+        val parts = target.split("#", limit = 2)
+        val nickname = parts[0]
+        val explicitTag = parts.getOrNull(1)?.uppercase()
+
+        val candidates = getWalletCandidatesForNickname(nickname)
+        if (candidates.isEmpty()) return TipRecipientResolution.NotFound
+
+        if (explicitTag != null) {
+            val matched = candidates.firstOrNull { it.tag == explicitTag }
+            if (matched == null) {
+                // Tag can become stale shortly after re-announce or collision-length expansion.
+                return if (candidates.size == 1) {
+                    val only = candidates.first()
+                    TipRecipientResolution.Unique(
+                        nickname = nickname,
+                        peerID = only.peerID,
+                        address = only.address
+                    )
+                } else {
+                    TipRecipientResolution.Ambiguous(
+                        nickname = nickname,
+                        options = candidates.map { "${nickname}#${it.tag}" }
+                    )
+                }
+            }
+            return TipRecipientResolution.Unique(
+                nickname = nickname,
+                peerID = matched.peerID,
+                address = matched.address
+            )
+        }
+
+        if (candidates.size == 1) {
+            val only = candidates.first()
+            return TipRecipientResolution.Unique(
+                nickname = nickname,
+                peerID = only.peerID,
+                address = only.address
+            )
+        }
+
+        return TipRecipientResolution.Ambiguous(
+            nickname = nickname,
+            options = candidates.map { "${nickname}#${it.tag}" }
+        )
     }
 
     /**
      * Get a peer's verified Solana ownership proofs by nickname.
      */
     fun getPeerOwnershipProofs(nickname: String): List<com.bitchat.android.model.SolanaOwnershipProof> {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return emptyList()
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return emptyList()
         return meshService.getPeerInfo(peerID)?.solanaOwnershipProofs ?: emptyList()
     }
 
@@ -1154,8 +1332,7 @@ class ChatViewModel(
      * Look up a peer's NFT profile mint by nickname.
      */
     fun getPeerNftProfileMint(nickname: String): String? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return null
         return meshService.getPeerInfo(peerID)?.nftProfileMint
     }
 
@@ -1164,8 +1341,7 @@ class ChatViewModel(
      * or if the image is unavailable.
      */
     suspend fun getPeerNftAvatar(nickname: String): android.graphics.Bitmap? {
-        val peerID = meshService.getPeerNicknames().entries
-            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerID = getMostRecentPeerIdForNickname(nickname) ?: return null
         val peerInfo = meshService.getPeerInfo(peerID) ?: return null
         val mint = peerInfo.nftProfileMint ?: return null
         val owner = peerInfo.solanaAddress ?: return null
@@ -1198,6 +1374,96 @@ class ChatViewModel(
             val addr = meshService.getPeerInfo(peerID)?.solanaAddress
             if (addr != null) Pair(nickname, addr) else null
         }
+    }
+
+    private fun getMostRecentPeerIdForNickname(nickname: String): String? {
+        return getWalletCandidatesForNickname(nickname).firstOrNull()?.peerID
+    }
+
+    private data class WalletCandidate(
+        val peerID: String,
+        val address: String,
+        val lastSeen: Long,
+        val tag: String
+    )
+
+    private fun getWalletCandidatesForNickname(nickname: String): List<WalletCandidate> {
+        val nicknames = meshService.getPeerNicknames()
+        val baseCandidates = nicknames.entries
+            .asSequence()
+            .filter { it.value == nickname }
+            .mapNotNull { entry ->
+                val info = meshService.getPeerInfo(entry.key) ?: return@mapNotNull null
+                val address = info.solanaAddress ?: return@mapNotNull null
+                WalletCandidate(
+                    peerID = entry.key,
+                    address = address,
+                    lastSeen = info.lastSeen,
+                    tag = buildPeerTag(entry.key, 4)
+                )
+            }
+            .sortedByDescending { it.lastSeen }
+            .toList()
+
+        val hasTagCollision = baseCandidates
+            .map { it.tag }
+            .groupingBy { it }
+            .eachCount()
+            .any { it.value > 1 }
+
+        if (!hasTagCollision) return baseCandidates
+
+        return baseCandidates.map { candidate ->
+            candidate.copy(tag = buildPeerTag(candidate.peerID, 6))
+        }
+    }
+
+    private fun buildPeerTag(peerID: String, length: Int): String {
+        val clean = peerID.filter { it.isLetterOrDigit() }
+        return clean.takeLast(length).uppercase().ifBlank { "0".repeat(length) }
+    }
+
+    private fun buildCollisionAwarePeerNicknames(
+        rawNicknames: Map<String, String>,
+        connectedPeerIds: List<String>
+    ): Map<String, String> {
+        if (rawNicknames.isEmpty()) return emptyMap()
+
+        val connectedSet = connectedPeerIds.toSet()
+        val connectedEntries = rawNicknames.entries.filter { connectedSet.contains(it.key) }
+        val grouped = connectedEntries.groupBy { it.value }
+        val decorated = mutableMapOf<String, String>()
+
+        grouped.forEach { (nickname, entries) ->
+            if (entries.size <= 1) {
+                val only = entries.firstOrNull()
+                if (only != null) decorated[only.key] = nickname
+                return@forEach
+            }
+
+            // Duplicate nicknames in this mesh: suffix with 4 chars; expand to 6 only on collision.
+            val fourTags = entries.associate { it.key to buildPeerTag(it.key, 4) }
+            val hasTagCollision = fourTags.values.groupingBy { it }.eachCount().any { it.value > 1 }
+            val tags = if (hasTagCollision) {
+                entries.associate { it.key to buildPeerTag(it.key, 6) }
+            } else {
+                fourTags
+            }
+
+            entries.forEach { entry ->
+                val suffix = tags[entry.key] ?: buildPeerTag(entry.key, if (hasTagCollision) 6 else 4)
+                decorated[entry.key] = "$nickname#$suffix"
+            }
+        }
+
+        // Preserve non-connected peers as plain names for fallback callers.
+        rawNicknames.forEach { (peerID, nickname) ->
+            if (!decorated.containsKey(peerID)) {
+                decorated[peerID] = nickname
+            }
+        }
+
+        return decorated
     }
 
     // MARK: - Message Notarization

@@ -159,6 +159,7 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.FEED_POST -> handleFeedPost(routed)
             MessageType.FEED_REACTION -> handleFeedReaction(routed)
             MessageType.FEED_REPLY -> handleFeedReply(routed)
+            MessageType.TOKEN_GATE_POLICY -> handleTokenGatePolicy(routed)
             else -> {
                 // Handle private packet types (address check required)
                 if (packetRelayManager.isPacketAddressedToMe(packet)) {
@@ -354,6 +355,15 @@ class PacketProcessor(private val myPeerID: String) {
         Log.d(TAG, "Processing FEED_REPLY from ${formatPeerForLog(peerID)}")
         delegate?.handleFeedReply(routed)
     }
+
+    /**
+     * Handle token-gate policy sync packet (0x43)
+     */
+    private suspend fun handleTokenGatePolicy(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing TOKEN_GATE_POLICY from ${formatPeerForLog(peerID)}")
+        delegate?.handleTokenGatePolicy(routed)
+    }
     
     /**
      * Handle delivery acknowledgment
@@ -439,6 +449,7 @@ interface PacketProcessorDelegate {
     fun handleFeedPost(routed: RoutedPacket)
     fun handleFeedReaction(routed: RoutedPacket)
     fun handleFeedReply(routed: RoutedPacket)
+    fun handleTokenGatePolicy(routed: RoutedPacket)
 
     // Communication
     fun sendAnnouncementToPeer(peerID: String)

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
+import com.bitchat.android.data.local.entities.WalletEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -53,6 +54,8 @@ class WalletViewModel @Inject constructor(
     val showRestoreDialog: StateFlow<Boolean> = _showRestoreDialog.asStateFlow()
     private val _showImportPrivateKeyDialog = MutableStateFlow(false)
     val showImportPrivateKeyDialog: StateFlow<Boolean> = _showImportPrivateKeyDialog.asStateFlow()
+    private val _initializationIssue = MutableStateFlow<String?>(null)
+    val initializationIssue: StateFlow<String?> = _initializationIssue.asStateFlow()
 
     // Send dialog state
     private val _showSendDialog = MutableStateFlow(false)
@@ -67,6 +70,10 @@ class WalletViewModel @Inject constructor(
     // Transaction history
     val recentTransactions: StateFlow<List<QueuedTransactionEntity>> =
         paymentManager.observeRecentTransactions()
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val allWallets: StateFlow<List<WalletEntity>> =
+        walletService.observeAllWallets()
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _showTransactionHistory = MutableStateFlow(false)
@@ -88,6 +95,7 @@ class WalletViewModel @Inject constructor(
                 // Observe active wallet from Room
                 walletService.observeActiveWallet().collect { wallet ->
                     if (wallet != null) {
+                        _initializationIssue.value = null
                         val solAmount = wallet.lastBalanceLamports.toDouble() / 1_000_000_000.0
                         val usdString = cachedSolPrice?.let { price ->
                             val usd = solAmount * price
@@ -101,14 +109,19 @@ class WalletViewModel @Inject constructor(
                             balanceUsd = usdString,
                             lastUpdated = wallet.lastBalanceUpdatedAt,
                             label = wallet.label,
+                            sourceLabel = walletService.getWalletSourceLabel(),
+                            lifecycleWarning = walletService.getLifecycleWarningMessage(),
+                            exportAuditSummary = walletService.getPrivateKeyExportAuditSummary(),
                             lastRefreshViaMesh = lastRefreshViaMesh,
                             usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
                         )
                     } else {
+                        _initializationIssue.value = walletService.getInitializationIssueMessage()
                         _walletState.value = WalletUiState.NoWallet
                     }
                 }
             } else {
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
             }
         }
@@ -125,6 +138,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Failed to create wallet: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Wallet creation failed", error)
             }
@@ -142,6 +156,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Invalid recovery phrase: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Wallet restore failed", error)
             }
@@ -159,6 +174,7 @@ class WalletViewModel @Inject constructor(
                 loadWalletState()
             }.onFailure { error ->
                 _errorMessage.value = "Invalid private key: ${error.message}"
+                _initializationIssue.value = walletService.getInitializationIssueMessage()
                 _walletState.value = WalletUiState.NoWallet
                 Log.e(TAG, "Private key import failed", error)
             }
@@ -272,18 +288,51 @@ class WalletViewModel @Inject constructor(
     }
 
     fun showPrivateKeyExport() {
+        val gate = walletService.canRevealPrivateKeyForExport()
+        if (gate.isFailure) {
+            _errorMessage.value = gate.exceptionOrNull()?.message ?: "Private key export temporarily locked"
+            return
+        }
         val privateKey = walletService.getPrivateKeyBase58()
         if (privateKey != null) {
+            walletService.markPrivateKeyExportRevealed()
             _privateKeyBase58.value = privateKey
+            loadWalletState()
         } else {
-            _errorMessage.value = "Private key not available"
+            _errorMessage.value = walletService.getInitializationIssueMessage() ?: "Private key not available"
         }
+    }
+
+    fun hasExportPasscodeConfigured(): Boolean {
+        return walletService.hasExportPasscode()
+    }
+
+    fun setExportPasscode(passcode: String): Result<Unit> {
+        val result = walletService.setExportPasscode(passcode)
+        if (result.isFailure) {
+            _errorMessage.value = result.exceptionOrNull()?.message ?: "Failed to set passcode"
+        }
+        return result
+    }
+
+    fun unlockPrivateKeyExportWithPasscode(passcode: String) {
+        val gate = walletService.canRevealPrivateKeyForExport()
+        if (gate.isFailure) {
+            _errorMessage.value = gate.exceptionOrNull()?.message ?: "Private key export temporarily locked"
+            return
+        }
+        if (!walletService.verifyExportPasscode(passcode)) {
+            _errorMessage.value = "Incorrect passcode"
+            return
+        }
+        showPrivateKeyExport()
     }
 
     fun deleteWallet() {
         viewModelScope.launch {
             walletService.deleteWallet()
             _mnemonicPhrase.value = null
+            _initializationIssue.value = walletService.getInitializationIssueMessage()
             _walletState.value = WalletUiState.NoWallet
             Log.d(TAG, "Wallet deleted")
         }
@@ -350,9 +399,23 @@ class WalletViewModel @Inject constructor(
                 kotlinx.coroutines.delay(5000)
                 silentRefreshBalance()
             }.onFailure { error ->
-                _errorMessage.value = "Send failed: ${error.message}"
+                val issue = walletService.getInitializationIssueMessage()
+                _errorMessage.value = if ((error.message ?: "").contains("No wallet found", ignoreCase = true) && issue != null) {
+                    "Send failed: $issue"
+                } else {
+                    "Send failed: ${error.message}"
+                }
             }
             _isSending.value = false
+        }
+    }
+
+    fun switchActiveWallet(publicKey: String) {
+        viewModelScope.launch {
+            val result = walletService.setActiveWallet(publicKey)
+            result.onFailure { error ->
+                _errorMessage.value = "Failed to switch wallet: ${error.message}"
+            }
         }
     }
 
@@ -391,6 +454,9 @@ sealed class WalletUiState {
         val balanceUsd: String? = null,
         val lastUpdated: Long,
         val label: String,
+        val sourceLabel: String? = null,
+        val lifecycleWarning: String? = null,
+        val exportAuditSummary: String? = null,
         val lastRefreshViaMesh: Boolean = false,
         val usdEstimateFromLastKnownPrice: Boolean = false
     ) : WalletUiState()

@@ -30,6 +30,8 @@ import androidx.compose.foundation.BorderStroke
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
 import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.di.SolanaEntryPoint
+import dagger.hilt.android.EntryPointAccessors
 /**
  * About Sheet for bitchat app information
  * Matches the design language of LocationChannelsSheet
@@ -44,6 +46,28 @@ fun AboutSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val walletSummary = remember(isPresented) {
+        try {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                SolanaEntryPoint::class.java
+            )
+            val walletService = entryPoint.solanaWalletService()
+            WalletAboutSummary(
+                address = walletService.getPublicKeyBase58(),
+                initIssue = walletService.getInitializationIssueMessage(),
+                lifecycleWarning = walletService.getLifecycleWarningMessage(),
+                exportAudit = walletService.getPrivateKeyExportAuditSummary()
+            )
+        } catch (_: Exception) {
+            WalletAboutSummary(
+                address = null,
+                initIssue = "Wallet service unavailable",
+                lifecycleWarning = null,
+                exportAudit = null
+            )
+        }
+    }
     
     // Get version name from package info
     val versionName = remember {
@@ -513,6 +537,38 @@ fun AboutSheet(
                                             fontFamily = CourierPrimeFamily,
                                             color = colorScheme.onSurface.copy(alpha = 0.6f)
                                         )
+                                        walletSummary.address?.let { address ->
+                                            Text(
+                                                text = "Address: ${if (address.length > 12) "${address.take(6)}...${address.takeLast(4)}" else address}",
+                                                fontSize = 11.sp,
+                                                fontFamily = CourierPrimeFamily,
+                                                color = colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                        walletSummary.lifecycleWarning?.let { warning ->
+                                            Text(
+                                                text = warning,
+                                                fontSize = 11.sp,
+                                                fontFamily = CourierPrimeFamily,
+                                                color = colorScheme.error.copy(alpha = 0.9f)
+                                            )
+                                        }
+                                        walletSummary.initIssue?.let { issue ->
+                                            Text(
+                                                text = issue,
+                                                fontSize = 11.sp,
+                                                fontFamily = CourierPrimeFamily,
+                                                color = colorScheme.error.copy(alpha = 0.9f)
+                                            )
+                                        }
+                                        walletSummary.exportAudit?.let { audit ->
+                                            Text(
+                                                text = audit,
+                                                fontSize = 11.sp,
+                                                fontFamily = CourierPrimeFamily,
+                                                color = colorScheme.onSurface.copy(alpha = 0.5f)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -622,6 +678,13 @@ fun AboutSheet(
         }
     }
 }
+
+private data class WalletAboutSummary(
+    val address: String?,
+    val initIssue: String?,
+    val lifecycleWarning: String?,
+    val exportAudit: String?
+)
 
 /**
  * Password prompt dialog for password-protected channels

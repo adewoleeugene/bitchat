@@ -6,6 +6,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.text.format.DateUtils
 import android.widget.Toast
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,12 +32,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bitchat.android.data.local.entities.WalletEntity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.bitchat.android.ui.theme.BitchatColors
@@ -64,7 +70,12 @@ fun WalletScreen(
     val sendSuccess by viewModel.sendSuccess.collectAsState()
     val showTxHistory by viewModel.showTransactionHistory.collectAsState()
     val transactions by viewModel.recentTransactions.collectAsState()
+    val allWallets by viewModel.allWallets.collectAsState()
+    val initializationIssue by viewModel.initializationIssue.collectAsState()
     val context = LocalContext.current
+    var showExportAuthMethodDialog by remember { mutableStateOf(false) }
+    var showSetExportPasscodeDialog by remember { mutableStateOf(false) }
+    var showVerifyExportPasscodeDialog by remember { mutableStateOf(false) }
 
     // Transaction history screen (full screen overlay)
     if (showTxHistory) {
@@ -133,7 +144,9 @@ fun WalletScreen(
                 is WalletUiState.NoWallet -> {
                     NoWalletContent(
                         onCreateWallet = { viewModel.createWallet() },
-                        onRestoreWallet = { viewModel.showRestoreDialog() }
+                        onRestoreWallet = { viewModel.showRestoreDialog() },
+                        onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
+                        initializationIssue = initializationIssue
                     )
                 }
 
@@ -141,12 +154,14 @@ fun WalletScreen(
                     val state = walletState as WalletUiState.Ready
                     WalletReadyContent(
                         state = state,
+                        wallets = allWallets,
                         isRefreshing = isRefreshing,
                         onRefresh = { viewModel.refreshBalance() },
                         onDelete = { viewModel.deleteWallet() },
                         onCreateMnemonicWallet = { viewModel.createWallet() },
+                        onSwitchWallet = { publicKey -> viewModel.switchActiveWallet(publicKey) },
                         onImportPrivateKey = { viewModel.showImportPrivateKeyDialog() },
-                        onExportPrivateKey = { viewModel.showPrivateKeyExport() },
+                        onExportPrivateKey = { showExportAuthMethodDialog = true },
                         onExportRecoveryPhrase = { viewModel.showMnemonicBackup() },
                         onSend = { viewModel.showSendDialog() },
                         onTransactionHistory = { viewModel.showTransactionHistory() }
@@ -220,12 +235,255 @@ fun WalletScreen(
             onDismiss = { viewModel.dismissImportPrivateKeyDialog() }
         )
     }
+
+    if (showExportAuthMethodDialog) {
+        ExportAuthMethodDialog(
+            onDismiss = { showExportAuthMethodDialog = false },
+            onUseDeviceAuth = {
+                showExportAuthMethodDialog = false
+                authenticateThenExportPrivateKey(
+                    context = context,
+                    viewModel = viewModel,
+                    onFallbackToPasscode = {
+                        if (viewModel.hasExportPasscodeConfigured()) {
+                            showVerifyExportPasscodeDialog = true
+                        } else {
+                            showSetExportPasscodeDialog = true
+                        }
+                    }
+                )
+            },
+            onUsePasscode = {
+                showExportAuthMethodDialog = false
+                if (viewModel.hasExportPasscodeConfigured()) {
+                    showVerifyExportPasscodeDialog = true
+                } else {
+                    showSetExportPasscodeDialog = true
+                }
+            }
+        )
+    }
+
+    if (showSetExportPasscodeDialog) {
+        SetExportPasscodeDialog(
+            onDismiss = { showSetExportPasscodeDialog = false },
+            onSetPasscode = { passcode ->
+                val result = viewModel.setExportPasscode(passcode)
+                if (result.isSuccess) {
+                    showSetExportPasscodeDialog = false
+                    showVerifyExportPasscodeDialog = true
+                }
+            }
+        )
+    }
+
+    if (showVerifyExportPasscodeDialog) {
+        VerifyExportPasscodeDialog(
+            onDismiss = { showVerifyExportPasscodeDialog = false },
+            onVerify = { passcode ->
+                viewModel.unlockPrivateKeyExportWithPasscode(passcode)
+                showVerifyExportPasscodeDialog = false
+            }
+        )
+    }
+}
+
+private fun authenticateThenExportPrivateKey(
+    context: Context,
+    viewModel: WalletViewModel,
+    onFallbackToPasscode: () -> Unit
+) {
+    val activity = context.findFragmentActivity()
+    if (activity == null) {
+        onFallbackToPasscode()
+        return
+    }
+
+    val allowed = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    val biometric = BiometricManager.from(context)
+    when (biometric.canAuthenticate(allowed)) {
+        BiometricManager.BIOMETRIC_SUCCESS -> {
+            val executor = ContextCompat.getMainExecutor(context)
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        viewModel.showPrivateKeyExport()
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Authenticate to export private key")
+                .setSubtitle("Protect your wallet backup")
+                .setAllowedAuthenticators(allowed)
+                .build()
+            prompt.authenticate(info)
+        }
+        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+            onFallbackToPasscode()
+        }
+        else -> {
+            onFallbackToPasscode()
+        }
+    }
+}
+
+@Composable
+private fun ExportAuthMethodDialog(
+    onDismiss: () -> Unit,
+    onUseDeviceAuth: () -> Unit,
+    onUsePasscode: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Authenticate Export",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                "Choose how to unlock private key export.",
+                fontFamily = CourierPrimeFamily,
+                color = BitchatColors.TextSecondary
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onUseDeviceAuth) {
+                Text("Device Security", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onUsePasscode) {
+                Text("App Passcode", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
+@Composable
+private fun SetExportPasscodeDialog(
+    onDismiss: () -> Unit,
+    onSetPasscode: (String) -> Unit
+) {
+    var passcode by remember { mutableStateOf("") }
+    var confirmPasscode by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Set App Passcode",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Create a passcode for private key export fallback.",
+                    fontFamily = CourierPrimeFamily,
+                    color = BitchatColors.TextSecondary
+                )
+                OutlinedTextField(
+                    value = passcode,
+                    onValueChange = { passcode = it },
+                    label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = confirmPasscode,
+                    onValueChange = { confirmPasscode = it },
+                    label = { Text("Confirm Passcode", fontFamily = CourierPrimeFamily) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (passcode == confirmPasscode && passcode.isNotBlank()) {
+                        onSetPasscode(passcode)
+                    }
+                },
+                enabled = passcode.isNotBlank() && confirmPasscode.isNotBlank() && passcode == confirmPasscode
+            ) {
+                Text("Save", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
+@Composable
+private fun VerifyExportPasscodeDialog(
+    onDismiss: () -> Unit,
+    onVerify: (String) -> Unit
+) {
+    var passcode by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Enter App Passcode",
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value = passcode,
+                onValueChange = { passcode = it },
+                label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                visualTransformation = PasswordVisualTransformation()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onVerify(passcode) }, enabled = passcode.isNotBlank()) {
+                Text("Unlock", fontFamily = CourierPrimeFamily)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontFamily = CourierPrimeFamily)
+            }
+        }
+    )
+}
+
+private fun Context.findFragmentActivity(): FragmentActivity? {
+    var current = this
+    while (current is android.content.ContextWrapper) {
+        if (current is FragmentActivity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 @Composable
 private fun NoWalletContent(
     onCreateWallet: () -> Unit,
-    onRestoreWallet: () -> Unit
+    onRestoreWallet: () -> Unit,
+    onImportPrivateKey: () -> Unit,
+    initializationIssue: String?
 ) {
     Spacer(modifier = Modifier.height(48.dp))
 
@@ -247,6 +505,18 @@ private fun NoWalletContent(
         color = BitchatColors.TextSecondary,
         modifier = Modifier.padding(horizontal = 24.dp)
     )
+
+    if (!initializationIssue.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = initializationIssue,
+            fontFamily = CourierPrimeFamily,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            color = BitchatColors.StatusError,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
+    }
 
     Spacer(modifier = Modifier.height(32.dp))
 
@@ -275,15 +545,31 @@ private fun NoWalletContent(
     ) {
         Text("Restore from Recovery Phrase", fontFamily = CourierPrimeFamily)
     }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Button(
+        onClick = onImportPrivateKey,
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = BitchatColors.ButtonGhostBg,
+            contentColor = BitchatColors.TextPrimary
+        ),
+        shape = BitchatShapes.Button
+    ) {
+        Text("Import Private Key", fontFamily = CourierPrimeFamily)
+    }
 }
 
 @Composable
 private fun WalletReadyContent(
     state: WalletUiState.Ready,
+    wallets: List<WalletEntity>,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
     onCreateMnemonicWallet: () -> Unit,
+    onSwitchWallet: (String) -> Unit,
     onImportPrivateKey: () -> Unit,
     onExportPrivateKey: () -> Unit,
     onExportRecoveryPhrase: () -> Unit,
@@ -294,7 +580,9 @@ private fun WalletReadyContent(
     var showQr by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showCreateMnemonicConfirm by remember { mutableStateOf(false) }
+    var showSwitchWalletDialog by remember { mutableStateOf(false) }
     var autoPaymentsEnabled by remember { mutableStateOf(true) }
+    val canCreateMnemonicWallet = state.label.equals("Identity-Derived Wallet", ignoreCase = true)
 
     Spacer(modifier = Modifier.height(24.dp))
 
@@ -342,6 +630,79 @@ private fun WalletReadyContent(
                     fontFamily = CourierPrimeFamily,
                     fontSize = 11.sp,
                     color = BitchatColors.TextTertiary
+                )
+            }
+            Text(
+                text = "Creating or importing a wallet sets a new active wallet",
+                fontFamily = CourierPrimeFamily,
+                fontSize = 10.sp,
+                color = BitchatColors.TextTertiary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = state.sourceLabel ?: state.label,
+                fontFamily = CourierPrimeFamily,
+                fontSize = 11.sp,
+                color = BitchatColors.TextSecondary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Public Address",
+                fontFamily = CourierPrimeFamily,
+                fontSize = 11.sp,
+                color = BitchatColors.TextTertiary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = state.shortAddress,
+                fontFamily = CourierPrimeFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp,
+                color = BitchatColors.TextPrimary
+            )
+            Text(
+                text = state.address,
+                fontFamily = CourierPrimeFamily,
+                fontSize = 10.sp,
+                color = BitchatColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", state.address))
+                    Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
+                },
+                border = BorderStroke(1.dp, BitchatColors.Border),
+                shape = BitchatShapes.Button,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = BitchatColors.TextPrimary
+                )
+            ) {
+                Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Copy Address", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
+            }
+            if (!state.lifecycleWarning.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = state.lifecycleWarning,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 10.sp,
+                    color = BitchatColors.StatusError,
+                    textAlign = TextAlign.Center
+                )
+            }
+            if (!state.exportAuditSummary.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = state.exportAuditSummary,
+                    fontFamily = CourierPrimeFamily,
+                    fontSize = 10.sp,
+                    color = BitchatColors.TextTertiary,
+                    textAlign = TextAlign.Center
                 )
             }
         }
@@ -456,19 +817,37 @@ private fun WalletReadyContent(
         }
     )
 
-    WalletMenuItem(
-        title = "Create Mnemonic Wallet",
-        subtitle = "Replace with a new 24-word wallet",
-        onClick = { showCreateMnemonicConfirm = true },
-        trailing = {
-            Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
-                contentDescription = null,
-                tint = BitchatColors.TextDisabled,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    )
+    if (wallets.size > 1) {
+        WalletMenuItem(
+            title = "Switch Wallet",
+            subtitle = "Use a different saved wallet",
+            onClick = { showSwitchWalletDialog = true },
+            trailing = {
+                Icon(
+                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    contentDescription = null,
+                    tint = BitchatColors.TextDisabled,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        )
+    }
+
+    if (canCreateMnemonicWallet) {
+        WalletMenuItem(
+            title = "Create Mnemonic Wallet",
+            subtitle = "Replace with a new 24-word wallet",
+            onClick = { showCreateMnemonicConfirm = true },
+            trailing = {
+                Icon(
+                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    contentDescription = null,
+                    tint = BitchatColors.TextDisabled,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        )
+    }
 
     WalletMenuItem(
         title = "Import Private Key",
@@ -553,7 +932,7 @@ private fun WalletReadyContent(
         )
     }
 
-    if (showCreateMnemonicConfirm) {
+    if (canCreateMnemonicWallet && showCreateMnemonicConfirm) {
         AlertDialog(
             onDismissRequest = { showCreateMnemonicConfirm = false },
             title = {
@@ -565,7 +944,7 @@ private fun WalletReadyContent(
             },
             text = {
                 Text(
-                    "This creates a new mnemonic wallet and replaces the current active wallet. Back up existing secrets first.",
+                    "This creates a new mnemonic wallet and makes it active. Your other wallets stay saved and can be switched later.",
                     fontFamily = CourierPrimeFamily,
                     color = BitchatColors.TextSecondary
                 )
@@ -583,6 +962,51 @@ private fun WalletReadyContent(
             dismissButton = {
                 TextButton(onClick = { showCreateMnemonicConfirm = false }) {
                     Text("Cancel", fontFamily = CourierPrimeFamily)
+                }
+            }
+        )
+    }
+
+    if (showSwitchWalletDialog) {
+        AlertDialog(
+            onDismissRequest = { showSwitchWalletDialog = false },
+            title = {
+                Text(
+                    "Switch Wallet",
+                    fontFamily = CourierPrimeFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    wallets.forEach { wallet ->
+                        OutlinedButton(
+                            onClick = {
+                                showSwitchWalletDialog = false
+                                onSwitchWallet(wallet.publicKey)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = wallet.publicKey != state.address,
+                            shape = BitchatShapes.Button,
+                            border = BorderStroke(1.dp, BitchatColors.Border),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BitchatColors.TextPrimary)
+                        ) {
+                            val short = if (wallet.publicKey.length > 12) {
+                                "${wallet.publicKey.take(6)}...${wallet.publicKey.takeLast(4)}"
+                            } else {
+                                wallet.publicKey
+                            }
+                            Text(
+                                text = if (wallet.publicKey == state.address) "$short (Active)" else short,
+                                fontFamily = CourierPrimeFamily
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSwitchWalletDialog = false }) {
+                    Text("Close", fontFamily = CourierPrimeFamily)
                 }
             }
         )

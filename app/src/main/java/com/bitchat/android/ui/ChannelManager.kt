@@ -156,11 +156,6 @@ class ChannelManager(
         updatedChannels.add(key)
         state.setJoinedChannels(updatedChannels)
 
-        // Set as creator if new channel
-        if (!dataManager.channelCreators.containsKey(key) && !state.getPasswordProtectedChannelsValue().contains(key)) {
-            dataManager.addChannelCreator(key, myPeerID)
-        }
-
         // Add ourselves as member
         dataManager.addChannelMember(key, myPeerID)
 
@@ -174,6 +169,12 @@ class ChannelManager(
         switchToChannel(key)
         saveChannelData()
         return true
+    }
+
+    fun assignChannelCreator(channel: String, creatorPeerID: String) {
+        dataManager.addChannelCreator(channel, creatorPeerID)
+        dataManager.addChannelMember(channel, creatorPeerID)
+        saveChannelData()
     }
     
     fun leaveChannel(channel: String) {
@@ -277,6 +278,7 @@ class ChannelManager(
     
     fun removeChannelMember(channel: String, peerID: String) {
         dataManager.removeChannelMember(channel, peerID)
+        saveChannelData()
     }
     
     fun cleanupDisconnectedMembers(connectedPeers: List<String>, myPeerID: String) {
@@ -299,6 +301,46 @@ class ChannelManager(
     
     fun isChannelCreator(channel: String, peerID: String): Boolean {
         return dataManager.isChannelCreator(channel, peerID)
+    }
+
+    fun transferChannelOwnership(channel: String, newOwnerPeerID: String): Boolean {
+        val transferred = dataManager.transferChannelOwnership(channel, newOwnerPeerID)
+        if (transferred) {
+            saveChannelData()
+        }
+        return transferred
+    }
+
+    fun setChannelAdmin(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        val changed = dataManager.setChannelAdmin(channel, actorPeerID, targetPeerID)
+        if (changed) {
+            saveChannelData()
+        }
+        return changed
+    }
+
+    fun setChannelMember(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        val changed = dataManager.setChannelMember(channel, actorPeerID, targetPeerID)
+        if (changed) {
+            saveChannelData()
+        }
+        return changed
+    }
+
+    fun hasChannelCreator(channel: String): Boolean {
+        return dataManager.hasChannelCreator(channel)
+    }
+
+    fun isChannelAdmin(channel: String, peerID: String): Boolean {
+        return dataManager.isChannelAdmin(channel, peerID)
+    }
+
+    fun getChannelRole(channel: String, peerID: String): String {
+        return dataManager.getChannelRole(channel, peerID)
+    }
+
+    fun getChannelMembers(channel: String): Set<String> {
+        return dataManager.getChannelMembers(channel)
     }
     
     fun isChannelTokenGated(channel: String): Boolean {
