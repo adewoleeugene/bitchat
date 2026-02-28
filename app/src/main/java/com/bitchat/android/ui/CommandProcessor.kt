@@ -29,17 +29,15 @@ class CommandProcessor(
 
     private val commandScope = CoroutineScope(Dispatchers.Main)
 
-    // Available commands list
-    private val baseCommands = listOf(
+    // Global commands (shown only when no channel is active)
+    private val globalCommands = listOf(
         CommandSuggestion("/block", emptyList(), "name", "block someone"),
         CommandSuggestion("/channels", emptyList(), null, "list your channels"),
-        CommandSuggestion("/channel", emptyList(), "<action>", "channel tools"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat"),
         CommandSuggestion("/create", emptyList(), "channel", "make a new channel"),
         CommandSuggestion("/gm", emptyList(), "name", "send a gm"),
         CommandSuggestion("/hug", emptyList(), "name", "hug someone"),
         CommandSuggestion("/j", listOf("/join"), "channel", "join a channel"),
-        CommandSuggestion("/kick", emptyList(), "[@user|#channel @user]", "remove member from channel (admin)"),
         CommandSuggestion("/m", listOf("/msg"), "name", "private message"),
         CommandSuggestion("/tip", emptyList(), null, "send SOL"),
         CommandSuggestion("/unblock", emptyList(), "name", "unblock someone"),
@@ -1122,7 +1120,7 @@ class CommandProcessor(
     
     // MARK: - Command Autocomplete
 
-    fun updateCommandSuggestions(input: String) {
+    fun updateCommandSuggestions(input: String, myPeerID: String) {
         if (!input.startsWith("/")) {
             state.setShowCommandSuggestions(false)
             state.setCommandSuggestions(emptyList())
@@ -1130,7 +1128,7 @@ class CommandProcessor(
         }
         
         // Get all available commands based on context
-        val allCommands = getAllAvailableCommands()
+        val allCommands = getAllAvailableCommands(myPeerID)
         
         // Filter commands based on input
         val filteredCommands = filterCommands(allCommands, input.lowercase())
@@ -1144,32 +1142,50 @@ class CommandProcessor(
         }
     }
     
-    private fun getAllAvailableCommands(): List<CommandSuggestion> {
-        val gateCommands = mutableListOf(
-            CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "alias: channel gate set (admin)"),
-            CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show (admin)"),
-            CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
-            CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
-            CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel (admin)"),
-            CommandSuggestion("/channel member remove", emptyList(), "[#channel] @nickname", "remove member from channel (admin)"),
-            CommandSuggestion("/channel owner transfer", emptyList(), "[#channel] @nickname", "transfer channel ownership (owner)"),
-            CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings"),
-            CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
-            CommandSuggestion("/channel gate refresh", emptyList(), "[#channel]", "re-check gate status"),
-            CommandSuggestion("/channel gate remove", emptyList(), "[#channel]", "remove token gate (admin)")
+    private fun getAllAvailableCommands(myPeerID: String): List<CommandSuggestion> {
+        val currentChannel = state.getCurrentChannelValue()
+        if (currentChannel.isNullOrBlank()) {
+            // Global context: only global commands.
+            return globalCommands
+        }
+
+        // Channel context: do not show global commands.
+        val commands = mutableListOf(
+            CommandSuggestion("/channel", emptyList(), "<action>", "channel tools")
         )
 
-        // Add channel-specific commands if in a channel
-        val channelCommands = if (state.getCurrentChannelValue() != null) {
-            listOf(
-                CommandSuggestion("/pass", emptyList(), "[password]", "change channel password"),
-                CommandSuggestion("/transfer", emptyList(), "<nickname>", "transfer channel ownership")
+        val isAdmin = channelManager.isChannelAdmin(currentChannel, myPeerID)
+        val isOwner = channelManager.isChannelCreator(currentChannel, myPeerID)
+
+        if (isAdmin) {
+            commands.addAll(
+                listOf(
+                    CommandSuggestion("/kick", emptyList(), "[@user|#channel @user]", "remove member from channel (admin)"),
+                    CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "alias: channel gate set (admin)"),
+                    CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show (admin)"),
+                    CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
+                    CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
+                    CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel (admin)"),
+                    CommandSuggestion("/channel member remove", emptyList(), "[#channel] @nickname", "remove member from channel (admin)"),
+                    CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings"),
+                    CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
+                    CommandSuggestion("/channel gate refresh", emptyList(), "[#channel]", "re-check gate status"),
+                    CommandSuggestion("/channel gate remove", emptyList(), "[#channel]", "remove token gate (admin)")
+                )
             )
-        } else {
-            emptyList()
         }
-        
-        return baseCommands + gateCommands + channelCommands
+
+        if (isOwner) {
+            commands.addAll(
+                listOf(
+                    CommandSuggestion("/pass", emptyList(), "[password]", "change channel password"),
+                    CommandSuggestion("/transfer", emptyList(), "<nickname>", "transfer channel ownership"),
+                    CommandSuggestion("/channel owner transfer", emptyList(), "[#channel] @nickname", "transfer channel ownership (owner)")
+                )
+            )
+        }
+
+        return commands
     }
     
     private fun filterCommands(commands: List<CommandSuggestion>, input: String): List<CommandSuggestion> {

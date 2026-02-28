@@ -1057,7 +1057,7 @@ class ChatViewModel(
     // MARK: - Command Autocomplete (delegated)
     
     fun updateCommandSuggestions(input: String) {
-        commandProcessor.updateCommandSuggestions(input)
+        commandProcessor.updateCommandSuggestions(input, meshService.myPeerID)
     }
     
     fun selectCommandSuggestion(suggestion: CommandSuggestion): CommandResult {
