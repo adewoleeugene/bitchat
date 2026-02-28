@@ -277,6 +277,7 @@ class ChannelManager(
     
     fun removeChannelMember(channel: String, peerID: String) {
         dataManager.removeChannelMember(channel, peerID)
+        saveChannelData()
     }
     
     fun cleanupDisconnectedMembers(connectedPeers: List<String>, myPeerID: String) {

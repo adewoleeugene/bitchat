@@ -39,6 +39,7 @@ class CommandProcessor(
         CommandSuggestion("/gm", emptyList(), "name", "send a gm"),
         CommandSuggestion("/hug", emptyList(), "name", "hug someone"),
         CommandSuggestion("/j", listOf("/join"), "channel", "join a channel"),
+        CommandSuggestion("/kick", emptyList(), "[@user|#channel @user]", "remove member from channel (admin)"),
         CommandSuggestion("/m", listOf("/msg"), "name", "private message"),
         CommandSuggestion("/tip", emptyList(), null, "send SOL"),
         CommandSuggestion("/unblock", emptyList(), "name", "unblock someone"),
@@ -58,6 +59,7 @@ class CommandProcessor(
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
             "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
+            "/kick" -> handleKickCommand(parts, myPeerID, meshService, viewModel)
             "/transfer" -> handleTransferCommand(parts, myPeerID, meshService, viewModel)
             "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
             "/tip" -> handleTipCommand(parts, meshService, viewModel)
@@ -126,13 +128,18 @@ class CommandProcessor(
         if (parts.size < 2) {
             return CommandResult(
                 prefillText = "/channel ",
-                hintText = "usage: /channel users|gate ...|owner transfer ..."
+                hintText = "usage: /channel users|member remove|gate ...|owner transfer ..."
             )
         }
 
         return when (parts[1].lowercase()) {
             "users" -> {
-                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val target = requireChannelAdmin(
+                    channelArg = parts.getOrNull(2),
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "list channel users"
+                ) ?: return null
                 val (channelTag, channelKey) = target
                 val members = channelManager.getChannelMembers(channelKey)
                 if (members.isEmpty()) {
@@ -189,6 +196,69 @@ class CommandProcessor(
                     }
                 }
             }
+            "member" -> {
+                if (parts.size < 3 || parts[2].lowercase() != "remove") {
+                    return CommandResult(
+                        prefillText = "/channel member remove ",
+                        hintText = "usage: /channel member remove [#channel] @nickname"
+                    )
+                }
+
+                val subject = parts.getOrNull(3)
+                if (subject.isNullOrBlank()) {
+                    return CommandResult(
+                        prefillText = "/channel member remove @",
+                        hintText = "which user should be removed?"
+                    )
+                }
+
+                val looksLikeChannel =
+                    subject.startsWith("#") || subject.startsWith("mesh:") || subject.startsWith("geo:")
+                val channelArg = if (looksLikeChannel) subject else null
+                val nicknameArg = if (looksLikeChannel) parts.getOrNull(4) else subject
+
+                if (nicknameArg.isNullOrBlank()) {
+                    val prefill = if (channelArg != null) "/channel member remove $channelArg @" else "/channel member remove @"
+                    return CommandResult(
+                        prefillText = prefill,
+                        hintText = "which user should be removed?"
+                    )
+                }
+
+                val target = requireChannelAdmin(
+                    channelArg = channelArg,
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "remove channel members"
+                ) ?: return null
+                val (channelTag, channelKey) = target
+
+                val targetName = nicknameArg.removePrefix("@")
+                val targetPeerID = getPeerIDForNickname(targetName, meshService, viewModel)
+                if (targetPeerID == null) {
+                    addSystemMessage("can't find '$targetName' — are they online? check /w")
+                    return null
+                }
+
+                if (targetPeerID == myPeerID) {
+                    addSystemMessage("use leave channel instead of removing yourself from $channelTag.")
+                    return null
+                }
+
+                if (channelManager.isChannelCreator(channelKey, targetPeerID)) {
+                    addSystemMessage("can't remove channel owner from $channelTag. transfer ownership first.")
+                    return null
+                }
+
+                if (!channelManager.getChannelMembers(channelKey).contains(targetPeerID)) {
+                    addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is not a tracked member of $channelTag.")
+                    return null
+                }
+
+                channelManager.removeChannelMember(channelKey, targetPeerID)
+                addSystemMessage("removed @${getPeerNickname(targetPeerID, meshService, viewModel)} from $channelTag.")
+                null
+            }
             "owner" -> {
                 if (parts.size < 3 || parts[2].lowercase() != "transfer") {
                     return CommandResult(
@@ -244,7 +314,7 @@ class CommandProcessor(
             }
             else -> CommandResult(
                 prefillText = "/channel ",
-                hintText = "usage: /channel users|gate ...|owner transfer ..."
+                hintText = "usage: /channel users|member remove|gate ...|owner transfer ..."
             )
         }
     }
@@ -271,6 +341,32 @@ class CommandProcessor(
             }
         } else {
             mutableListOf("/channel", "owner", "transfer", second)
+        }
+        return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
+    }
+
+    private fun handleKickCommand(
+        parts: List<String>,
+        myPeerID: String,
+        meshService: BluetoothMeshService,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        if (parts.size < 2) {
+            return CommandResult(
+                prefillText = "/kick @",
+                hintText = "who should be removed from the channel?"
+            )
+        }
+
+        val second = parts[1]
+        val looksLikeChannel =
+            second.startsWith("#") || second.startsWith("mesh:") || second.startsWith("geo:")
+        val bridged = if (looksLikeChannel) {
+            mutableListOf("/channel", "member", "remove", second).apply {
+                parts.getOrNull(2)?.let { add(it) }
+            }
+        } else {
+            mutableListOf("/channel", "member", "remove", second)
         }
         return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
     }
@@ -1054,7 +1150,8 @@ class CommandProcessor(
             CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show (admin)"),
             CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
             CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
-            CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel"),
+            CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel (admin)"),
+            CommandSuggestion("/channel member remove", emptyList(), "[#channel] @nickname", "remove member from channel (admin)"),
             CommandSuggestion("/channel owner transfer", emptyList(), "[#channel] @nickname", "transfer channel ownership (owner)"),
             CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings"),
             CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
@@ -1066,7 +1163,6 @@ class CommandProcessor(
         val channelCommands = if (state.getCurrentChannelValue() != null) {
             listOf(
                 CommandSuggestion("/pass", emptyList(), "[password]", "change channel password"),
-                CommandSuggestion("/save", emptyList(), null, "save channel messages locally"),
                 CommandSuggestion("/transfer", emptyList(), "<nickname>", "transfer channel ownership")
             )
         } else {
@@ -1097,13 +1193,15 @@ class CommandProcessor(
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
             "/gate refresh" -> CommandResult(prefillText = "/gate refresh #", hintText = "or use /gate refresh in current channel")
             "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")
-            "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | gate show|set|refresh|remove")
+            "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | member remove | gate show|set|refresh|remove")
             "/channel users" -> CommandResult(prefillText = "/channel users #", hintText = "or use in current channel")
+            "/channel member remove" -> CommandResult(prefillText = "/channel member remove @", hintText = "or /channel member remove #channel @name")
             "/channel owner transfer" -> CommandResult(prefillText = "/channel owner transfer @", hintText = "or /channel owner transfer #channel @name")
             "/channel gate show" -> CommandResult(prefillText = "/channel gate show #", hintText = "or use in current channel")
             "/channel gate set" -> CommandResult(prefillText = "/channel gate set #", hintText = "usage: /channel gate set #vip <spl|sol|nft-specific|nft-collection> ...")
             "/channel gate refresh" -> CommandResult(prefillText = "/channel gate refresh #", hintText = "or use in current channel")
             "/channel gate remove" -> CommandResult(prefillText = "/channel gate remove #", hintText = "or use in current channel")
+            "/kick" -> CommandResult(prefillText = "/kick @", hintText = "who should be removed from the channel?")
             "/transfer" -> CommandResult(prefillText = "/transfer @", hintText = "who should become channel owner?")
             "/j", "/join" -> CommandResult(prefillText = "/join #", hintText = "type a channel name")
             "/tip" -> CommandResult(prefillText = "/tip @", hintText = "who do you want to tip?")
