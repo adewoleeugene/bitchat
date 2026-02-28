@@ -33,6 +33,7 @@ class CommandProcessor(
     private val baseCommands = listOf(
         CommandSuggestion("/block", emptyList(), "name", "block someone"),
         CommandSuggestion("/channels", emptyList(), null, "list your channels"),
+        CommandSuggestion("/channel", emptyList(), "<action>", "channel tools"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat"),
         CommandSuggestion("/create", emptyList(), "channel", "make a new channel"),
         CommandSuggestion("/gm", emptyList(), "name", "send a gm"),
@@ -55,7 +56,9 @@ class CommandProcessor(
         return when (cmd) {
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
+            "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
+            "/transfer" -> handleTransferCommand(parts, myPeerID, meshService, viewModel)
             "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
             "/tip" -> handleTipCommand(parts, meshService, viewModel)
             "/w" -> { handleWhoCommand(meshService, viewModel); null }
@@ -69,6 +72,207 @@ class CommandProcessor(
             "/wallet" -> { handleWalletCommand(); null }
             else -> { handleUnknownCommand(cmd); null }
         }
+    }
+
+    private fun requireChannelAdmin(
+        channelArg: String?,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        action: String
+    ): Pair<String, String>? {
+        val target = resolveGateTarget(channelArg, viewModel) ?: return null
+        val (channelTag, channelKey) = target
+
+        // Bootstrap rule: if no creator is recorded yet, allow first admin action.
+        if (!channelManager.hasChannelCreator(channelKey)) {
+            return target
+        }
+
+        if (!channelManager.isChannelAdmin(channelKey, myPeerID)) {
+            val role = channelManager.getChannelRole(channelKey, myPeerID)
+            addSystemMessage("permission denied: $action in $channelTag requires channel admin role (your role: $role).")
+            return null
+        }
+        return target
+    }
+
+    private fun requireChannelOwner(
+        channelArg: String?,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        action: String
+    ): Pair<String, String>? {
+        val target = resolveGateTarget(channelArg, viewModel) ?: return null
+        val (channelTag, channelKey) = target
+
+        if (!channelManager.hasChannelCreator(channelKey)) {
+            addSystemMessage("permission denied: $action in $channelTag requires a channel owner.")
+            return null
+        }
+
+        if (!channelManager.isChannelCreator(channelKey, myPeerID)) {
+            addSystemMessage("permission denied: $action in $channelTag requires channel owner role.")
+            return null
+        }
+        return target
+    }
+
+    private fun handleChannelCommand(
+        parts: List<String>,
+        myPeerID: String,
+        meshService: BluetoothMeshService,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        if (parts.size < 2) {
+            return CommandResult(
+                prefillText = "/channel ",
+                hintText = "usage: /channel users|gate ...|owner transfer ..."
+            )
+        }
+
+        return when (parts[1].lowercase()) {
+            "users" -> {
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val (channelTag, channelKey) = target
+                val members = channelManager.getChannelMembers(channelKey)
+                if (members.isEmpty()) {
+                    addSystemMessage("no tracked members in $channelTag yet.")
+                    return null
+                }
+                val nicknames = members
+                    .map { getPeerNickname(it, meshService, viewModel) }
+                    .distinct()
+                    .sorted()
+                addSystemMessage("users in $channelTag (${nicknames.size}): ${nicknames.joinToString(", ")}")
+                null
+            }
+            "gate" -> {
+                if (parts.size < 3) {
+                    return CommandResult(
+                        prefillText = "/channel gate ",
+                        hintText = "usage: /channel gate show|refresh|set|remove ..."
+                    )
+                }
+                when (parts[2].lowercase()) {
+                    "show" -> {
+                        val gateParts = mutableListOf("/gate", "status")
+                        parts.getOrNull(3)?.let { gateParts.add(it) }
+                        handleGateCommand(gateParts, myPeerID, viewModel, meshService)
+                    }
+                    "refresh" -> {
+                        val gateParts = mutableListOf("/gate", "refresh")
+                        parts.getOrNull(3)?.let { gateParts.add(it) }
+                        handleGateCommand(gateParts, myPeerID, viewModel, meshService)
+                    }
+                    "remove" -> {
+                        val gateParts = mutableListOf("/gate", "remove")
+                        parts.getOrNull(3)?.let { gateParts.add(it) }
+                        handleGateCommand(gateParts, myPeerID, viewModel, meshService)
+                    }
+                    "set" -> {
+                        if (parts.size < 5) {
+                            return CommandResult(
+                                prefillText = "/channel gate set #",
+                                hintText = "usage: /channel gate set #vip <spl|sol|nft-specific|nft-collection> ..."
+                            )
+                        }
+                        val channel = parts[3]
+                        val gateParts = mutableListOf("/gate", "create", channel)
+                        gateParts.addAll(parts.drop(4))
+                        handleGateCommand(gateParts, myPeerID, viewModel, meshService)
+                    }
+                    else -> {
+                        CommandResult(
+                            prefillText = "/channel gate ",
+                            hintText = "usage: /channel gate show|refresh|set|remove ..."
+                        )
+                    }
+                }
+            }
+            "owner" -> {
+                if (parts.size < 3 || parts[2].lowercase() != "transfer") {
+                    return CommandResult(
+                        prefillText = "/channel owner transfer ",
+                        hintText = "usage: /channel owner transfer [#channel] @nickname"
+                    )
+                }
+
+                val subject = parts.getOrNull(3)
+                if (subject.isNullOrBlank()) {
+                    return CommandResult(
+                        prefillText = "/channel owner transfer @",
+                        hintText = "who should become channel owner?"
+                    )
+                }
+
+                val looksLikeChannel =
+                    subject.startsWith("#") || subject.startsWith("mesh:") || subject.startsWith("geo:")
+                val channelArg = if (looksLikeChannel) subject else null
+                val nicknameArg = if (looksLikeChannel) parts.getOrNull(4) else subject
+
+                if (nicknameArg.isNullOrBlank()) {
+                    val prefill = if (channelArg != null) "/channel owner transfer $channelArg @" else "/channel owner transfer @"
+                    return CommandResult(
+                        prefillText = prefill,
+                        hintText = "who should become channel owner?"
+                    )
+                }
+
+                val target = requireChannelOwner(
+                    channelArg = channelArg,
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "transfer ownership"
+                ) ?: return null
+
+                val (channelTag, channelKey) = target
+                val targetName = nicknameArg.removePrefix("@")
+                val targetPeerID = getPeerIDForNickname(targetName, meshService, viewModel)
+                if (targetPeerID == null) {
+                    addSystemMessage("can't find '$targetName' — are they online? check /w")
+                    return null
+                }
+
+                if (!channelManager.transferChannelOwnership(channelKey, targetPeerID)) {
+                    addSystemMessage("couldn't transfer ownership for $channelTag.")
+                    return null
+                }
+
+                val newOwnerName = getPeerNickname(targetPeerID, meshService, viewModel)
+                addSystemMessage("ownership of $channelTag transferred to @$newOwnerName.")
+                null
+            }
+            else -> CommandResult(
+                prefillText = "/channel ",
+                hintText = "usage: /channel users|gate ...|owner transfer ..."
+            )
+        }
+    }
+
+    private fun handleTransferCommand(
+        parts: List<String>,
+        myPeerID: String,
+        meshService: BluetoothMeshService,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        if (parts.size < 2) {
+            return CommandResult(
+                prefillText = "/transfer @",
+                hintText = "who should become channel owner?"
+            )
+        }
+
+        val second = parts[1]
+        val looksLikeChannel =
+            second.startsWith("#") || second.startsWith("mesh:") || second.startsWith("geo:")
+        val bridged = if (looksLikeChannel) {
+            mutableListOf("/channel", "owner", "transfer", second).apply {
+                parts.getOrNull(2)?.let { add(it) }
+            }
+        } else {
+            mutableListOf("/channel", "owner", "transfer", second)
+        }
+        return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
     }
 
     private fun handleGateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?, meshService: BluetoothMeshService): CommandResult? {
@@ -87,6 +291,12 @@ class CommandProcessor(
                         hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ..."
                     )
                 }
+                requireChannelAdmin(
+                    channelArg = parts[2],
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "update token gate"
+                ) ?: return null
                 val channel = parts[2]
                 val gateTypeArg = parts[3].lowercase()
                 val createArgs = mutableListOf("/create", channel, "--token-gate")
@@ -148,7 +358,12 @@ class CommandProcessor(
                     addSystemMessage("token gate service not available yet.")
                     return null
                 }
-                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val target = requireChannelAdmin(
+                    channelArg = parts.getOrNull(2),
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "view token gate status"
+                ) ?: return null
                 val (channelTag, channelKey) = target
                 commandScope.launch {
                     val config = tgs.getTokenGate(channelKey)
@@ -179,7 +394,12 @@ class CommandProcessor(
                     addSystemMessage("token gate service not available yet.")
                     return null
                 }
-                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val target = requireChannelAdmin(
+                    channelArg = parts.getOrNull(2),
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "refresh token gate status"
+                ) ?: return null
                 val (channelTag, channelKey) = target
                 commandScope.launch {
                     val config = tgs.getTokenGate(channelKey)
@@ -212,7 +432,12 @@ class CommandProcessor(
                     addSystemMessage("token gate service not available yet.")
                     return null
                 }
-                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val target = requireChannelAdmin(
+                    channelArg = parts.getOrNull(2),
+                    myPeerID = myPeerID,
+                    viewModel = viewModel,
+                    action = "remove token gate"
+                ) ?: return null
                 val (channelTag, channelKey) = target
                 commandScope.launch {
                     val config = tgs.getTokenGate(channelKey)
@@ -825,7 +1050,16 @@ class CommandProcessor(
     
     private fun getAllAvailableCommands(): List<CommandSuggestion> {
         val gateCommands = mutableListOf(
-            CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "create a token gate")
+            CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "alias: channel gate set (admin)"),
+            CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show (admin)"),
+            CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
+            CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
+            CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel"),
+            CommandSuggestion("/channel owner transfer", emptyList(), "[#channel] @nickname", "transfer channel ownership (owner)"),
+            CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings"),
+            CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
+            CommandSuggestion("/channel gate refresh", emptyList(), "[#channel]", "re-check gate status"),
+            CommandSuggestion("/channel gate remove", emptyList(), "[#channel]", "remove token gate (admin)")
         )
 
         // Add channel-specific commands if in a channel
@@ -863,6 +1097,14 @@ class CommandProcessor(
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
             "/gate refresh" -> CommandResult(prefillText = "/gate refresh #", hintText = "or use /gate refresh in current channel")
             "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")
+            "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | gate show|set|refresh|remove")
+            "/channel users" -> CommandResult(prefillText = "/channel users #", hintText = "or use in current channel")
+            "/channel owner transfer" -> CommandResult(prefillText = "/channel owner transfer @", hintText = "or /channel owner transfer #channel @name")
+            "/channel gate show" -> CommandResult(prefillText = "/channel gate show #", hintText = "or use in current channel")
+            "/channel gate set" -> CommandResult(prefillText = "/channel gate set #", hintText = "usage: /channel gate set #vip <spl|sol|nft-specific|nft-collection> ...")
+            "/channel gate refresh" -> CommandResult(prefillText = "/channel gate refresh #", hintText = "or use in current channel")
+            "/channel gate remove" -> CommandResult(prefillText = "/channel gate remove #", hintText = "or use in current channel")
+            "/transfer" -> CommandResult(prefillText = "/transfer @", hintText = "who should become channel owner?")
             "/j", "/join" -> CommandResult(prefillText = "/join #", hintText = "type a channel name")
             "/tip" -> CommandResult(prefillText = "/tip @", hintText = "who do you want to tip?")
             "/m", "/msg" -> CommandResult(prefillText = "/m @", hintText = "who do you want to message?")

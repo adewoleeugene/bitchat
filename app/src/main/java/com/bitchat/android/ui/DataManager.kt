@@ -23,11 +23,13 @@ class DataManager(private val context: Context) {
     private val _favoritePeers = mutableSetOf<String>()
     private val _blockedUsers = mutableSetOf<String>()
     private val _channelMembers = mutableMapOf<String, MutableSet<String>>()
+    private val _channelRoles = mutableMapOf<String, MutableMap<String, String>>()
     
     val channelCreators: Map<String, String> get() = _channelCreators
     val favoritePeers: Set<String> get() = _favoritePeers
     val blockedUsers: Set<String> get() = _blockedUsers
     val channelMembers: Map<String, MutableSet<String>> get() = _channelMembers
+    val channelRoles: Map<String, MutableMap<String, String>> get() = _channelRoles
     
     // MARK: - Nickname Management
     
@@ -99,9 +101,35 @@ class DataManager(private val context: Context) {
             val creatorsMap = gson.fromJson(creatorsJson, Map::class.java) as? Map<String, String>
             // Normalize creator keys too
             creatorsMap?.forEach { (key, value) ->
-                _channelCreators[ChannelKeys.normalize(key)] = value
+                val normalizedKey = ChannelKeys.normalize(key)
+                _channelCreators[normalizedKey] = value
+                setChannelRole(normalizedKey, value, ChannelRoles.OWNER)
             }
         } catch (e: Exception) {
+            // Ignore parsing errors
+        }
+
+        // Load channel roles (best effort, backward compatible)
+        val rolesJson = prefs.getString("channel_roles", "{}")
+        try {
+            val raw = gson.fromJson(rolesJson, Map::class.java) as? Map<*, *>
+            raw?.forEach { (channelKeyAny, rolesAny) ->
+                val channelKey = ChannelKeys.normalize(channelKeyAny?.toString().orEmpty())
+                if (channelKey.isBlank()) return@forEach
+                val roleMap = mutableMapOf<String, String>()
+                val rolesMap = rolesAny as? Map<*, *>
+                rolesMap?.forEach { (peerAny, roleAny) ->
+                    val peerID = peerAny?.toString().orEmpty()
+                    val role = roleAny?.toString().orEmpty()
+                    if (peerID.isNotBlank() && role.isNotBlank()) {
+                        roleMap[peerID] = role
+                    }
+                }
+                if (roleMap.isNotEmpty()) {
+                    _channelRoles[channelKey] = roleMap
+                }
+            }
+        } catch (_: Exception) {
             // Ignore parsing errors
         }
 
@@ -120,20 +148,41 @@ class DataManager(private val context: Context) {
             putStringSet("joined_channels", joinedChannels)
             putStringSet("password_protected_channels", passwordProtectedChannels)
             putString("channel_creators", gson.toJson(_channelCreators))
+            putString("channel_roles", gson.toJson(_channelRoles))
             apply()
         }
     }
     
     fun addChannelCreator(channel: String, creatorID: String) {
         _channelCreators[channel] = creatorID
+        setChannelRole(channel, creatorID, ChannelRoles.OWNER)
     }
     
     fun removeChannelCreator(channel: String) {
+        val creator = _channelCreators[channel]
+        if (!creator.isNullOrBlank()) {
+            _channelRoles[channel]?.remove(creator)
+        }
         _channelCreators.remove(channel)
     }
     
     fun isChannelCreator(channel: String, peerID: String): Boolean {
         return _channelCreators[channel] == peerID
+    }
+
+    fun hasChannelCreator(channel: String): Boolean {
+        return _channelCreators.containsKey(channel)
+    }
+
+    fun transferChannelOwnership(channel: String, newOwnerPeerID: String): Boolean {
+        val oldOwner = _channelCreators[channel] ?: return false
+        if (oldOwner == newOwnerPeerID) return false
+
+        _channelCreators[channel] = newOwnerPeerID
+        setChannelRole(channel, oldOwner, ChannelRoles.ADMIN)
+        setChannelRole(channel, newOwnerPeerID, ChannelRoles.OWNER)
+        addChannelMember(channel, newOwnerPeerID)
+        return true
     }
     
     // MARK: - Channel Members Management
@@ -143,28 +192,62 @@ class DataManager(private val context: Context) {
             _channelMembers[channel] = mutableSetOf()
         }
         _channelMembers[channel]?.add(peerID)
+        if (_channelRoles[channel]?.containsKey(peerID) != true) {
+            setChannelRole(channel, peerID, ChannelRoles.MEMBER)
+        }
     }
     
     fun removeChannelMember(channel: String, peerID: String) {
         _channelMembers[channel]?.remove(peerID)
+        _channelRoles[channel]?.remove(peerID)
     }
     
     fun removeChannelMembers(channel: String) {
         _channelMembers.remove(channel)
+        _channelRoles.remove(channel)
     }
     
     fun cleanupDisconnectedMembers(channel: String, connectedPeers: List<String>, myPeerID: String) {
-        _channelMembers[channel]?.removeAll { memberID ->
+        val removed = _channelMembers[channel]?.filter { memberID ->
             memberID != myPeerID && !connectedPeers.contains(memberID)
-        }
+        }.orEmpty()
+        _channelMembers[channel]?.removeAll(removed.toSet())
+        removed.forEach { _channelRoles[channel]?.remove(it) }
     }
     
     fun cleanupAllDisconnectedMembers(connectedPeers: List<String>, myPeerID: String) {
-        _channelMembers.values.forEach { members ->
-            members.removeAll { memberID ->
+        _channelMembers.forEach { (channel, members) ->
+            val removed = members.filter { memberID ->
                 memberID != myPeerID && !connectedPeers.contains(memberID)
             }
+            members.removeAll(removed.toSet())
+            removed.forEach { _channelRoles[channel]?.remove(it) }
         }
+    }
+
+    fun setChannelRole(channel: String, peerID: String, role: String) {
+        val normalized = when (role) {
+            ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.MEMBER -> role
+            else -> ChannelRoles.MEMBER
+        }
+        if (!_channelRoles.containsKey(channel)) {
+            _channelRoles[channel] = mutableMapOf()
+        }
+        _channelRoles[channel]?.set(peerID, normalized)
+    }
+
+    fun getChannelRole(channel: String, peerID: String): String {
+        return _channelRoles[channel]?.get(peerID)
+            ?: if (_channelCreators[channel] == peerID) ChannelRoles.OWNER else ChannelRoles.MEMBER
+    }
+
+    fun isChannelAdmin(channel: String, peerID: String): Boolean {
+        val role = getChannelRole(channel, peerID)
+        return role == ChannelRoles.OWNER || role == ChannelRoles.ADMIN
+    }
+
+    fun getChannelMembers(channel: String): Set<String> {
+        return _channelMembers[channel]?.toSet() ?: emptySet()
     }
     
     // MARK: - Favorites Management
@@ -270,6 +353,7 @@ class DataManager(private val context: Context) {
         _blockedUsers.clear()
         _geohashBlockedUsers.clear()
         _channelMembers.clear()
+        _channelRoles.clear()
         prefs.edit().clear().apply()
     }
 }

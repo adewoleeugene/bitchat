@@ -300,6 +300,30 @@ class ChannelManager(
     fun isChannelCreator(channel: String, peerID: String): Boolean {
         return dataManager.isChannelCreator(channel, peerID)
     }
+
+    fun transferChannelOwnership(channel: String, newOwnerPeerID: String): Boolean {
+        val transferred = dataManager.transferChannelOwnership(channel, newOwnerPeerID)
+        if (transferred) {
+            saveChannelData()
+        }
+        return transferred
+    }
+
+    fun hasChannelCreator(channel: String): Boolean {
+        return dataManager.hasChannelCreator(channel)
+    }
+
+    fun isChannelAdmin(channel: String, peerID: String): Boolean {
+        return dataManager.isChannelAdmin(channel, peerID)
+    }
+
+    fun getChannelRole(channel: String, peerID: String): String {
+        return dataManager.getChannelRole(channel, peerID)
+    }
+
+    fun getChannelMembers(channel: String): Set<String> {
+        return dataManager.getChannelMembers(channel)
+    }
     
     fun isChannelTokenGated(channel: String): Boolean {
         val service = tokenGateService
