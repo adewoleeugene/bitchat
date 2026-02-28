@@ -1,12 +1,18 @@
 package com.bitchat.android.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,26 +69,85 @@ fun ChatUserSheet(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Header
-                Text(
-                    text = stringResource(R.string.at_nickname, targetNickname),
-                    fontSize = 18.sp,
-                    fontFamily = CourierPrimeFamily,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                
-                Text(
-                    text = if (selectedMessage != null) stringResource(R.string.choose_action_message_or_user) else stringResource(R.string.choose_action_user),
-                    fontSize = 12.sp,
-                    fontFamily = CourierPrimeFamily,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
+                // NFT avatar state
+                var nftAvatar by remember(targetNickname) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                var isLoadingAvatar by remember(targetNickname) { mutableStateOf(false) }
+                val nftProfileMint = viewModel.getPeerNftProfileMint(targetNickname)
+
+                // Async fetch avatar
+                LaunchedEffect(targetNickname, nftProfileMint) {
+                    nftAvatar = null
+                    isLoadingAvatar = false
+                    if (nftProfileMint != null) {
+                        isLoadingAvatar = true
+                        nftAvatar = viewModel.getPeerNftAvatar(targetNickname)
+                        isLoadingAvatar = false
+                    }
+                }
+
+                // Header with avatar
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Circular NFT avatar or placeholder
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            nftAvatar != null -> {
+                                val avatarBitmap = nftAvatar ?: return@Box
+                                Image(
+                                    bitmap = avatarBitmap.asImageBitmap(),
+                                    contentDescription = "NFT Avatar",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            isLoadingAvatar -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                            else -> {
+                                Text(
+                                    text = targetNickname.take(1).uppercase(),
+                                    fontSize = 18.sp,
+                                    fontFamily = CourierPrimeFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Column {
+                        Text(
+                            text = stringResource(R.string.at_nickname, targetNickname),
+                            fontSize = 18.sp,
+                            fontFamily = CourierPrimeFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Text(
+                            text = if (selectedMessage != null) stringResource(R.string.choose_action_message_or_user) else stringResource(R.string.choose_action_user),
+                            fontSize = 12.sp,
+                            fontFamily = CourierPrimeFamily,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
 
                 // Solana address (if peer has one)
-                val peerSolanaAddress = remember(targetNickname) {
-                    viewModel.getPeerSolanaAddress(targetNickname)
-                }
+                val peerSolanaAddress = viewModel.getPeerSolanaAddress(targetNickname)
+                val peerOwnershipProofs = viewModel.getPeerOwnershipProofs(targetNickname)
                 if (peerSolanaAddress != null) {
                     val truncatedAddress = if (peerSolanaAddress.length > 12) {
                         "${peerSolanaAddress.take(6)}...${peerSolanaAddress.takeLast(4)}"
@@ -115,6 +180,37 @@ fun ChatUserSheet(
                                 color = standardBlue
                             )
                         }
+                    }
+                }
+                if (peerOwnershipProofs.isNotEmpty()) {
+                    val hasSplProof = peerOwnershipProofs.any {
+                        it.claimType == com.bitchat.android.model.SolanaOwnershipProof.ClaimType.SPL_TOKEN
+                    }
+                    val nftProofCount = peerOwnershipProofs.count {
+                        it.claimType == com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_MINT ||
+                            it.claimType == com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_COLLECTION
+                    }
+                    val badges = buildList {
+                        if (hasSplProof) add("Token Holder")
+                        if (nftProofCount > 0) add("NFT Collector")
+                    }.joinToString(" · ")
+                    val subtitle = if (badges.isNotEmpty()) {
+                        "$badges (${peerOwnershipProofs.size} verified proofs)"
+                    } else {
+                        "${peerOwnershipProofs.size} verified ownership proofs"
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = subtitle,
+                            fontSize = 12.sp,
+                            fontFamily = CourierPrimeFamily,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
                     }
                 }
 
@@ -151,20 +247,56 @@ fun ChatUserSheet(
                                     }
                                 )
                             }
+
+                            item {
+                                UserActionRow(
+                                    title = "View Notarization Proof",
+                                    subtitle = "Show queue/confirmation details for this message",
+                                    titleColor = standardBlue,
+                                    onClick = {
+                                        viewModel.inspectNotarization(message)
+                                        onDismiss()
+                                    }
+                                )
+                            }
+
+                            item {
+                                UserActionRow(
+                                    title = "Process Notarization Queue",
+                                    subtitle = "Try posting queued hashes now",
+                                    titleColor = standardGreen,
+                                    onClick = {
+                                        viewModel.processNotarizationQueueNow()
+                                        onDismiss()
+                                    }
+                                )
+                            }
+
+                            item {
+                                UserActionRow(
+                                    title = "Retry Failed Notarizations",
+                                    subtitle = "Re-queue failed notarization attempts",
+                                    titleColor = standardGrey,
+                                    onClick = {
+                                        viewModel.retryFailedNotarizations()
+                                        onDismiss()
+                                    }
+                                )
+                            }
                         }
                     }
                     
                     // Only show user actions for other users' messages or when no message is selected
                     if (selectedMessage?.sender != viewModel.nickname.value) {
-                        // Slap action
+                        // GM action
                         item {
                             UserActionRow(
-                                title = stringResource(R.string.action_slap_title, targetNickname),
-                                subtitle = stringResource(R.string.action_slap_subtitle),
+                                title = "Say gm to $targetNickname",
+                                subtitle = "Send a quick web3 greeting",
                                 titleColor = standardBlue,
                                 onClick = {
-                                    // Send slap command
-                                    viewModel.sendMessage("/slap $targetNickname")
+                                    // Send gm command
+                                    viewModel.sendMessage("/gm $targetNickname")
                                     onDismiss()
                                 }
                             )

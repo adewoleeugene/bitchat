@@ -40,7 +40,9 @@ import com.bitchat.android.ui.ChatViewModel
 import com.bitchat.android.ui.OrientationAwareActivity
 import com.bitchat.android.ui.theme.BitchatTheme
 import com.bitchat.android.nostr.PoWPreferenceManager
+import com.bitchat.android.di.SolanaEntryPoint
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -613,6 +615,7 @@ class MainActivity : OrientationAwareActivity() {
                 // Set up mesh service delegate and start services
                 meshService.delegate = chatViewModel
                 meshService.startServices()
+                wireSolanaMeshBalanceFallbacks()
                 
                 Log.d("MainActivity", "Mesh service started successfully")
                 
@@ -627,6 +630,46 @@ class MainActivity : OrientationAwareActivity() {
                 Log.e("MainActivity", "Failed to initialize app", e)
                 handleOnboardingFailed("Failed to initialize the app: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Defensive wiring for Solana mesh balance relay flow.
+     * Keeps recipient balance refresh working even if chat-layer Solana wiring
+     * is unavailable during startup/order-of-init edge cases.
+     */
+    private fun wireSolanaMeshBalanceFallbacks() {
+        try {
+            val entry = EntryPointAccessors.fromApplication(
+                applicationContext,
+                SolanaEntryPoint::class.java
+            )
+            val relayHandler = entry.solanaRelayHandler()
+            val paymentManager = entry.solanaPaymentManager()
+
+            // Ensure mesh packet handlers have a relay handler for BALANCE_INTENT packets.
+            meshService.solanaRelayHandler = relayHandler
+
+            // Route offline balance refresh requests through mesh.
+            paymentManager.onRequestBalanceIntent = { intent ->
+                meshService.broadcastSolanaBalanceIntent(intent)
+            }
+
+            // Route online peer balance responses back to the requester.
+            relayHandler.onSendBalanceResponse = { response ->
+                meshService.broadcastSolanaBalanceResponse(response)
+            }
+
+            // Deliver received balance responses into payment manager cache/update path.
+            meshService.onBalanceResponseReceived = { response ->
+                lifecycleScope.launch {
+                    paymentManager.handleBalanceResponse(response)
+                }
+            }
+
+            Log.d("MainActivity", "Solana mesh balance fallback wiring active")
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to wire Solana mesh balance fallbacks: ${e.message}")
         }
     }
     

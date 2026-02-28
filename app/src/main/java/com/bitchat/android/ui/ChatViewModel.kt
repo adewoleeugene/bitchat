@@ -33,6 +33,7 @@ class ChatViewModel(
 ) : AndroidViewModel(application), BluetoothMeshDelegate {
     private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
     private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
+    private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
 
     companion object {
@@ -243,13 +244,83 @@ class ChatViewModel(
             )
             commandProcessor.walletService = solanaEntryPoint.solanaWalletService()
             commandProcessor.paymentManager = solanaEntryPoint.solanaPaymentManager()
-            commandProcessor.tokenGateService = solanaEntryPoint.tokenGateService()
+            val tokenGateService = solanaEntryPoint.tokenGateService()
+            commandProcessor.tokenGateService = tokenGateService
 
             // Wire up token gate service to channel manager for join validation
-            channelManager.tokenGateService = solanaEntryPoint.tokenGateService()
+            channelManager.tokenGateService = tokenGateService
 
+            val walletService = solanaEntryPoint.solanaWalletService()
             // Set local Solana address on mesh service for identity announcements
-            meshService.solanaAddress = solanaEntryPoint.solanaWalletService().getPublicKeyBase58()
+            meshService.solanaAddress = walletService.getPublicKeyBase58()
+            // Build automatic wallet-link proof for announcements (username <-> wallet binding)
+            meshService.buildSolanaLinkProof = { nickname, signingPublicKey ->
+                try {
+                    val address = walletService.getPublicKeyBase58()
+                    if (address.isNullOrBlank()) {
+                        null
+                    } else {
+                        val message = com.bitchat.android.solana.SolanaIdentityProofUtil.buildLinkMessage(
+                            nickname = nickname,
+                            solanaAddress = address,
+                            signingPublicKey = signingPublicKey
+                        )
+                        val signature = walletService.sign(message)
+                        if (signature == null) null else Pair(address, signature)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            meshService.buildSolanaOwnershipProofs = { nickname, signingPublicKey, solanaAddress ->
+                try {
+                    val now = System.currentTimeMillis()
+                    val proofs = mutableListOf<com.bitchat.android.model.SolanaOwnershipProof>()
+                    for (config in tokenGateService.getAllTokenGates()) {
+                        if (proofs.size >= 12) break
+                        val claimType = when (config.gateType) {
+                            com.bitchat.android.data.local.entities.TokenGateType.SPL_TOKEN ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.SPL_TOKEN
+                            com.bitchat.android.data.local.entities.TokenGateType.NFT_SPECIFIC ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_MINT
+                            com.bitchat.android.data.local.entities.TokenGateType.NFT_COLLECTION ->
+                                com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_COLLECTION
+                            else -> null
+                        } ?: continue
+
+                        val validation = tokenGateService
+                            .validateEligibility(
+                                channelKey = config.channelKey,
+                                mode = com.bitchat.android.solana.ValidationMode.PREFER_CACHE_THEN_ONLINE
+                            )
+                            .getOrNull() ?: continue
+
+                        if (validation.decision != com.bitchat.android.solana.GateDecision.ALLOW) continue
+
+                        val expiresAt = validation.validUntil.coerceAtLeast(now + 60_000L)
+                        val unsignedProof = com.bitchat.android.model.SolanaOwnershipProof(
+                            claimType = claimType,
+                            targetAddress = config.tokenMintAddress,
+                            minRequired = config.minBalance,
+                            observedBalance = validation.userBalance,
+                            validatedAtMs = now,
+                            expiresAtMs = expiresAt,
+                            signature = ByteArray(64)
+                        )
+                        val message = com.bitchat.android.solana.SolanaOwnershipProofUtil.buildProofMessage(
+                            nickname = nickname,
+                            solanaAddress = solanaAddress,
+                            signingPublicKey = signingPublicKey,
+                            proof = unsignedProof
+                        )
+                        val signature = walletService.sign(message) ?: continue
+                        proofs.add(unsignedProof.copy(signature = signature))
+                    }
+                    proofs
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
 
             // Wire up Solana relay handler for mesh transaction relay
             val relayHandler = solanaEntryPoint.solanaRelayHandler()
@@ -263,17 +334,8 @@ class ChatViewModel(
             relayHandler.onSendRelayAck = { ack ->
                 meshService.broadcastSolanaRelayAck(ack)
             }
-            relayHandler.onRelayEvent = { event ->
-                viewModelScope.launch(Dispatchers.Main) {
-                    val msg = BitchatMessage(
-                        sender = "system",
-                        content = "solana relay: $event",
-                        timestamp = java.util.Date(),
-                        isRelay = false
-                    )
-                    messageManager.addMessage(msg)
-                }
-            }
+            // Keep relay internals off the main chat timeline to avoid spam.
+            relayHandler.onRelayEvent = null
 
             // Wire mesh relay fallback into payment manager
             val paymentManager = solanaEntryPoint.solanaPaymentManager()
@@ -294,33 +356,67 @@ class ChatViewModel(
             paymentManager.onRequestBlockhashIntent = { intent ->
                 meshService.broadcastSolanaIntentRequest(intent)
             }
+            paymentManager.onRequestBalanceIntent = { intent ->
+                meshService.broadcastSolanaBalanceIntent(intent)
+            }
             relayHandler.onSendBlockhashResponse = { response ->
                 meshService.broadcastSolanaBlockhashResponse(response)
+            }
+            relayHandler.onSendBalanceResponse = { response ->
+                meshService.broadcastSolanaBalanceResponse(response)
             }
             meshService.onBlockhashResponseReceived = { response ->
                 viewModelScope.launch {
                     paymentManager.handleBlockhashResponse(response)
                 }
             }
+            meshService.onBalanceResponseReceived = { response ->
+                viewModelScope.launch {
+                    paymentManager.handleBalanceResponse(response)
+                }
+            }
 
-            // Wire payment manager status events to system messages in chat
+            // Surface high-signal payment progress so mesh/offline flow does not
+            // look stalled, while still keeping relay-debug chatter out of chat.
             paymentManager.onStatusEvent = { event ->
-                viewModelScope.launch(Dispatchers.Main) {
-                    val msg = BitchatMessage(
-                        sender = "system",
-                        content = "solana: $event",
-                        timestamp = java.util.Date(),
-                        isRelay = false
-                    )
-                    messageManager.addMessage(msg)
+                val lowered = event.lowercase()
+                val shouldShow = lowered.contains("offline") ||
+                    lowered.contains("requesting blockhash") ||
+                    lowered.contains("signed tx sent") ||
+                    lowered.contains("relay not available") ||
+                    lowered.contains("blockhash request failed") ||
+                    lowered.contains("received empty blockhash")
+                if (shouldShow) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        val dedupKey = "status:$event"
+                        if (notifiedStatusEvents.contains(dedupKey)) return@launch
+                        notifiedStatusEvents.add(dedupKey)
+                        messageManager.addMessage(
+                            BitchatMessage(
+                                sender = "system",
+                                content = "payment status: $event",
+                                timestamp = java.util.Date(),
+                                isRelay = false
+                            )
+                        )
+                    }
                 }
             }
 
             // Wire up message notarization service
             notarizationService = solanaEntryPoint.messageNotarizationService()
 
+            // Wire up NFT avatar service
+            nftAvatarService = solanaEntryPoint.nftAvatarService()
+
+            // Restore persisted NFT profile mint selection
+            val nftPrefs = getApplication<android.app.Application>()
+                .getSharedPreferences("nft_profile", android.content.Context.MODE_PRIVATE)
+            meshService.nftProfileMint = nftPrefs.getString("nft_profile_mint", null)
+
             // Observe transaction status changes and show updates in chat
             observeTransactionStatus(solanaEntryPoint)
+            observeIncomingBalanceCredits(solanaEntryPoint)
         } catch (e: Exception) {
             Log.w(TAG, "Solana services not available: ${e.message}")
         }
@@ -1046,6 +1142,53 @@ class ChatViewModel(
     }
 
     /**
+     * Get a peer's verified Solana ownership proofs by nickname.
+     */
+    fun getPeerOwnershipProofs(nickname: String): List<com.bitchat.android.model.SolanaOwnershipProof> {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return emptyList()
+        return meshService.getPeerInfo(peerID)?.solanaOwnershipProofs ?: emptyList()
+    }
+
+    /**
+     * Look up a peer's NFT profile mint by nickname.
+     */
+    fun getPeerNftProfileMint(nickname: String): String? {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return null
+        return meshService.getPeerInfo(peerID)?.nftProfileMint
+    }
+
+    /**
+     * Fetch NFT avatar bitmap for a peer. Returns null if peer has no NFT profile
+     * or if the image is unavailable.
+     */
+    suspend fun getPeerNftAvatar(nickname: String): android.graphics.Bitmap? {
+        val peerID = meshService.getPeerNicknames().entries
+            .firstOrNull { it.value == nickname }?.key ?: return null
+        val peerInfo = meshService.getPeerInfo(peerID) ?: return null
+        val mint = peerInfo.nftProfileMint ?: return null
+        val owner = peerInfo.solanaAddress ?: return null
+        return nftAvatarService?.getAvatar(mint, owner)
+    }
+
+    /**
+     * Set the NFT mint address for our profile avatar.
+     * Persists the selection and triggers a re-announce to propagate.
+     */
+    fun setNftProfileMint(mintAddress: String?) {
+        meshService.nftProfileMint = mintAddress
+        val prefs = getApplication<android.app.Application>()
+            .getSharedPreferences("nft_profile", android.content.Context.MODE_PRIVATE)
+        if (mintAddress != null) {
+            prefs.edit().putString("nft_profile_mint", mintAddress).apply()
+        } else {
+            prefs.edit().remove("nft_profile_mint").apply()
+        }
+        meshService.sendBroadcastAnnounce()
+    }
+
+    /**
      * Get all peers that have a known Solana address.
      * Returns list of (nickname, solanaAddress) pairs.
      */
@@ -1094,11 +1237,72 @@ class ChatViewModel(
         }
     }
 
+    fun inspectNotarization(message: BitchatMessage) {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            val proof = service.getProof(message.id, refreshMetadata = true)
+            if (proof == null) {
+                messageManager.addSystemMessage("notarization: no record for this message")
+                return@launch
+            }
+            val details = when (proof.status) {
+                com.bitchat.android.data.local.entities.NotarizationStatus.CONFIRMED -> {
+                    val tx = proof.txSignature?.take(12)?.plus("...") ?: "n/a"
+                    val slot = proof.slot?.toString() ?: "n/a"
+                    val blockTime = proof.blockTime?.let { java.util.Date(it * 1000).toString() } ?: "n/a"
+                    "notarization confirmed\nhash: ${proof.messageHash.take(16)}...\ntx: $tx\nslot: $slot\nblock time: $blockTime"
+                }
+                com.bitchat.android.data.local.entities.NotarizationStatus.BROADCASTING ->
+                    "notarization pending confirmation\nhash: ${proof.messageHash.take(16)}..."
+                com.bitchat.android.data.local.entities.NotarizationStatus.QUEUED ->
+                    "notarization queued (waiting for connectivity)\nhash: ${proof.messageHash.take(16)}..."
+                com.bitchat.android.data.local.entities.NotarizationStatus.FAILED ->
+                    "notarization failed: ${proof.errorMessage ?: "unknown error"}"
+                else ->
+                    "notarization status: ${proof.status.lowercase()}"
+            }
+            messageManager.addSystemMessage(details)
+        }
+    }
+
+    fun processNotarizationQueueNow() {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            val result = service.processBatch()
+            result.onSuccess { count ->
+                messageManager.addSystemMessage(
+                    if (count > 0) "processed notarization batch ($count messages)"
+                    else "no queued notarizations to process"
+                )
+            }
+            result.onFailure { error ->
+                messageManager.addSystemMessage("notarization processing failed: ${error.message}")
+            }
+        }
+    }
+
+    fun retryFailedNotarizations() {
+        val service = notarizationService ?: run {
+            messageManager.addSystemMessage("wallet required for notarization")
+            return
+        }
+        viewModelScope.launch {
+            service.retryFailed()
+            messageManager.addSystemMessage("retrying failed notarizations")
+        }
+    }
+
     /**
      * Check if a message has been notarized and get the proof.
      */
     suspend fun getNotarizationProof(messageId: String): com.bitchat.android.data.local.entities.MessageNotarizationEntity? {
-        return notarizationService?.getProof(messageId)
+        return notarizationService?.getProof(messageId, refreshMetadata = true)
     }
 
     // MARK: - Social Feed
@@ -1194,9 +1398,14 @@ class ChatViewModel(
      * Track confirmed/failed transaction IDs to avoid duplicate system messages.
      */
     private val notifiedTransactionIds = mutableSetOf<String>()
+    private val notifiedStatusEvents = mutableSetOf<String>()
+    private var lastObservedWalletAddress: String? = null
+    private var lastObservedWalletLamports: Long? = null
+    private val notifiedIncomingCreditKeys = mutableSetOf<String>()
 
     private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
         val paymentManager = entryPoint.solanaPaymentManager()
+        val myWalletAddress = entryPoint.solanaWalletService().getPublicKeyBase58()
         viewModelScope.launch {
             paymentManager.observeRecentTransactions()
                 .collect { transactions ->
@@ -1208,20 +1417,31 @@ class ChatViewModel(
                         val shortRecipient = if (tx.recipientPublicKey.length > 12) {
                             "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
                         } else tx.recipientPublicKey
+                        val shortSender = if (tx.senderPublicKey.length > 12) {
+                            "${tx.senderPublicKey.take(8)}...${tx.senderPublicKey.takeLast(4)}"
+                        } else tx.senderPublicKey
 
                         val statusMessage = when (tx.status) {
                             com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment: $amountSol SOL to $shortRecipient — requesting blockhash from mesh peer..."
+                                "payment preparing: $amountSol SOL to $shortRecipient (awaiting blockhash)"
                             }
                             com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment: $amountSol SOL to $shortRecipient — broadcasting via relay peer..."
+                                "payment broadcasting: $amountSol SOL to $shortRecipient"
                             }
                             com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment confirmed: $amountSol SOL to $shortRecipient" +
-                                    if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                val isIncoming = myWalletAddress != null &&
+                                    tx.recipientPublicKey == myWalletAddress &&
+                                    tx.senderPublicKey != myWalletAddress
+                                if (isIncoming) {
+                                    "payment received: $amountSol SOL from $shortSender" +
+                                        if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                } else {
+                                    "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                        if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
+                                }
                             }
                             com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
                                 notifiedTransactionIds.add(key)
@@ -1245,6 +1465,48 @@ class ChatViewModel(
                         }
                     }
                 }
+        }
+    }
+
+    private fun observeIncomingBalanceCredits(entryPoint: SolanaEntryPoint) {
+        val walletService = entryPoint.solanaWalletService()
+        val paymentManager = entryPoint.solanaPaymentManager()
+        viewModelScope.launch {
+            walletService.observeActiveWallet().collect { wallet ->
+                if (wallet == null) {
+                    lastObservedWalletAddress = null
+                    lastObservedWalletLamports = null
+                    return@collect
+                }
+
+                if (lastObservedWalletAddress != wallet.publicKey) {
+                    lastObservedWalletAddress = wallet.publicKey
+                    lastObservedWalletLamports = wallet.lastBalanceLamports
+                    return@collect
+                }
+
+                val previous = lastObservedWalletLamports
+                val current = wallet.lastBalanceLamports
+                if (previous != null && current > previous) {
+                    val delta = current - previous
+                    val dedupKey = "credit:${wallet.publicKey}:${wallet.lastBalanceUpdatedAt}:$current"
+                    if (!notifiedIncomingCreditKeys.contains(dedupKey)) {
+                        notifiedIncomingCreditKeys.add(dedupKey)
+                        val deltaSol = paymentManager.lamportsToSolDisplay(delta)
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            messageManager.addMessage(
+                                BitchatMessage(
+                                    sender = "system",
+                                    content = "payment received: $deltaSol SOL",
+                                    timestamp = Date(),
+                                    isRelay = false
+                                )
+                            )
+                        }
+                    }
+                }
+                lastObservedWalletLamports = current
+            }
         }
     }
 

@@ -16,7 +16,7 @@ data class QueuedTransactionEntity(
     val senderPublicKey: String,        // Sender wallet address (Base58)
     val recipientPublicKey: String,     // Recipient wallet address (Base58)
     val amountLamports: Long,           // Amount in lamports
-    val status: String,                 // PENDING, BROADCASTING, CONFIRMED, FAILED
+    val status: String,                 // QUEUED, BROADCASTING, CONFIRMED, FAILED
     val createdAt: Long,                // Unix timestamp millis
     val lastAttemptAt: Long = 0,        // Last broadcast attempt timestamp
     val attemptCount: Int = 0,          // Number of broadcast attempts

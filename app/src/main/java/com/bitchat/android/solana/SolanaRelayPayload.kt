@@ -468,3 +468,148 @@ data class SolanaBlockhashResponse(
         }
     }
 }
+
+/**
+ * BALANCE_INTENT (0x36) payload — offline user requesting a relayed balance fetch.
+ *
+ * Wire format:
+ * - intentIdLength: 1 byte
+ * - intentId: variable (UUID string)
+ * - requesterPubKeyLength: 1 byte
+ * - requesterPubKey: variable (Base58 wallet address to query)
+ */
+data class SolanaBalanceIntent(
+    val intentId: String,
+    val requesterPubKey: String
+) {
+    fun encode(): ByteArray {
+        val intentIdBytes = intentId.toByteArray(Charsets.UTF_8)
+        val requesterBytes = requesterPubKey.toByteArray(Charsets.UTF_8)
+        val size = 1 + intentIdBytes.size + 1 + requesterBytes.size
+        val buffer = ByteBuffer.allocate(size).apply { order(ByteOrder.BIG_ENDIAN) }
+
+        buffer.put(intentIdBytes.size.coerceAtMost(255).toByte())
+        buffer.put(intentIdBytes.take(255).toByteArray())
+
+        buffer.put(requesterBytes.size.coerceAtMost(255).toByte())
+        buffer.put(requesterBytes.take(255).toByteArray())
+
+        val result = ByteArray(buffer.position())
+        buffer.rewind()
+        buffer.get(result)
+        return result
+    }
+
+    companion object {
+        fun decode(data: ByteArray): SolanaBalanceIntent? {
+            return try {
+                if (data.size < 3) return null
+                val buffer = ByteBuffer.wrap(data).apply { order(ByteOrder.BIG_ENDIAN) }
+
+                val intentIdLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < intentIdLen) return null
+                val intentIdBytes = ByteArray(intentIdLen)
+                buffer.get(intentIdBytes)
+                val intentId = String(intentIdBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 1) return null
+                val requesterLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < requesterLen) return null
+                val requesterBytes = ByteArray(requesterLen)
+                buffer.get(requesterBytes)
+                val requesterPubKey = String(requesterBytes, Charsets.UTF_8)
+
+                SolanaBalanceIntent(intentId, requesterPubKey)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}
+
+/**
+ * BALANCE_RESPONSE (0x37) payload — relayed balance result from online peer.
+ *
+ * Wire format:
+ * - intentIdLength: 1 byte
+ * - intentId: variable (matches original intent)
+ * - walletPubKeyLength: 1 byte
+ * - walletPubKey: variable (queried wallet)
+ * - lamports: 8 bytes (big-endian)
+ * - slot: 8 bytes (big-endian, 0 if unavailable)
+ * - fetchedAtMs: 8 bytes (big-endian, relay local timestamp)
+ * - errorMessageLength: 2 bytes (big-endian)
+ * - errorMessage: variable (UTF-8, empty if successful)
+ */
+data class SolanaBalanceResponse(
+    val intentId: String,
+    val walletPubKey: String,
+    val lamports: Long,
+    val slot: Long,
+    val fetchedAtMs: Long,
+    val errorMessage: String
+) {
+    fun encode(): ByteArray {
+        val intentIdBytes = intentId.toByteArray(Charsets.UTF_8)
+        val walletBytes = walletPubKey.toByteArray(Charsets.UTF_8)
+        val errorBytes = errorMessage.toByteArray(Charsets.UTF_8)
+        val size = 1 + intentIdBytes.size + 1 + walletBytes.size + 8 + 8 + 8 + 2 + errorBytes.size
+        val buffer = ByteBuffer.allocate(size).apply { order(ByteOrder.BIG_ENDIAN) }
+
+        buffer.put(intentIdBytes.size.coerceAtMost(255).toByte())
+        buffer.put(intentIdBytes.take(255).toByteArray())
+
+        buffer.put(walletBytes.size.coerceAtMost(255).toByte())
+        buffer.put(walletBytes.take(255).toByteArray())
+
+        buffer.putLong(lamports)
+        buffer.putLong(slot)
+        buffer.putLong(fetchedAtMs)
+
+        buffer.putShort(errorBytes.size.coerceAtMost(65535).toShort())
+        buffer.put(errorBytes.take(65535).toByteArray())
+
+        val result = ByteArray(buffer.position())
+        buffer.rewind()
+        buffer.get(result)
+        return result
+    }
+
+    companion object {
+        fun decode(data: ByteArray): SolanaBalanceResponse? {
+            return try {
+                if (data.size < 29) return null
+                val buffer = ByteBuffer.wrap(data).apply { order(ByteOrder.BIG_ENDIAN) }
+
+                val intentIdLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < intentIdLen) return null
+                val intentIdBytes = ByteArray(intentIdLen)
+                buffer.get(intentIdBytes)
+                val intentId = String(intentIdBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 1) return null
+                val walletLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < walletLen) return null
+                val walletBytes = ByteArray(walletLen)
+                buffer.get(walletBytes)
+                val walletPubKey = String(walletBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 24) return null
+                val lamports = buffer.getLong()
+                val slot = buffer.getLong()
+                val fetchedAtMs = buffer.getLong()
+
+                if (buffer.remaining() < 2) return null
+                val errorLen = buffer.getShort().toInt() and 0xFFFF
+                if (buffer.remaining() < errorLen) return null
+                val errorBytes = ByteArray(errorLen)
+                buffer.get(errorBytes)
+                val errorMessage = String(errorBytes, Charsets.UTF_8)
+
+                SolanaBalanceResponse(intentId, walletPubKey, lamports, slot, fetchedAtMs, errorMessage)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}

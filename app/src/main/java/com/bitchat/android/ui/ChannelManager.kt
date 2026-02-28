@@ -1,7 +1,9 @@
 package com.bitchat.android.ui
 
 import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.solana.GateDecision
 import com.bitchat.android.solana.TokenGateService
+import com.bitchat.android.solana.ValidationMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -75,41 +77,80 @@ class ChannelManager(
             }
         }
 
-        // Token gate validation (if service available and channel is gated)
+        // Token gate validation (if service available and channel is gated).
+        // This path is asynchronous to avoid blocking UI on RPC latency.
         val tgs = tokenGateService
-        if (tgs != null) {
-            try {
-                val isGated = runBlocking { tgs.isTokenGated(key) }
-                if (isGated) {
-                    tokenGatedChannels.add(key)
-                    val validation = runBlocking { tgs.validateEligibility(key) }
-                    validation.onSuccess { result ->
-                        if (!result.isEligible) {
-                            val displayAmount = tgs.formatTokenAmount(result.requiredBalance, result.tokenDecimals)
-                            val symbol = result.tokenSymbol.ifEmpty { "tokens" }
-                            val msg = BitchatMessage(
-                                sender = "system",
-                                content = "token gate: you need at least $displayAmount $symbol to join $channelTag. check your wallet.",
-                                timestamp = Date(),
-                                isRelay = false
-                            )
-                            messageManager.addMessage(msg)
-                            return false
+        if (tgs != null && runBlocking { tgs.isTokenGated(key) }) {
+            tokenGatedChannels.add(key)
+            messageManager.addMessage(
+                BitchatMessage(
+                    sender = "system",
+                    content = "checking token gate for $channelTag...",
+                    timestamp = Date(),
+                    isRelay = false
+                )
+            )
+            coroutineScope.launch {
+                val validation = tgs.validateEligibility(key, ValidationMode.PREFER_CACHE_THEN_ONLINE)
+                validation.onSuccess { result ->
+                    when (result.decision) {
+                        GateDecision.ALLOW -> {
+                            val joined = joinChannelInternal(key, channelTag, myPeerID)
+                            if (joined) {
+                                messageManager.addMessage(
+                                    BitchatMessage(
+                                        sender = "system",
+                                        content = "joined channel $channelTag (token-gated)",
+                                        timestamp = Date(),
+                                        isRelay = false
+                                    )
+                                )
+                            }
                         }
-                    }.onFailure { error ->
-                        val msg = BitchatMessage(
+                        GateDecision.DENY -> {
+                            val requirement = tgs.formatRequirementText(result)
+                            messageManager.addMessage(
+                                BitchatMessage(
+                                    sender = "system",
+                                    content = "token gate denied for $channelTag: $requirement.",
+                                    timestamp = Date(),
+                                    isRelay = false
+                                )
+                            )
+                        }
+                        GateDecision.UNKNOWN_OFFLINE -> {
+                            messageManager.addMessage(
+                                BitchatMessage(
+                                    sender = "system",
+                                    content = "token gate could not be verified for $channelTag while offline. connect to internet and retry.",
+                                    timestamp = Date(),
+                                    isRelay = false
+                                )
+                            )
+                        }
+                    }
+                }.onFailure { error ->
+                    messageManager.addMessage(
+                        BitchatMessage(
                             sender = "system",
-                            content = "token gate check failed: ${error.message}",
+                            content = "token gate check failed for $channelTag: ${error.message}",
                             timestamp = Date(),
                             isRelay = false
                         )
-                        messageManager.addMessage(msg)
-                        return false
-                    }
+                    )
                 }
-            } catch (_: Exception) { }
+            }
+            return false
         }
 
+        return joinChannelInternal(key, channelTag, myPeerID)
+    }
+
+    private fun joinChannelInternal(
+        key: String,
+        channelTag: String,
+        myPeerID: String
+    ): Boolean {
         // Join the channel
         val updatedChannels = state.getJoinedChannelsValue().toMutableSet()
         updatedChannels.add(key)
@@ -261,6 +302,14 @@ class ChannelManager(
     }
     
     fun isChannelTokenGated(channel: String): Boolean {
+        val service = tokenGateService
+        if (service != null) {
+            try {
+                val isGated = runBlocking { service.isTokenGated(channel) }
+                if (isGated) tokenGatedChannels.add(channel)
+                return isGated
+            } catch (_: Exception) { }
+        }
         return tokenGatedChannels.contains(channel)
     }
 

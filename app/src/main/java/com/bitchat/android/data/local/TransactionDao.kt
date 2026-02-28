@@ -20,16 +20,19 @@ interface TransactionDao {
     @Update
     suspend fun updateTransaction(tx: QueuedTransactionEntity)
 
-    @Query("SELECT * FROM queued_transactions WHERE status = 'PENDING' AND ttlExpiresAt > :now ORDER BY createdAt ASC")
+    @Query("SELECT * FROM queued_transactions WHERE status IN ('QUEUED', 'PENDING') AND ttlExpiresAt > :now ORDER BY createdAt ASC")
     suspend fun getPendingTransactions(now: Long = System.currentTimeMillis()): List<QueuedTransactionEntity>
 
-    @Query("UPDATE queued_transactions SET status = 'PENDING' WHERE status = 'BROADCASTING' AND lastAttemptAt < :staleThreshold AND ttlExpiresAt > :now")
+    @Query("SELECT * FROM queued_transactions WHERE status = 'BROADCASTING' AND txSignature IS NOT NULL ORDER BY lastAttemptAt ASC")
+    suspend fun getBroadcastingWithSignature(): List<QueuedTransactionEntity>
+
+    @Query("UPDATE queued_transactions SET status = 'QUEUED' WHERE status = 'BROADCASTING' AND lastAttemptAt < :staleThreshold AND ttlExpiresAt > :now")
     suspend fun recoverStaleBroadcasting(staleThreshold: Long = System.currentTimeMillis() - 120_000L, now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE queued_transactions SET status = 'PENDING' WHERE status = 'AWAITING_BLOCKHASH' AND lastAttemptAt < :staleThreshold AND ttlExpiresAt > :now")
-    suspend fun recoverStaleHandshake(staleThreshold: Long = System.currentTimeMillis() - 120_000L, now: Long = System.currentTimeMillis())
+    @Query("UPDATE queued_transactions SET status = 'QUEUED' WHERE status = 'AWAITING_BLOCKHASH' AND lastAttemptAt < :staleThreshold AND ttlExpiresAt > :now")
+    suspend fun recoverStaleHandshake(staleThreshold: Long = System.currentTimeMillis() - 30_000L, now: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM queued_transactions WHERE status = 'PENDING' AND ttlExpiresAt > :now ORDER BY createdAt ASC")
+    @Query("SELECT * FROM queued_transactions WHERE status IN ('QUEUED', 'PENDING') AND ttlExpiresAt > :now ORDER BY createdAt ASC")
     fun observePendingTransactions(now: Long = System.currentTimeMillis()): Flow<List<QueuedTransactionEntity>>
 
     @Query("SELECT * FROM queued_transactions WHERE senderPublicKey = :publicKey OR recipientPublicKey = :publicKey ORDER BY createdAt DESC")
@@ -41,12 +44,18 @@ interface TransactionDao {
     @Query("UPDATE queued_transactions SET status = :status, txSignature = :signature, lastAttemptAt = :attemptAt, attemptCount = attemptCount + 1 WHERE id = :id")
     suspend fun updateStatus(id: String, status: String, signature: String? = null, attemptAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE queued_transactions SET status = 'BROADCASTING', txSignature = :signature, errorMessage = NULL, lastAttemptAt = :attemptAt WHERE id = :id")
+    suspend fun markBroadcastObserved(id: String, signature: String, attemptAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE queued_transactions SET status = 'CONFIRMED', txSignature = :signature, errorMessage = NULL, lastAttemptAt = :attemptAt WHERE id = :id")
+    suspend fun markConfirmed(id: String, signature: String, attemptAt: Long = System.currentTimeMillis())
+
     @Query("UPDATE queued_transactions SET status = 'FAILED', errorMessage = :error, lastAttemptAt = :attemptAt, attemptCount = attemptCount + 1 WHERE id = :id")
     suspend fun markFailed(id: String, error: String, attemptAt: Long = System.currentTimeMillis())
 
     @Query("DELETE FROM queued_transactions WHERE status = 'CONFIRMED' AND createdAt < :olderThan")
     suspend fun pruneConfirmed(olderThan: Long)
 
-    @Query("UPDATE queued_transactions SET status = 'FAILED', errorMessage = 'TTL expired' WHERE status = 'PENDING' AND ttlExpiresAt < :now")
+    @Query("UPDATE queued_transactions SET status = 'FAILED', errorMessage = 'TTL expired' WHERE status IN ('QUEUED', 'PENDING') AND ttlExpiresAt < :now")
     suspend fun expireStaleTransactions(now: Long = System.currentTimeMillis())
 }

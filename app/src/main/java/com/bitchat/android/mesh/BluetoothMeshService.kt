@@ -7,6 +7,7 @@ import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.protocol.MessagePadding
 import com.bitchat.android.model.RoutedPacket
 import com.bitchat.android.model.IdentityAnnouncement
+import com.bitchat.android.model.SolanaOwnershipProof
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
 import com.bitchat.android.protocol.SpecialRecipients
@@ -16,6 +17,8 @@ import com.bitchat.android.feed.FeedReactionPayload
 import com.bitchat.android.feed.FeedReplyPayload
 import com.bitchat.android.feed.FeedService
 import com.bitchat.android.solana.SolanaBlockhashResponse
+import com.bitchat.android.solana.SolanaBalanceIntent
+import com.bitchat.android.solana.SolanaBalanceResponse
 import com.bitchat.android.solana.SolanaRelayAck
 import com.bitchat.android.solana.SolanaRelayClaim
 import com.bitchat.android.solana.SolanaRelayHandler
@@ -75,12 +78,20 @@ class BluetoothMeshService(private val context: Context) {
 
     // Callback for blockhash responses received from online peers (set from ChatViewModel)
     var onBlockhashResponseReceived: ((SolanaBlockhashResponse) -> Unit)? = null
+    var onBalanceResponseReceived: ((SolanaBalanceResponse) -> Unit)? = null
 
     // Feed service for social feed (set from ChatViewModel)
     var feedService: FeedService? = null
 
     // Solana wallet address to include in ANNOUNCE packets (set from ChatViewModel)
     var solanaAddress: String? = null
+    // NFT mint address for profile avatar in ANNOUNCE packets (set from ChatViewModel)
+    var nftProfileMint: String? = null
+    // Optional callback to build wallet-link proof for ANNOUNCE.
+    // Returns Pair<solanaAddress, proofSignature> or null if wallet unavailable.
+    var buildSolanaLinkProof: ((nickname: String, signingPublicKey: ByteArray) -> Pair<String, ByteArray>?)? = null
+    // Optional callback to build signed ownership claims for ANNOUNCE.
+    var buildSolanaOwnershipProofs: (suspend (nickname: String, signingPublicKey: ByteArray, solanaAddress: String) -> List<SolanaOwnershipProof>)? = null
 
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -264,8 +275,26 @@ class BluetoothMeshService(private val context: Context) {
                 return peerManager.getPeerInfo(peerID)
             }
             
-            override fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String?): Boolean {
-                return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
+            override fun updatePeerInfo(
+                peerID: String,
+                nickname: String,
+                noisePublicKey: ByteArray,
+                signingPublicKey: ByteArray,
+                isVerified: Boolean,
+                solanaAddress: String?,
+                solanaOwnershipProofs: List<SolanaOwnershipProof>,
+                nftProfileMint: String?
+            ): Boolean {
+                return peerManager.updatePeerInfo(
+                    peerID,
+                    nickname,
+                    noisePublicKey,
+                    signingPublicKey,
+                    isVerified,
+                    solanaAddress,
+                    solanaOwnershipProofs,
+                    nftProfileMint
+                )
             }
             
             // Packet operations
@@ -574,6 +603,30 @@ class BluetoothMeshService(private val context: Context) {
                 }
                 solanaRelayHandler?.handleRelayAck(ack, fromPeer)
                     ?: Log.d(TAG, "No Solana relay handler configured, ignoring relay ack")
+            }
+
+            override fun handleSolanaBalanceIntent(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val intent = SolanaBalanceIntent.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_BALANCE_INTENT payload from $fromPeer")
+                    return
+                }
+                val handler = solanaRelayHandler
+                if (handler == null) {
+                    Log.d(TAG, "No Solana relay handler configured, ignoring balance intent")
+                    return
+                }
+                handler.handleBalanceIntent(intent, fromPeer, context)
+            }
+
+            override fun handleSolanaBalanceResponse(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val response = SolanaBalanceResponse.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode SOLANA_BALANCE_RESPONSE payload from $fromPeer")
+                    return
+                }
+                onBalanceResponseReceived?.invoke(response)
+                    ?: Log.d(TAG, "No balance response handler configured, ignoring")
             }
 
             override fun handleFeedPost(routed: RoutedPacket) {
@@ -1007,26 +1060,48 @@ class BluetoothMeshService(private val context: Context) {
                 return@launch
             }
             
+            // Build optional Solana link proof automatically when wallet is available
+            val proofData = try { buildSolanaLinkProof?.invoke(nickname, signingKey) } catch (_: Exception) { null }
+            val announcementAddress = proofData?.first ?: solanaAddress
+            val announcementProof = proofData?.second
+            val ownershipProofs = try {
+                if (announcementAddress.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    buildSolanaOwnershipProofs?.invoke(nickname, signingKey, announcementAddress).orEmpty()
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
             // Create iOS-compatible IdentityAnnouncement with TLV encoding
-            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
+            val announcement = IdentityAnnouncement(
+                nickname = nickname,
+                noisePublicKey = staticKey,
+                signingPublicKey = signingKey,
+                solanaAddress = announcementAddress,
+                solanaLinkProofSignature = announcementProof,
+                solanaOwnershipProofs = ownershipProofs,
+                nftProfileMint = nftProfileMint
+            )
             val tlvPayload = announcement.encode()
             if (tlvPayload == null) {
                 Log.e(TAG, "Failed to encode announcement as TLV")
                 return@launch
             }
-            
+
             val announcePacket = BitchatPacket(
                 type = MessageType.ANNOUNCE.value,
                 ttl = MAX_TTL,
                 senderID = myPeerID,
                 payload = tlvPayload
             )
-            
+
             // Sign the packet using our signing key (exactly like iOS)
             val signedPacket = encryptionService.signData(announcePacket.toBinaryDataForSigning()!!)?.let { signature ->
                 announcePacket.copy(signature = signature)
             } ?: announcePacket
-            
+
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             Log.d(TAG, "Sent iOS-compatible signed TLV announce (${tlvPayload.size} bytes)")
             // Track announce for sync
@@ -1056,8 +1131,32 @@ class BluetoothMeshService(private val context: Context) {
             return
         }
         
+        // Build optional Solana link proof automatically when wallet is available
+        val proofData = try { buildSolanaLinkProof?.invoke(nickname, signingKey) } catch (_: Exception) { null }
+        val announcementAddress = proofData?.first ?: solanaAddress
+        val announcementProof = proofData?.second
+        val ownershipProofs = try {
+            if (announcementAddress.isNullOrBlank()) {
+                emptyList()
+            } else {
+                runBlocking {
+                    buildSolanaOwnershipProofs?.invoke(nickname, signingKey, announcementAddress).orEmpty()
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
         // Create iOS-compatible IdentityAnnouncement with TLV encoding
-        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, solanaAddress)
+        val announcement = IdentityAnnouncement(
+            nickname = nickname,
+            noisePublicKey = staticKey,
+            signingPublicKey = signingKey,
+            solanaAddress = announcementAddress,
+            solanaLinkProofSignature = announcementProof,
+            solanaOwnershipProofs = ownershipProofs,
+            nftProfileMint = nftProfileMint
+        )
         val tlvPayload = announcement.encode()
         if (tlvPayload == null) {
             Log.e(TAG, "Failed to encode peer announcement as TLV")
@@ -1156,9 +1255,20 @@ class BluetoothMeshService(private val context: Context) {
         noisePublicKey: ByteArray,
         signingPublicKey: ByteArray,
         isVerified: Boolean,
-        solanaAddress: String? = null
+        solanaAddress: String? = null,
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(),
+        nftProfileMint: String? = null
     ): Boolean {
-        return peerManager.updatePeerInfo(peerID, nickname, noisePublicKey, signingPublicKey, isVerified, solanaAddress)
+        return peerManager.updatePeerInfo(
+            peerID,
+            nickname,
+            noisePublicKey,
+            signingPublicKey,
+            isVerified,
+            solanaAddress,
+            solanaOwnershipProofs,
+            nftProfileMint
+        )
     }
     
     /**
@@ -1384,6 +1494,42 @@ class BluetoothMeshService(private val context: Context) {
             val signedPacket = signPacketBeforeBroadcast(packet)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             Log.d(TAG, "Broadcast SOLANA_TX_ACK for ${ack.requestId.take(8)}... type=${ack.ackType}")
+        }
+    }
+
+    /**
+     * Broadcast a Solana balance intent through the mesh.
+     * Sent by offline user to request relayed balance fetch from an online peer.
+     */
+    fun broadcastSolanaBalanceIntent(intent: SolanaBalanceIntent) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_BALANCE_INTENT.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = intent.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_BALANCE_INTENT ${intent.intentId.take(8)}...")
+        }
+    }
+
+    /**
+     * Broadcast a Solana balance response through the mesh.
+     * Sent by online peer with balance data or error details.
+     */
+    fun broadcastSolanaBalanceResponse(response: SolanaBalanceResponse) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.SOLANA_BALANCE_RESPONSE.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = response.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            Log.d(TAG, "Broadcast SOLANA_BALANCE_RESPONSE for ${response.intentId.take(8)}...")
         }
     }
 

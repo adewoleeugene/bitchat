@@ -1,6 +1,6 @@
 # Solana Integration Roadmap
 
-**Status:** DRAFT - Planning Phase
+**Status:** LIVING - Mixed implementation status by feature
 **Version:** 1.0
 **Last Updated:** 2025-10-24
 **Author:** Design Review
@@ -19,6 +19,7 @@ This document outlines low-hanging fruit Solana integrations that fit naturally 
 
 **Effort:** 1-2 days
 **Priority:** HIGH (foundation for all other features)
+**Implementation Status (2026-02-24):** IMPLEMENTED
 
 **What:** Derive Solana keypair from existing Ed25519 identity and display wallet address in settings.
 
@@ -50,6 +51,7 @@ This document outlines low-hanging fruit Solana integrations that fit naturally 
 
 **Effort:** 3-5 days
 **Priority:** HIGH (killer feature)
+**Implementation Status (2026-02-24):** IMPLEMENTED (offline queue + mesh relay + on-chain confirmation polling)
 
 **See:** `exit-relay.md` for full design of offline transaction relay system.
 
@@ -87,6 +89,7 @@ This document outlines low-hanging fruit Solana integrations that fit naturally 
 
 **Effort:** 3-4 days
 **Priority:** MEDIUM
+**Implementation Status (2026-02-24):** IMPLEMENTED (SPL + NFT specific + NFT collection, with cache + RPC revalidation)
 
 **What:** Channels that require holding specific SPL tokens or NFTs to join.
 
@@ -133,6 +136,7 @@ This document outlines low-hanging fruit Solana integrations that fit naturally 
 
 **Effort:** 2-3 days
 **Priority:** MEDIUM
+**Implementation Status (2026-02-24):** IMPLEMENTED (wallet-link proof + signed ownership claims + verification + proof caps)
 
 **What:** Include Solana wallet address in BLE `ANNOUNCE` messages. Peers can verify token/NFT ownership offline (cached) or online.
 
@@ -179,6 +183,7 @@ Alice (0x1a2b3c...)
 
 **Effort:** 2-3 days
 **Priority:** LOW (advanced feature)
+**Implementation Status (2026-02-24):** IMPLEMENTED (queue + batching + recovery + slot/blockTime proof metadata)
 
 **What:** Hash critical messages and post to Solana for immutable timestamping. Useful for proof of authorship and compliance.
 
@@ -394,6 +399,6 @@ Create: `app/src/main/java/com/bitchat/android/solana/`
 
 ---
 
-**Document Status:** DRAFT - Planning Phase
+**Document Status:** LIVING - Implementation Tracking
 **Dependencies:** Exit relay design (exit-relay.md)
 **Estimated Time:** Phased approach (3-4 weeks total)

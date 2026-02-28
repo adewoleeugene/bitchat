@@ -36,6 +36,10 @@ class WalletViewModel @Inject constructor(
     private val _mnemonicPhrase = MutableStateFlow<String?>(null)
     val mnemonicPhrase: StateFlow<String?> = _mnemonicPhrase.asStateFlow()
 
+    // Private key export display (explicit reveal)
+    private val _privateKeyBase58 = MutableStateFlow<String?>(null)
+    val privateKeyBase58: StateFlow<String?> = _privateKeyBase58.asStateFlow()
+
     // Balance refresh state
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -47,6 +51,8 @@ class WalletViewModel @Inject constructor(
     // Restore input
     private val _showRestoreDialog = MutableStateFlow(false)
     val showRestoreDialog: StateFlow<Boolean> = _showRestoreDialog.asStateFlow()
+    private val _showImportPrivateKeyDialog = MutableStateFlow(false)
+    val showImportPrivateKeyDialog: StateFlow<Boolean> = _showImportPrivateKeyDialog.asStateFlow()
 
     // Send dialog state
     private val _showSendDialog = MutableStateFlow(false)
@@ -68,6 +74,8 @@ class WalletViewModel @Inject constructor(
 
     // Cached SOL/USD price
     private var cachedSolPrice: Double? = null
+    private var lastRefreshViaMesh: Boolean = false
+    private var usdEstimateFromLastKnownPrice: Boolean = false
 
     init {
         loadWalletState()
@@ -92,7 +100,9 @@ class WalletViewModel @Inject constructor(
                             balanceSol = walletService.lamportsToSol(wallet.lastBalanceLamports),
                             balanceUsd = usdString,
                             lastUpdated = wallet.lastBalanceUpdatedAt,
-                            label = wallet.label
+                            label = wallet.label,
+                            lastRefreshViaMesh = lastRefreshViaMesh,
+                            usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
                         )
                     } else {
                         _walletState.value = WalletUiState.NoWallet
@@ -138,26 +148,64 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    fun importPrivateKey(privateKeyBase58: String) {
+        viewModelScope.launch {
+            _walletState.value = WalletUiState.Loading
+            _showImportPrivateKeyDialog.value = false
+            val result = walletService.restoreWalletFromPrivateKeyBase58(privateKeyBase58.trim())
+            result.onSuccess {
+                _mnemonicPhrase.value = null
+                Log.d(TAG, "Private key wallet imported successfully")
+                loadWalletState()
+            }.onFailure { error ->
+                _errorMessage.value = "Invalid private key: ${error.message}"
+                _walletState.value = WalletUiState.NoWallet
+                Log.e(TAG, "Private key import failed", error)
+            }
+        }
+    }
+
     fun refreshBalance() {
         viewModelScope.launch {
             _isRefreshing.value = true
+            val usedFallbackPrice = ensureFallbackSolPriceFromCurrentState()
+            var fetchedFreshPrice = false
             // Fetch price and balance in parallel
             val priceJob = launch {
                 rpcService.getSolPrice().onSuccess { price ->
                     cachedSolPrice = price
+                    fetchedFreshPrice = true
+                    usdEstimateFromLastKnownPrice = false
                 }
             }
             val result = walletService.refreshBalance()
+            result.onSuccess {
+                lastRefreshViaMesh = false
+            }
             result.onFailure { error ->
-                val message = if (isNetworkError(error)) {
-                    "Offline — balance will update when internet is available"
+                if (isNetworkError(error)) {
+                    val meshResult = paymentManager.requestBalanceViaMesh()
+                    if (meshResult.isSuccess) {
+                        lastRefreshViaMesh = true
+                        _errorMessage.value = null
+                    } else {
+                        val meshReason = meshResult.exceptionOrNull()?.message.orEmpty()
+                        _errorMessage.value = if (meshReason.contains("relay not available", ignoreCase = true)) {
+                            "Offline — mesh balance sync not available in this screen yet"
+                        } else {
+                            "Offline — balance will update when internet is available"
+                        }
+                    }
                 } else {
-                    "Balance refresh failed: ${error.message}"
+                    _errorMessage.value = "Balance refresh failed: ${error.message}"
                 }
-                _errorMessage.value = message
                 Log.e(TAG, "Balance refresh failed", error)
             }
             priceJob.join()
+            if (usedFallbackPrice && !fetchedFreshPrice) {
+                usdEstimateFromLastKnownPrice = true
+            }
+            refreshUsdFromCachedPrice()
             _isRefreshing.value = false
         }
     }
@@ -174,15 +222,44 @@ class WalletViewModel @Inject constructor(
         viewModelScope.launch {
             rpcService.getSolPrice().onSuccess { price ->
                 cachedSolPrice = price
-                // Update current state if ready
-                val current = _walletState.value
-                if (current is WalletUiState.Ready) {
-                    val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
-                    val usd = solAmount * price
-                    _walletState.value = current.copy(balanceUsd = "$${"%,.0f".format(usd)}")
-                }
+                refreshUsdFromCachedPrice()
             }
         }
+    }
+
+    private fun refreshUsdFromCachedPrice() {
+        val price = cachedSolPrice ?: return
+        val current = _walletState.value
+        if (current is WalletUiState.Ready) {
+            val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
+            val usd = solAmount * price
+            _walletState.value = current.copy(
+                balanceUsd = "$${"%,.0f".format(usd)}",
+                usdEstimateFromLastKnownPrice = usdEstimateFromLastKnownPrice
+            )
+        }
+    }
+
+    /**
+     * If we cannot fetch price while offline, reuse an implied local price from
+     * the currently displayed wallet state so USD can still refresh with new SOL balance.
+     */
+    private fun ensureFallbackSolPriceFromCurrentState(): Boolean {
+        if (cachedSolPrice != null) return false
+        val current = _walletState.value as? WalletUiState.Ready ?: return false
+        val usdString = current.balanceUsd ?: return false
+        val numericUsd = usdString
+            .replace("$", "")
+            .replace(",", "")
+            .trim()
+            .toDoubleOrNull() ?: return false
+        if (current.balanceLamports <= 0L || numericUsd <= 0.0) return false
+
+        val solAmount = current.balanceLamports.toDouble() / 1_000_000_000.0
+        if (solAmount <= 0.0) return false
+
+        cachedSolPrice = numericUsd / solAmount
+        return true
     }
 
     fun showMnemonicBackup() {
@@ -191,6 +268,15 @@ class WalletViewModel @Inject constructor(
             _mnemonicPhrase.value = mnemonic
         } else {
             _errorMessage.value = "Recovery phrase not available"
+        }
+    }
+
+    fun showPrivateKeyExport() {
+        val privateKey = walletService.getPrivateKeyBase58()
+        if (privateKey != null) {
+            _privateKeyBase58.value = privateKey
+        } else {
+            _errorMessage.value = "Private key not available"
         }
     }
 
@@ -207,6 +293,10 @@ class WalletViewModel @Inject constructor(
         _mnemonicPhrase.value = null
     }
 
+    fun dismissPrivateKeyExport() {
+        _privateKeyBase58.value = null
+    }
+
     fun dismissError() {
         _errorMessage.value = null
     }
@@ -217,6 +307,14 @@ class WalletViewModel @Inject constructor(
 
     fun dismissRestoreDialog() {
         _showRestoreDialog.value = false
+    }
+
+    fun showImportPrivateKeyDialog() {
+        _showImportPrivateKeyDialog.value = true
+    }
+
+    fun dismissImportPrivateKeyDialog() {
+        _showImportPrivateKeyDialog.value = false
     }
 
     fun showTransactionHistory() {
@@ -268,7 +366,10 @@ class WalletViewModel @Inject constructor(
             rpcService.getSolPrice().onSuccess { price ->
                 cachedSolPrice = price
             }
-            walletService.refreshBalance()
+            val refreshed = walletService.refreshBalance()
+            refreshed.onSuccess {
+                lastRefreshViaMesh = false
+            }
             // Balance update will flow through Room observation automatically
         } catch (e: Exception) {
             Log.d(TAG, "Silent balance refresh skipped (offline): ${e.message}")
@@ -289,6 +390,8 @@ sealed class WalletUiState {
         val balanceSol: String,
         val balanceUsd: String? = null,
         val lastUpdated: Long,
-        val label: String
+        val label: String,
+        val lastRefreshViaMesh: Boolean = false,
+        val usdEstimateFromLastKnownPrice: Boolean = false
     ) : WalletUiState()
 }

@@ -154,6 +154,8 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.SOLANA_BLOCKHASH_RESPONSE -> handleSolanaBlockhashResponse(routed)
             MessageType.SOLANA_TX_CLAIM -> handleSolanaRelayClaim(routed)
             MessageType.SOLANA_TX_ACK -> handleSolanaRelayAck(routed)
+            MessageType.SOLANA_BALANCE_INTENT -> handleSolanaBalanceIntent(routed)
+            MessageType.SOLANA_BALANCE_RESPONSE -> handleSolanaBalanceResponse(routed)
             MessageType.FEED_POST -> handleFeedPost(routed)
             MessageType.FEED_REACTION -> handleFeedReaction(routed)
             MessageType.FEED_REPLY -> handleFeedReply(routed)
@@ -309,6 +311,24 @@ class PacketProcessor(private val myPeerID: String) {
     }
 
     /**
+     * Handle Solana balance intent (0x36) — offline user requesting balance via online peer
+     */
+    private suspend fun handleSolanaBalanceIntent(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_BALANCE_INTENT from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaBalanceIntent(routed)
+    }
+
+    /**
+     * Handle Solana balance response (0x37) — online peer returning relayed balance
+     */
+    private suspend fun handleSolanaBalanceResponse(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing SOLANA_BALANCE_RESPONSE from ${formatPeerForLog(peerID)}")
+        delegate?.handleSolanaBalanceResponse(routed)
+    }
+
+    /**
      * Handle feed post (0x40)
      */
     private suspend fun handleFeedPost(routed: RoutedPacket) {
@@ -414,6 +434,8 @@ interface PacketProcessorDelegate {
     fun handleSolanaBlockhashResponse(routed: RoutedPacket)
     fun handleSolanaRelayClaim(routed: RoutedPacket)
     fun handleSolanaRelayAck(routed: RoutedPacket)
+    fun handleSolanaBalanceIntent(routed: RoutedPacket)
+    fun handleSolanaBalanceResponse(routed: RoutedPacket)
     fun handleFeedPost(routed: RoutedPacket)
     fun handleFeedReaction(routed: RoutedPacket)
     fun handleFeedReply(routed: RoutedPacket)

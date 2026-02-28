@@ -10,6 +10,7 @@ import com.bitchat.android.data.local.entities.FeedReplyEntity
 import com.bitchat.android.data.local.entities.MessageNotarizationEntity
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
+import com.bitchat.android.data.local.entities.TokenGateEligibilityCacheEntity
 import com.bitchat.android.data.local.entities.WalletEntity
 
 @Database(
@@ -17,12 +18,13 @@ import com.bitchat.android.data.local.entities.WalletEntity
         WalletEntity::class,
         QueuedTransactionEntity::class,
         TokenGateConfigEntity::class,
+        TokenGateEligibilityCacheEntity::class,
         MessageNotarizationEntity::class,
         FeedPostEntity::class,
         FeedReactionEntity::class,
         FeedReplyEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -111,6 +113,34 @@ abstract class SolanaDatabase : RoomDatabase() {
                         `content` TEXT NOT NULL,
                         `timestamp` INTEGER NOT NULL,
                         `receivedAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    ALTER TABLE `token_gate_configs`
+                    ADD COLUMN `policyVersion` INTEGER NOT NULL DEFAULT 1
+                """.trimIndent())
+                db.execSQL("""
+                    ALTER TABLE `token_gate_configs`
+                    ADD COLUMN `gateHash` TEXT NOT NULL DEFAULT ''
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `token_gate_eligibility_cache` (
+                        `channelKey` TEXT NOT NULL,
+                        `walletAddress` TEXT NOT NULL,
+                        `gateHash` TEXT NOT NULL,
+                        `isEligible` INTEGER NOT NULL,
+                        `observedBalance` INTEGER NOT NULL,
+                        `validatedAt` INTEGER NOT NULL,
+                        `expiresAt` INTEGER NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `rpcSlot` INTEGER,
+                        `errorCode` TEXT,
+                        PRIMARY KEY(`channelKey`, `walletAddress`, `gateHash`)
                     )
                 """.trimIndent())
             }

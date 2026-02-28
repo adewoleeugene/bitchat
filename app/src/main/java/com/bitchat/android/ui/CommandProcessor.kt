@@ -3,9 +3,11 @@ package com.bitchat.android.ui
 import com.bitchat.android.data.local.entities.TokenGateType
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.solana.GateDecision
 import com.bitchat.android.solana.SolanaPaymentManager
 import com.bitchat.android.solana.SolanaWalletService
 import com.bitchat.android.solana.TokenGateService
+import com.bitchat.android.solana.ValidationMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,11 +35,11 @@ class CommandProcessor(
         CommandSuggestion("/channels", emptyList(), null, "list your channels"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat"),
         CommandSuggestion("/create", emptyList(), "channel", "make a new channel"),
+        CommandSuggestion("/gm", emptyList(), "name", "send a gm"),
         CommandSuggestion("/hug", emptyList(), "name", "hug someone"),
         CommandSuggestion("/j", listOf("/join"), "channel", "join a channel"),
         CommandSuggestion("/m", listOf("/msg"), "name", "private message"),
-        CommandSuggestion("/slap", emptyList(), "name", "slap someone with a trout"),
-        CommandSuggestion("/tip", emptyList(), "name amount", "send SOL"),
+        CommandSuggestion("/tip", emptyList(), null, "send SOL"),
         CommandSuggestion("/unblock", emptyList(), "name", "unblock someone"),
         CommandSuggestion("/w", emptyList(), null, "who's online"),
         CommandSuggestion("/wallet", emptyList(), null, "your wallet")
@@ -53,6 +55,7 @@ class CommandProcessor(
         return when (cmd) {
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel)
+            "/gate" -> handleGateCommand(parts, myPeerID, viewModel)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/tip" -> handleTipCommand(parts, meshService, viewModel)
             "/w" -> { handleWhoCommand(meshService, viewModel); null }
@@ -60,12 +63,175 @@ class CommandProcessor(
             "/pass" -> { handlePassCommand(parts, myPeerID); null }
             "/block" -> { handleBlockCommand(parts, meshService); null }
             "/unblock" -> { handleUnblockCommand(parts, meshService); null }
+            "/gm" -> { handleActionCommand(parts, "says", "gm ☀️", meshService, myPeerID, onSendMessage); null }
             "/hug" -> { handleActionCommand(parts, "gives", "a warm hug 🫂", meshService, myPeerID, onSendMessage); null }
-            "/slap" -> { handleActionCommand(parts, "slaps", "around a bit with a large trout 🐟", meshService, myPeerID, onSendMessage); null }
             "/channels" -> { handleChannelsCommand(); null }
             "/wallet" -> { handleWalletCommand(); null }
             else -> { handleUnknownCommand(cmd); null }
         }
+    }
+
+    private fun handleGateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?): CommandResult? {
+        if (parts.size < 2) {
+            return CommandResult(
+                prefillText = "/gate create #",
+                hintText = "usage: /gate [create|status|refresh|remove] ..."
+            )
+        }
+
+        return when (parts[1].lowercase()) {
+            "create" -> {
+                if (parts.size < 4) {
+                    return CommandResult(
+                        prefillText = "/gate create #",
+                        hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ..."
+                    )
+                }
+                val channel = parts[2]
+                val gateTypeArg = parts[3].lowercase()
+                val createArgs = mutableListOf("/create", channel, "--token-gate")
+
+                when (gateTypeArg) {
+                    "spl" -> {
+                        if (parts.size < 6) {
+                            return CommandResult(
+                                prefillText = "/gate create #",
+                                hintText = "usage: /gate create #vip spl <mint> <amount> [symbol] [decimals]"
+                            )
+                        }
+                        createArgs.addAll(parts.drop(3))
+                    }
+                    "nft-specific", "nft_specific" -> {
+                        if (parts.size < 5) {
+                            return CommandResult(
+                                prefillText = "/gate create #",
+                                hintText = "usage: /gate create #vip nft-specific <mint>"
+                            )
+                        }
+                        createArgs.addAll(listOf("nft-specific", parts[4]))
+                    }
+                    "nft-collection", "nft_collection" -> {
+                        if (parts.size < 5) {
+                            return CommandResult(
+                                prefillText = "/gate create #",
+                                hintText = "usage: /gate create #vip nft-collection <collection_mint>"
+                            )
+                        }
+                        createArgs.addAll(listOf("nft-collection", parts[4]))
+                    }
+                    else -> {
+                        return CommandResult(
+                            prefillText = "/gate create #",
+                            hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ..."
+                        )
+                    }
+                }
+                handleCreateCommand(createArgs, myPeerID, viewModel)
+            }
+            "status" -> {
+                val tgs = tokenGateService
+                if (tgs == null) {
+                    addSystemMessage("token gate service not available yet.")
+                    return null
+                }
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val (channelTag, channelKey) = target
+                commandScope.launch {
+                    val config = tgs.getTokenGate(channelKey)
+                    if (config == null) {
+                        addSystemMessage("$channelTag is not token-gated.")
+                        return@launch
+                    }
+                    val symbol = config.tokenSymbol.ifEmpty { "tokens" }
+                    val required = tgs.formatTokenAmount(config.minBalance, config.tokenDecimals)
+                    val hashShort = if (config.gateHash.length >= 12) config.gateHash.take(12) else config.gateHash
+                    addSystemMessage(
+                        "gate status for $channelTag\n" +
+                            "requirement: $required $symbol\n" +
+                            "mint: ${config.tokenMintAddress.take(8)}...\n" +
+                            "policy: v${config.policyVersion} ($hashShort...)"
+                    )
+                }
+                null
+            }
+            "refresh" -> {
+                val tgs = tokenGateService
+                if (tgs == null) {
+                    addSystemMessage("token gate service not available yet.")
+                    return null
+                }
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val (channelTag, channelKey) = target
+                commandScope.launch {
+                    val config = tgs.getTokenGate(channelKey)
+                    if (config == null) {
+                        addSystemMessage("$channelTag is not token-gated.")
+                        return@launch
+                    }
+                    val result = tgs.validateEligibility(channelKey, ValidationMode.STRICT_ONLINE)
+                    result.onSuccess { validation ->
+                        when (validation.decision) {
+                            GateDecision.ALLOW -> {
+                                addSystemMessage("gate refresh for $channelTag: eligible (${tgs.formatRequirementText(validation)}).")
+                            }
+                            GateDecision.DENY -> {
+                                addSystemMessage("gate refresh for $channelTag: not eligible (${tgs.formatRequirementText(validation)}).")
+                            }
+                            GateDecision.UNKNOWN_OFFLINE -> {
+                                addSystemMessage("gate refresh for $channelTag: offline/unverified.")
+                            }
+                        }
+                    }.onFailure { error ->
+                        addSystemMessage("gate refresh failed for $channelTag: ${error.message}")
+                    }
+                }
+                null
+            }
+            "remove" -> {
+                val tgs = tokenGateService
+                if (tgs == null) {
+                    addSystemMessage("token gate service not available yet.")
+                    return null
+                }
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val (channelTag, channelKey) = target
+                commandScope.launch {
+                    val config = tgs.getTokenGate(channelKey)
+                    if (config == null) {
+                        addSystemMessage("$channelTag is not token-gated.")
+                        return@launch
+                    }
+                    tgs.removeTokenGate(channelKey)
+                    addSystemMessage("removed token gate from $channelTag.")
+                }
+                null
+            }
+            else -> {
+                addSystemMessage("unknown /gate action '${parts[1]}'. try: /gate create|status|refresh|remove")
+                null
+            }
+        }
+    }
+
+    private fun resolveGateTarget(channelArg: String?, viewModel: ChatViewModel?): Pair<String, String>? {
+        val timeline = viewModel?.selectedLocationChannel?.value
+
+        if (!channelArg.isNullOrBlank()) {
+            if (channelArg.startsWith("mesh:") || channelArg.startsWith("geo:")) {
+                val key = ChannelKeys.normalize(channelArg)
+                return Pair(ChannelKeys.parseChannelName(key), key)
+            }
+            val channelTag = if (channelArg.startsWith("#")) channelArg else "#$channelArg"
+            return Pair(channelTag, ChannelKeys.create(timeline, channelTag))
+        }
+
+        val current = state.getCurrentChannelValue()
+        if (current.isNullOrBlank()) {
+            addSystemMessage("specify a channel, e.g. /gate status #vip (or switch into a channel first).")
+            return null
+        }
+        val key = ChannelKeys.normalize(current)
+        return Pair(ChannelKeys.parseChannelName(key), key)
     }
     
     private fun handleJoinCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?): CommandResult? {
@@ -115,22 +281,66 @@ class CommandProcessor(
                 return null
             }
 
-            // Parse: --token-gate <mint_address> <min_amount> [symbol] [decimals]
-            if (parts.size < tokenGateIndex + 3) {
-                addSystemMessage("to token-gate a channel, add the token address and amount:\n/create #vip --token-gate TokenAddress 100 USDC")
+            // Parse:
+            // SPL: --token-gate spl <mint_address> <min_amount> [symbol] [decimals]
+            // SPL (legacy): --token-gate <mint_address> <min_amount> [symbol] [decimals]
+            // NFT specific: --token-gate nft-specific <mint_address>
+            // NFT collection: --token-gate nft-collection <collection_mint>
+            if (parts.size < tokenGateIndex + 2) {
+                addSystemMessage("usage:\n/create #vip --token-gate spl <mint> <amount> [symbol] [decimals]\n/create #vip --token-gate nft-specific <mint>\n/create #vip --token-gate nft-collection <collection_mint>")
                 return null
             }
 
-            val mintAddress = parts[tokenGateIndex + 1]
-            val minAmountStr = parts[tokenGateIndex + 2]
-            val minAmount = minAmountStr.toLongOrNull()
-            if (minAmount == null || minAmount <= 0) {
-                addSystemMessage("invalid minimum amount: $minAmountStr")
+            val firstArg = parts[tokenGateIndex + 1]
+            val parsedGateType = when (firstArg.lowercase()) {
+                "spl" -> TokenGateType.SPL_TOKEN
+                "nft-specific", "nft_specific" -> TokenGateType.NFT_SPECIFIC
+                "nft-collection", "nft_collection" -> TokenGateType.NFT_COLLECTION
+                else -> TokenGateType.SPL_TOKEN // legacy format
+            }
+
+            val mintArgIndex = if (parsedGateType == TokenGateType.SPL_TOKEN && firstArg.lowercase() !in setOf("spl")) {
+                tokenGateIndex + 1
+            } else {
+                tokenGateIndex + 2
+            }
+            val mintAddress = parts.getOrNull(mintArgIndex)
+            if (mintAddress.isNullOrBlank()) {
+                addSystemMessage("missing mint/collection address for token gate.")
                 return null
             }
 
-            val symbol = if (parts.size > tokenGateIndex + 3) parts[tokenGateIndex + 3] else ""
-            val decimals = if (parts.size > tokenGateIndex + 4) parts[tokenGateIndex + 4].toIntOrNull() ?: 0 else 0
+            val minAmount: Long
+            val symbol: String
+            val decimals: Int
+            when (parsedGateType) {
+                TokenGateType.SPL_TOKEN -> {
+                    val amountIndex = mintArgIndex + 1
+                    val minAmountStr = parts.getOrNull(amountIndex)
+                    val parsedAmount = minAmountStr?.toLongOrNull()
+                    if (parsedAmount == null || parsedAmount <= 0) {
+                        addSystemMessage("invalid minimum amount: ${minAmountStr ?: "(missing)"}")
+                        return null
+                    }
+                    minAmount = parsedAmount
+                    symbol = parts.getOrNull(amountIndex + 1) ?: ""
+                    decimals = parts.getOrNull(amountIndex + 2)?.toIntOrNull() ?: 0
+                }
+                TokenGateType.NFT_SPECIFIC -> {
+                    minAmount = 1L
+                    symbol = "NFT"
+                    decimals = 0
+                }
+                TokenGateType.NFT_COLLECTION -> {
+                    minAmount = 1L
+                    symbol = "NFT"
+                    decimals = 0
+                }
+                else -> {
+                    addSystemMessage("unknown token gate type.")
+                    return null
+                }
+            }
 
             // First join/create the channel
             val success = channelManager.joinChannel(channel, null, myPeerID, timeline)
@@ -141,15 +351,23 @@ class CommandProcessor(
             commandScope.launch {
                 val result = tgs.createTokenGate(
                     channelKey = key,
-                    gateType = TokenGateType.SPL_TOKEN,
+                    gateType = parsedGateType,
                     tokenMintAddress = mintAddress,
                     minBalance = minAmount,
                     tokenSymbol = symbol,
                     tokenDecimals = decimals
                 )
                 result.onSuccess {
-                    val displaySymbol = symbol.ifEmpty { "tokens" }
-                    addSystemMessage("created token-gated channel $channel: requires $minAmount $displaySymbol (mint: ${mintAddress.take(8)}...)")
+                    val descriptor = when (parsedGateType) {
+                        TokenGateType.SPL_TOKEN -> {
+                            val displaySymbol = symbol.ifEmpty { "tokens" }
+                            "requires $minAmount $displaySymbol"
+                        }
+                        TokenGateType.NFT_SPECIFIC -> "requires holding NFT mint ${mintAddress.take(8)}..."
+                        TokenGateType.NFT_COLLECTION -> "requires holding any NFT in collection ${mintAddress.take(8)}..."
+                        else -> "token gate enabled"
+                    }
+                    addSystemMessage("created token-gated channel $channel: $descriptor")
                 }.onFailure { error ->
                     addSystemMessage("channel created but token gate setup failed: ${error.message}")
                 }
@@ -553,6 +771,10 @@ class CommandProcessor(
     }
     
     private fun getAllAvailableCommands(): List<CommandSuggestion> {
+        val gateCommands = mutableListOf(
+            CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "create a token gate")
+        )
+
         // Add channel-specific commands if in a channel
         val channelCommands = if (state.getCurrentChannelValue() != null) {
             listOf(
@@ -564,7 +786,7 @@ class CommandProcessor(
             emptyList()
         }
         
-        return baseCommands + channelCommands
+        return baseCommands + gateCommands + channelCommands
     }
     
     private fun filterCommands(commands: List<CommandSuggestion>, input: String): List<CommandSuggestion> {
@@ -583,13 +805,18 @@ class CommandProcessor(
         // Pre-fill with contextual hint based on what the command expects
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
+            "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ...")
+            "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|nft-specific|nft-collection> ...")
+            "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
+            "/gate refresh" -> CommandResult(prefillText = "/gate refresh #", hintText = "or use /gate refresh in current channel")
+            "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")
             "/j", "/join" -> CommandResult(prefillText = "/join #", hintText = "type a channel name")
             "/tip" -> CommandResult(prefillText = "/tip @", hintText = "who do you want to tip?")
             "/m", "/msg" -> CommandResult(prefillText = "/m @", hintText = "who do you want to message?")
             "/block" -> CommandResult(prefillText = "/block @", hintText = "who do you want to block?")
             "/unblock" -> CommandResult(prefillText = "/unblock @", hintText = "who do you want to unblock?")
+            "/gm" -> CommandResult(prefillText = "/gm @", hintText = "who gets your gm?")
             "/hug" -> CommandResult(prefillText = "/hug @", hintText = "who do you want to hug?")
-            "/slap" -> CommandResult(prefillText = "/slap @", hintText = "who do you want to slap?")
             else -> CommandResult(prefillText = "${suggestion.command} ")
         }
     }

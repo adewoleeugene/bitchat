@@ -5,8 +5,11 @@ import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
 import com.bitchat.android.model.IdentityAnnouncement
 import com.bitchat.android.model.RoutedPacket
+import com.bitchat.android.model.SolanaOwnershipProof
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
+import com.bitchat.android.solana.SolanaIdentityProofUtil
+import com.bitchat.android.solana.SolanaOwnershipProofUtil
 import com.bitchat.android.util.toHexString
 import kotlinx.coroutines.*
 import java.util.*
@@ -38,6 +41,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleNoiseEncrypted(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         
         Log.d(TAG, "Processing Noise encrypted message from $peerID (${packet.payload.size} bytes)")
         
@@ -260,6 +264,65 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val nickname = announcement.nickname
         val noisePublicKey = announcement.noisePublicKey
         val signingPublicKey = announcement.signingPublicKey
+        val announcedSolana = announcement.solanaAddress
+        val announcedProof = announcement.solanaLinkProofSignature
+
+        val verifiedSolanaAddress: String? = if (!announcedSolana.isNullOrBlank()) {
+            if (announcedProof != null && SolanaIdentityProofUtil.verifyLinkProof(
+                    nickname = nickname,
+                    solanaAddress = announcedSolana,
+                    signingPublicKey = signingPublicKey,
+                    signature = announcedProof
+                )
+            ) {
+                announcedSolana
+            } else {
+                Log.w(TAG, "Ignoring unverified Solana mapping for $peerID (${nickname.take(16)})")
+                null
+            }
+        } else {
+            null
+        }
+
+        val verifiedOwnershipProofs: List<SolanaOwnershipProof> =
+            if (!verifiedSolanaAddress.isNullOrBlank() && announcement.solanaOwnershipProofs.isNotEmpty()) {
+                announcement.solanaOwnershipProofs
+                    .asSequence()
+                    .take(12) // Keep ANNOUNCE bounded and resilient against proof flooding.
+                    .filter { proof ->
+                        SolanaOwnershipProofUtil.verifyProof(
+                            nickname = nickname,
+                            solanaAddress = verifiedSolanaAddress,
+                            signingPublicKey = signingPublicKey,
+                            proof = proof
+                        )
+                    }
+                    .toList()
+            } else {
+                emptyList()
+            }
+
+        if (announcement.solanaOwnershipProofs.isNotEmpty() &&
+            verifiedOwnershipProofs.size != announcement.solanaOwnershipProofs.size
+        ) {
+            Log.w(
+                TAG,
+                "Dropped ${announcement.solanaOwnershipProofs.size - verifiedOwnershipProofs.size} invalid Solana ownership proofs from $peerID"
+            )
+        }
+
+        // Validate NFT profile mint: only accept if peer has a verified Solana address
+        // and the mint looks like a valid Base58 Solana address (32-44 chars, valid charset)
+        val validatedNftProfileMint: String? = announcement.nftProfileMint?.let { mint ->
+            if (!verifiedSolanaAddress.isNullOrBlank() &&
+                mint.length in 32..44 &&
+                mint.all { it in "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" }
+            ) {
+                mint
+            } else {
+                null
+            }
+        }
 
         // Update peer info with verification status through new method
         val isFirstAnnounce = delegate?.updatePeerInfo(
@@ -268,7 +331,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
             isVerified = true,
-            solanaAddress = announcement.solanaAddress
+            solanaAddress = verifiedSolanaAddress,
+            solanaOwnershipProofs = verifiedOwnershipProofs,
+            nftProfileMint = validatedNftProfileMint
         ) ?: false
 
         // Update peer ID binding with noise public key for identity management
@@ -290,6 +355,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleNoiseHandshake(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         
         Log.d(TAG, "Processing Noise handshake from $peerID (${packet.payload.size} bytes)")
         
@@ -343,6 +409,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     suspend fun handleMessage(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
+        ensurePeerTracked(peerID)
         if (peerID == myPeerID) return
         val senderNickname = delegate?.getPeerNickname(peerID)
         if (senderNickname != null) {
@@ -570,6 +637,18 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             // Best-effort; ignore errors
         }
     }
+
+    /**
+     * Ensure a peer appears in local peer tracking even before a verified ANNOUNCE
+     * is processed. This prevents one-sided "invisible peer" states when Noise/private
+     * traffic is already flowing.
+     */
+    private fun ensurePeerTracked(peerID: String) {
+        if (peerID == "unknown" || peerID == myPeerID) return
+        if (delegate?.getPeerInfo(peerID) != null) return
+        val fallbackNickname = "peer-${peerID.take(4)}"
+        delegate?.addOrUpdatePeer(peerID, fallbackNickname)
+    }
 }
 
 /**
@@ -584,7 +663,16 @@ interface MessageHandlerDelegate {
     fun getNetworkSize(): Int
     fun getMyNickname(): String?
     fun getPeerInfo(peerID: String): PeerInfo?
-    fun updatePeerInfo(peerID: String, nickname: String, noisePublicKey: ByteArray, signingPublicKey: ByteArray, isVerified: Boolean, solanaAddress: String? = null): Boolean
+    fun updatePeerInfo(
+        peerID: String,
+        nickname: String,
+        noisePublicKey: ByteArray,
+        signingPublicKey: ByteArray,
+        isVerified: Boolean,
+        solanaAddress: String? = null,
+        solanaOwnershipProofs: List<SolanaOwnershipProof> = emptyList(),
+        nftProfileMint: String? = null
+    ): Boolean
     
     // Packet operations
     fun sendPacket(packet: BitchatPacket)

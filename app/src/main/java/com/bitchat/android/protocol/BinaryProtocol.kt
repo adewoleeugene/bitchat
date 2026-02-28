@@ -24,6 +24,8 @@ enum class MessageType(val value: UByte) {
     SOLANA_BLOCKHASH_RESPONSE(0x33u), // Fresh blockhash response (online peer → offline user)
     SOLANA_TX_CLAIM(0x34u),           // Relay ownership claim (gateway election/lock)
     SOLANA_TX_ACK(0x35u),             // Delivery acknowledgement for relay control plane
+    SOLANA_BALANCE_INTENT(0x36u),     // Balance request intent (offline user → online peer)
+    SOLANA_BALANCE_RESPONSE(0x37u),   // Balance response (online peer → offline user)
     FEED_POST(0x40u),       // Social feed post (text + optional image)
     FEED_REACTION(0x41u),   // Emoji reaction on a feed post
     FEED_REPLY(0x42u);      // Threaded reply under a feed post
