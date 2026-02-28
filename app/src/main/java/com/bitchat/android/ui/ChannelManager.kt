@@ -156,11 +156,6 @@ class ChannelManager(
         updatedChannels.add(key)
         state.setJoinedChannels(updatedChannels)
 
-        // Set as creator if new channel
-        if (!dataManager.channelCreators.containsKey(key) && !state.getPasswordProtectedChannelsValue().contains(key)) {
-            dataManager.addChannelCreator(key, myPeerID)
-        }
-
         // Add ourselves as member
         dataManager.addChannelMember(key, myPeerID)
 
@@ -174,6 +169,12 @@ class ChannelManager(
         switchToChannel(key)
         saveChannelData()
         return true
+    }
+
+    fun assignChannelCreator(channel: String, creatorPeerID: String) {
+        dataManager.addChannelCreator(channel, creatorPeerID)
+        dataManager.addChannelMember(channel, creatorPeerID)
+        saveChannelData()
     }
     
     fun leaveChannel(channel: String) {

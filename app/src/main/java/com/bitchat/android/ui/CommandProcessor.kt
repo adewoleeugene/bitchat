@@ -725,6 +725,7 @@ class CommandProcessor(
             // First join/create the channel
             val success = channelManager.joinChannel(channel, null, myPeerID, timeline)
             if (!success) return null
+            channelManager.assignChannelCreator(ChannelKeys.create(timeline, channel), myPeerID)
 
             // Now create the token gate
             val key = ChannelKeys.create(timeline, channel)
@@ -763,6 +764,7 @@ class CommandProcessor(
             // Regular channel creation (same as join)
             val success = channelManager.joinChannel(channel, null, myPeerID, timeline)
             if (success) {
+                channelManager.assignChannelCreator(ChannelKeys.create(timeline, channel), myPeerID)
                 addSystemMessage("created channel $channel")
             }
         }
