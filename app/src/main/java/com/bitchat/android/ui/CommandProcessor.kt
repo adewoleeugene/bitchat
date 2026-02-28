@@ -85,9 +85,9 @@ class CommandProcessor(
         val target = resolveGateTarget(channelArg, viewModel) ?: return null
         val (channelTag, channelKey) = target
 
-        // Bootstrap rule: if no creator is recorded yet, allow first admin action.
         if (!channelManager.hasChannelCreator(channelKey)) {
-            return target
+            addSystemMessage("permission denied: $action in $channelTag requires channel admin role, but no channel owner is configured yet.")
+            return null
         }
 
         if (!channelManager.isChannelAdmin(channelKey, myPeerID)) {
