@@ -90,9 +90,14 @@ class CommandProcessor(
                 val channel = parts[2]
                 val gateTypeArg = parts[3].lowercase()
                 val createArgs = mutableListOf("/create", channel, "--token-gate")
+                val shorthandSol = parts[3].toDoubleOrNull()
 
-                when (gateTypeArg) {
-                    "spl" -> {
+                when {
+                    // Shorthand: /gate create #vip 0.2  => SOL gate with 0.2 SOL minimum
+                    shorthandSol != null && shorthandSol > 0.0 -> {
+                        createArgs.addAll(listOf("sol", parts[3]))
+                    }
+                    gateTypeArg == "spl" -> {
                         if (parts.size < 6) {
                             return CommandResult(
                                 prefillText = "/gate create #",
@@ -101,7 +106,7 @@ class CommandProcessor(
                         }
                         createArgs.addAll(parts.drop(3))
                     }
-                    "sol" -> {
+                    gateTypeArg == "sol" -> {
                         if (parts.size < 5) {
                             return CommandResult(
                                 prefillText = "/gate create #",
@@ -110,7 +115,7 @@ class CommandProcessor(
                         }
                         createArgs.addAll(listOf("sol", parts[4]))
                     }
-                    "nft-specific", "nft_specific" -> {
+                    gateTypeArg in setOf("nft-specific", "nft_specific") -> {
                         if (parts.size < 5) {
                             return CommandResult(
                                 prefillText = "/gate create #",
@@ -119,7 +124,7 @@ class CommandProcessor(
                         }
                         createArgs.addAll(listOf("nft-specific", parts[4]))
                     }
-                    "nft-collection", "nft_collection" -> {
+                    gateTypeArg in setOf("nft-collection", "nft_collection") -> {
                         if (parts.size < 5) {
                             return CommandResult(
                                 prefillText = "/gate create #",
