@@ -57,6 +57,7 @@ class CommandProcessor(
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
             "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
+            "/leave" -> handleLeaveCommand(parts, myPeerID, meshService, viewModel)
             "/kick" -> handleKickCommand(parts, myPeerID, meshService, viewModel)
             "/transfer" -> handleTransferCommand(parts, myPeerID, meshService, viewModel)
             "/m", "/msg" -> handleMessageCommand(parts, meshService, viewModel)
@@ -126,18 +127,13 @@ class CommandProcessor(
         if (parts.size < 2) {
             return CommandResult(
                 prefillText = "/channel ",
-                hintText = "usage: /channel users|member remove|gate ...|owner transfer ..."
+                hintText = "usage: /channel users|gate show|exit ..."
             )
         }
 
         return when (parts[1].lowercase()) {
             "users" -> {
-                val target = requireChannelAdmin(
-                    channelArg = parts.getOrNull(2),
-                    myPeerID = myPeerID,
-                    viewModel = viewModel,
-                    action = "list channel users"
-                ) ?: return null
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
                 val (channelTag, channelKey) = target
                 val members = channelManager.getChannelMembers(channelKey)
                 if (members.isEmpty()) {
@@ -193,6 +189,17 @@ class CommandProcessor(
                         )
                     }
                 }
+            }
+            "exit", "leave" -> {
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
+                val (channelTag, channelKey) = target
+                if (!state.getJoinedChannelsValue().contains(channelKey)) {
+                    addSystemMessage("you are not in $channelTag.")
+                    return null
+                }
+                channelManager.leaveChannel(channelKey)
+                addSystemMessage("left channel $channelTag.")
+                null
             }
             "member" -> {
                 if (parts.size < 3 || parts[2].lowercase() != "remove") {
@@ -312,9 +319,20 @@ class CommandProcessor(
             }
             else -> CommandResult(
                 prefillText = "/channel ",
-                hintText = "usage: /channel users|member remove|gate ...|owner transfer ..."
+                hintText = "usage: /channel users|gate show|exit ..."
             )
         }
+    }
+
+    private fun handleLeaveCommand(
+        parts: List<String>,
+        myPeerID: String,
+        meshService: BluetoothMeshService,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val bridged = mutableListOf("/channel", "exit")
+        parts.getOrNull(1)?.let { bridged.add(it) }
+        return handleChannelCommand(bridged, myPeerID, meshService, viewModel)
     }
 
     private fun handleTransferCommand(
@@ -452,12 +470,7 @@ class CommandProcessor(
                     addSystemMessage("token gate service not available yet.")
                     return null
                 }
-                val target = requireChannelAdmin(
-                    channelArg = parts.getOrNull(2),
-                    myPeerID = myPeerID,
-                    viewModel = viewModel,
-                    action = "view token gate status"
-                ) ?: return null
+                val target = resolveGateTarget(parts.getOrNull(2), viewModel) ?: return null
                 val (channelTag, channelKey) = target
                 commandScope.launch {
                     val config = tgs.getTokenGate(channelKey)
@@ -1151,7 +1164,11 @@ class CommandProcessor(
 
         // Channel context: do not show global commands.
         val commands = mutableListOf(
-            CommandSuggestion("/channel", emptyList(), "<action>", "channel tools")
+            CommandSuggestion("/channel", emptyList(), "<action>", "channel tools"),
+            CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
+            CommandSuggestion("/channel exit", emptyList(), "[#channel]", "leave channel"),
+            CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel"),
+            CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings")
         )
 
         val isAdmin = channelManager.isChannelAdmin(currentChannel, myPeerID)
@@ -1162,12 +1179,10 @@ class CommandProcessor(
                 listOf(
                     CommandSuggestion("/kick", emptyList(), "[@user|#channel @user]", "remove member from channel (admin)"),
                     CommandSuggestion("/gate create", emptyList(), "#channel <type> ...", "alias: channel gate set (admin)"),
-                    CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show (admin)"),
+                    CommandSuggestion("/gate status", emptyList(), "[#channel]", "alias: channel gate show"),
                     CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
                     CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
-                    CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel (admin)"),
                     CommandSuggestion("/channel member remove", emptyList(), "[#channel] @nickname", "remove member from channel (admin)"),
-                    CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings"),
                     CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
                     CommandSuggestion("/channel gate refresh", emptyList(), "[#channel]", "re-check gate status"),
                     CommandSuggestion("/channel gate remove", emptyList(), "[#channel]", "remove token gate (admin)")
@@ -1209,7 +1224,9 @@ class CommandProcessor(
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
             "/gate refresh" -> CommandResult(prefillText = "/gate refresh #", hintText = "or use /gate refresh in current channel")
             "/gate remove" -> CommandResult(prefillText = "/gate remove #", hintText = "or use /gate remove in current channel")
-            "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | member remove | gate show|set|refresh|remove")
+            "/channel" -> CommandResult(prefillText = "/channel ", hintText = "users | gate show | exit")
+            "/leave" -> CommandResult(prefillText = "/leave", hintText = "or /leave #channel")
+            "/channel exit" -> CommandResult(prefillText = "/channel exit", hintText = "or /channel exit #channel")
             "/channel users" -> CommandResult(prefillText = "/channel users #", hintText = "or use in current channel")
             "/channel member remove" -> CommandResult(prefillText = "/channel member remove @", hintText = "or /channel member remove #channel @name")
             "/channel owner transfer" -> CommandResult(prefillText = "/channel owner transfer @", hintText = "or /channel owner transfer #channel @name")
