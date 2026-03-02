@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.Calendar
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * Location Notes Sheet - EXACT iOS UI match for bitchat
@@ -225,7 +225,7 @@ private fun LocationNotesHeader(
                     geohash,
                     count
                 ),
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 18.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -239,7 +239,7 @@ private fun LocationNotesHeader(
             ) {
                 Text(
                     text = "✕",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -254,7 +254,7 @@ private fun LocationNotesHeader(
             if (name.isNotEmpty()) {
                 Text(
                     text = name,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 12.sp,
                     color = accentGreen
                 )
@@ -265,7 +265,7 @@ private fun LocationNotesHeader(
         // Description
         Text(
             text = stringResource(R.string.location_notes_description),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -275,7 +275,7 @@ private fun LocationNotesHeader(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.location_notes_relays_unavailable),
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
@@ -306,7 +306,7 @@ private fun NoteRow(note: LocationNotesManager.Note) {
         ) {
             Text(
                 text = "@$baseName",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -315,7 +315,7 @@ private fun NoteRow(note: LocationNotesManager.Note) {
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = ts,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -327,7 +327,7 @@ private fun NoteRow(note: LocationNotesManager.Note) {
         // Second row: content
         Text(
             text = note.content,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -346,7 +346,7 @@ private fun NoRelaysRow(onRetry: () -> Unit) {
     ) {
         Text(
             text = stringResource(R.string.location_notes_no_relays_title),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
@@ -354,14 +354,14 @@ private fun NoRelaysRow(onRetry: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.location_notes_no_relays_desc),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.retry),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onRetry)
@@ -388,7 +388,7 @@ private fun LoadingRow() {
         Spacer(modifier = Modifier.width(10.dp))
         Text(
             text = stringResource(R.string.loading_location_notes),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -407,7 +407,7 @@ private fun EmptyRow() {
     ) {
         Text(
             text = stringResource(R.string.location_notes_empty_title),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
@@ -415,7 +415,7 @@ private fun EmptyRow() {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.location_notes_empty_desc),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -443,7 +443,7 @@ private fun ErrorRow(message: String, onDismiss: () -> Unit) {
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = message,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -451,7 +451,7 @@ private fun ErrorRow(message: String, onDismiss: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.dismiss),
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onDismiss)
@@ -490,7 +490,7 @@ private fun LocationNotesInputSection(
                 onValueChange = onDraftChange,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = colorScheme.primary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 ),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(colorScheme.primary),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -507,7 +507,7 @@ private fun LocationNotesInputSection(
                 Text(
                     text = stringResource(R.string.location_notes_input_placeholder),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     ),
                     color = colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.fillMaxWidth()

@@ -29,7 +29,7 @@ import com.bitchat.android.geohash.LocationChannelManager.PermissionState
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import com.bitchat.android.ui.icons.LucideIcon
 import com.bitchat.android.ui.icons.LucideIconSet
 
@@ -152,7 +152,7 @@ fun NicknameEditor(
             onValueChange = onValueChange,
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 color = colorScheme.primary,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             ),
             cursorBrush = SolidColor(colorScheme.primary),
             singleLine = true,
@@ -677,7 +677,7 @@ private fun LocationChannelsButton(
             Text(
                 text = badgeText,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 ),
                 color = badgeColor,
                 maxLines = 1

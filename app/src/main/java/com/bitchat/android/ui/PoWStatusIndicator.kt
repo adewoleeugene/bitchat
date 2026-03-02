@@ -18,7 +18,7 @@ import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import com.bitchat.android.nostr.PoWPreferenceManager
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * Shows the current Proof of Work status and settings
@@ -102,7 +102,7 @@ fun PoWStatusIndicator(
                             stringResource(R.string.pow_label_format, powDifficulty)
                         },
                         fontSize = 12.sp,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         color = if (isMining) BitchatColors.SelfMessage else {
                             colorScheme.onSurface.copy(alpha = 0.7f)
                         }
@@ -113,7 +113,7 @@ fun PoWStatusIndicator(
                         Text(
                             text = stringResource(R.string.pow_time_estimate, NostrProofOfWork.estimateMiningTime(powDifficulty)),
                             fontSize = 11.sp,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     }

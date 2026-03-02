@@ -27,7 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.window.Dialog
@@ -101,7 +101,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             text = stringResource(R.string.image_counter, (pagerState.currentPage ?: 0) + 1, imagePaths.size),
                             color = Color.White,
                             fontSize = 14.sp,
-                            fontFamily = CourierPrimeFamily
+                            fontFamily = SatoshiFamily
                         )
                     }
                 }

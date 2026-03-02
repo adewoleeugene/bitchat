@@ -62,6 +62,3 @@ object AppIcons {
     val Menu: ImageVector = LucideIconSet.Settings
     val Person: ImageVector = LucideIconSet.Users
 }
-
-@Deprecated("Use AppIcons", ReplaceWith("AppIcons"))
-typealias PixelIcons = AppIcons

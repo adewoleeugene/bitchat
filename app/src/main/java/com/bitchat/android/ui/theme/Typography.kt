@@ -18,12 +18,8 @@ val SatoshiFamily = FontFamily(
     Font(R.font.satoshi_variable, weight = FontWeight.Bold)
 )
 
-// Backward-compatible alias used across many screens.
-// Keeping the symbol avoids large refactors while ensuring Satoshi is applied globally.
-val CourierPrimeFamily = SatoshiFamily
-
 // Typography using Satoshi — sized for mobile readability.
-// Terminal/chat-specific surfaces can still opt into CourierPrimeFamily explicitly.
+// Terminal/chat-specific surfaces can still opt into SatoshiFamily explicitly.
 // Minimum 12sp for any visible text (WCAG mobile guideline)
 val Typography = Typography(
     bodyLarge = TextStyle(

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.random.Random
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * Animation state for individual characters
@@ -109,7 +109,7 @@ fun MessageWithMatrixAnimation(
         Text(
             text = contentText,
             modifier = modifier,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             softWrap = true
         )
     }
@@ -223,7 +223,7 @@ private fun AnimatedMessageDisplay(
     Text(
         text = annotatedText,
         modifier = modifier,
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         softWrap = true,
         overflow = androidx.compose.ui.text.style.TextOverflow.Visible,
         style = androidx.compose.ui.text.TextStyle(

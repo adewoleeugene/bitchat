@@ -9,7 +9,3 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 fun rememberAppIconPainter(icon: ImageVector): Painter {
     return rememberVectorPainter(image = icon)
 }
-
-@Deprecated("Use rememberAppIconPainter", ReplaceWith("rememberAppIconPainter(icon)"))
-@Composable
-fun rememberPixelPainter(icon: ImageVector): Painter = rememberAppIconPainter(icon)

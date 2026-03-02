@@ -33,7 +33,7 @@ import androidx.compose.material3.ColorScheme
 import java.text.SimpleDateFormat
 import java.util.*
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @Composable
 fun ImageMessageItem(
@@ -64,7 +64,7 @@ fun ImageMessageItem(
             var headerLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
             Text(
                 text = headerText,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 color = colorScheme.onSurface,
                 modifier = Modifier.pointerInput(message.id) {
                     detectTapGestures(onTap = { pos ->
@@ -149,7 +149,7 @@ fun ImageMessageItem(
                 }
             }
         } else {
-            Text(text = stringResource(com.bitchat.android.R.string.image_unavailable), fontFamily = CourierPrimeFamily, color = BitchatColors.TextSecondary)
+            Text(text = stringResource(com.bitchat.android.R.string.image_unavailable), fontFamily = SatoshiFamily, color = BitchatColors.TextSecondary)
         }
     }
 }

@@ -43,7 +43,7 @@ import androidx.compose.ui.res.stringResource
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 
 // VoiceNotePlayer moved to com.bitchat.android.ui.media.VoiceNotePlayer
@@ -249,7 +249,7 @@ private fun SystemMessageItem(
     ) {
         Text(
             text = annotatedText,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             modifier = Modifier.pointerInput(message.id) {
                 detectTapGestures(
                     onLongPress = {
@@ -281,7 +281,7 @@ private fun NicknameChip(
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     Text(
         text = nicknameText,
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         modifier = Modifier.pointerInput(message.id) {
             detectTapGestures(
                 onTap = { pos ->
@@ -457,7 +457,7 @@ private fun BubbleTextContent(
                     }
                 )
             },
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             softWrap = true,
             overflow = TextOverflow.Visible,
             style = androidx.compose.ui.text.TextStyle(color = colorScheme.onSurface),
@@ -523,7 +523,7 @@ private fun BubbleFileContent(
                 }
             }
         } else {
-            Text(text = stringResource(R.string.file_unavailable), fontFamily = CourierPrimeFamily, color = BitchatColors.TextSecondary)
+            Text(text = stringResource(R.string.file_unavailable), fontFamily = SatoshiFamily, color = BitchatColors.TextSecondary)
         }
     }
 }

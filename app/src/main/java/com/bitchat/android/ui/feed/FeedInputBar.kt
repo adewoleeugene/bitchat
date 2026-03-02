@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @Composable
 fun FeedInputBar(
@@ -38,7 +38,7 @@ fun FeedInputBar(
                 text = "+ New Post",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.Black,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             )
         }
     }

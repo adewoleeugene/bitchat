@@ -36,7 +36,7 @@ import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * Location Channels Sheet for selecting geohash-based location channels
@@ -134,7 +134,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.location_channels_title),
                                 style = MaterialTheme.typography.headlineSmall,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground
                             )
@@ -142,7 +142,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.location_channels_desc),
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                             )
                         }
@@ -171,7 +171,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.grant_location_permission),
                                                 fontSize = 12.sp,
-                                                fontFamily = CourierPrimeFamily
+                                                fontFamily = SatoshiFamily
                                             )
                                         }
                                     }
@@ -181,7 +181,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.location_permission_denied),
                                                 fontSize = 12.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = BitchatColors.StatusError.copy(alpha = 0.8f)
                                             )
                                             TextButton(
@@ -195,7 +195,7 @@ fun LocationChannelsSheet(
                                                 Text(
                                                     text = stringResource(R.string.open_settings),
                                                     fontSize = 12.sp,
-                                                    fontFamily = CourierPrimeFamily
+                                                    fontFamily = SatoshiFamily
                                                 )
                                             }
                                         }
@@ -204,7 +204,7 @@ fun LocationChannelsSheet(
                                         Text(
                                             text = stringResource(R.string.location_permission_granted),
                                             fontSize = 12.sp,
-                                            fontFamily = CourierPrimeFamily,
+                                            fontFamily = SatoshiFamily,
                                             color = standardGreen
                                         )
                                     }
@@ -217,7 +217,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.checking_permissions),
                                                 fontSize = 12.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                             )
                                         }
@@ -290,7 +290,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = stringResource(R.string.finding_nearby_channels),
                                     fontSize = 12.sp,
-                                    fontFamily = CourierPrimeFamily
+                                    fontFamily = SatoshiFamily
                                 )
                             }
                         }
@@ -302,7 +302,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = stringResource(R.string.bookmarked),
                                 style = MaterialTheme.typography.labelLarge,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -370,7 +370,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = stringResource(R.string.hash_symbol),
                                     fontSize = BASE_FONT_SIZE.sp,
-                                    fontFamily = CourierPrimeFamily,
+                                    fontFamily = SatoshiFamily,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                 )
 
@@ -390,7 +390,7 @@ fun LocationChannelsSheet(
                                     },
                                     textStyle = androidx.compose.ui.text.TextStyle(
                                         fontSize = BASE_FONT_SIZE.sp,
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         color = MaterialTheme.colorScheme.onSurface
                                     ),
                                     modifier = Modifier
@@ -413,7 +413,7 @@ fun LocationChannelsSheet(
                                             Text(
                                                 text = stringResource(R.string.geohash_placeholder),
                                                 fontSize = BASE_FONT_SIZE.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                             )
                                         }
@@ -472,7 +472,7 @@ fun LocationChannelsSheet(
                                         Text(
                                             text = stringResource(R.string.teleport),
                                             fontSize = BASE_FONT_SIZE.sp,
-                                            fontFamily = CourierPrimeFamily
+                                            fontFamily = SatoshiFamily
                                         )
                                         Icon(
                                             painter = rememberAppIconPainter(AppIcons.PinDrop),
@@ -492,7 +492,7 @@ fun LocationChannelsSheet(
                             Text(
                                 text = customError!!,
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = BitchatColors.StatusError,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -534,7 +534,7 @@ fun LocationChannelsSheet(
                                 Text(
                                     text = if (locationServicesEnabled) stringResource(R.string.disable_location_services) else stringResource(R.string.enable_location_services),
                                     fontSize = 12.sp,
-                                    fontFamily = CourierPrimeFamily
+                                    fontFamily = SatoshiFamily
                                 )
                             }
                         }
@@ -637,7 +637,7 @@ private fun ChannelRow(
                     Text(
                         text = baseTitle,
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = if (titleBold) FontWeight.Bold else FontWeight.Normal,
                         color = titleColor ?: MaterialTheme.colorScheme.onSurface
                     )
@@ -646,7 +646,7 @@ private fun ChannelRow(
                         Text(
                             text = count,
                             fontSize = 12.sp,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
@@ -655,7 +655,7 @@ private fun ChannelRow(
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             }

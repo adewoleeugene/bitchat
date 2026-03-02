@@ -26,7 +26,7 @@ import com.bitchat.android.model.BitchatMessage
 import androidx.compose.foundation.BorderStroke
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * User Action Sheet for selecting actions on a specific user (slap, hug, block)
@@ -119,7 +119,7 @@ fun ChatUserSheet(
                                 Text(
                                     text = targetNickname.take(1).uppercase(),
                                     fontSize = 18.sp,
-                                    fontFamily = CourierPrimeFamily,
+                                    fontFamily = SatoshiFamily,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -131,7 +131,7 @@ fun ChatUserSheet(
                         Text(
                             text = stringResource(R.string.at_nickname, targetNickname),
                             fontSize = 18.sp,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -139,7 +139,7 @@ fun ChatUserSheet(
                         Text(
                             text = if (selectedMessage != null) stringResource(R.string.choose_action_message_or_user) else stringResource(R.string.choose_action_user),
                             fontSize = 12.sp,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
                     }
@@ -170,13 +170,13 @@ fun ChatUserSheet(
                             Text(
                                 text = "SOL: $truncatedAddress",
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                             )
                             Text(
                                 text = "copy",
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = standardBlue
                             )
                         }
@@ -207,7 +207,7 @@ fun ChatUserSheet(
                         Text(
                             text = subtitle,
                             fontSize = 12.sp,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         )
@@ -352,7 +352,7 @@ fun ChatUserSheet(
                     Text(
                         text = stringResource(R.string.cancel_lower),
                         fontSize = BASE_FONT_SIZE.sp,
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     )
                 }
             }
@@ -384,7 +384,7 @@ private fun UserActionRow(
             Text(
                 text = title,
                 fontSize = BASE_FONT_SIZE.sp,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Medium,
                 color = titleColor
             )
@@ -392,7 +392,7 @@ private fun UserActionRow(
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }

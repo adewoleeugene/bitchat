@@ -541,7 +541,7 @@ private fun ChatTabBar(
         Text(
             text = contextLabel,
             style = MaterialTheme.typography.labelSmall.copy(
-                fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                fontFamily = com.bitchat.android.ui.theme.SatoshiFamily,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             ),
             color = contextColor,
@@ -577,7 +577,7 @@ private fun ChatTabBar(
                 Text(
                     text = "Chat",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                        fontFamily = com.bitchat.android.ui.theme.SatoshiFamily,
                         fontWeight = if (selectedTab == "chat") androidx.compose.ui.text.font.FontWeight.Bold
                             else androidx.compose.ui.text.font.FontWeight.Normal
                     ),
@@ -602,7 +602,7 @@ private fun ChatTabBar(
                 Text(
                     text = "Feed",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontFamily = com.bitchat.android.ui.theme.CourierPrimeFamily,
+                        fontFamily = com.bitchat.android.ui.theme.SatoshiFamily,
                         fontWeight = if (selectedTab == "feed") androidx.compose.ui.text.font.FontWeight.Bold
                             else androidx.compose.ui.text.font.FontWeight.Normal
                     ),

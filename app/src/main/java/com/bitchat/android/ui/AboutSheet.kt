@@ -29,7 +29,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import com.bitchat.android.di.SolanaEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 /**
@@ -128,7 +128,7 @@ fun AboutSheet(
                                 Text(
                                     text = stringResource(R.string.app_name),
                                     style = TextStyle(
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 32.sp
                                     ),
@@ -138,7 +138,7 @@ fun AboutSheet(
                                 Text(
                                     text = stringResource(R.string.version_prefix, versionName?:""),
                                     fontSize = 12.sp,
-                                    fontFamily = CourierPrimeFamily,
+                                    fontFamily = SatoshiFamily,
                                     color = colorScheme.onBackground.copy(alpha = 0.5f),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         baselineShift = BaselineShift(0.1f)
@@ -149,7 +149,7 @@ fun AboutSheet(
                             Text(
                                 text = stringResource(R.string.about_tagline),
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                             )
                         }
@@ -292,7 +292,7 @@ fun AboutSheet(
                                 FilterChip(
                                     selected = !powEnabled,
                                     onClick = { PoWPreferenceManager.setPowEnabled(false) },
-                                    label = { Text(stringResource(R.string.about_pow_off), fontFamily = CourierPrimeFamily) }
+                                    label = { Text(stringResource(R.string.about_pow_off), fontFamily = SatoshiFamily) }
                                 )
                                 FilterChip(
                                     selected = powEnabled,
@@ -302,7 +302,7 @@ fun AboutSheet(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(stringResource(R.string.about_pow_on), fontFamily = CourierPrimeFamily)
+                                            Text(stringResource(R.string.about_pow_on), fontFamily = SatoshiFamily)
                                             // Show current difficulty
                                             if (powEnabled) {
                                                 Surface(
@@ -318,7 +318,7 @@ fun AboutSheet(
                             Text(
                                 text = stringResource(R.string.about_pow_tip),
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = colorScheme.onSurface.copy(alpha = 0.6f)
                             )
 
@@ -331,7 +331,7 @@ fun AboutSheet(
                                     Text(
                                         text = stringResource(R.string.about_pow_difficulty, powDifficulty, NostrProofOfWork.estimateMiningTime(powDifficulty)),
                                         fontSize = 12.sp,
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                     )
 
                                     Slider(
@@ -358,7 +358,7 @@ fun AboutSheet(
                                             Text(
                                                 text = stringResource(R.string.about_pow_difficulty_attempts, powDifficulty, NostrProofOfWork.estimateWork(powDifficulty)),
                                                 fontSize = 12.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.onSurface.copy(alpha = 0.7f)
                                             )
                                             Text(
@@ -372,7 +372,7 @@ fun AboutSheet(
                                                     else -> stringResource(R.string.about_pow_desc_extreme)
                                                 },
                                                 fontSize = 12.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.onSurface.copy(alpha = 0.6f)
                                             )
                                         }
@@ -416,7 +416,7 @@ fun AboutSheet(
                                         torMode.value = com.bitchat.android.net.TorMode.OFF
                                         com.bitchat.android.net.TorPreferenceManager.set(context, torMode.value)
                                     },
-                                    label = { Text("tor off", fontFamily = CourierPrimeFamily) }
+                                    label = { Text("tor off", fontFamily = SatoshiFamily) }
                                 )
                                 FilterChip(
                                     selected = torMode.value == com.bitchat.android.net.TorMode.ON,
@@ -429,7 +429,7 @@ fun AboutSheet(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("tor on", fontFamily = CourierPrimeFamily)
+                                            Text("tor on", fontFamily = SatoshiFamily)
                                             val statusColor = when {
                                                 torStatus.running && torStatus.bootstrapPercent < 100 -> BitchatColors.SelfMessage
                                                 torStatus.running && torStatus.bootstrapPercent >= 100 -> BitchatColors.AccentGreen
@@ -528,20 +528,20 @@ fun AboutSheet(
                                             text = "Open Wallet",
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Medium,
-                                            fontFamily = CourierPrimeFamily,
+                                            fontFamily = SatoshiFamily,
                                             color = colorScheme.onSurface
                                         )
                                         Text(
                                             text = "Send & receive SOL on devnet",
                                             fontSize = 12.sp,
-                                            fontFamily = CourierPrimeFamily,
+                                            fontFamily = SatoshiFamily,
                                             color = colorScheme.onSurface.copy(alpha = 0.6f)
                                         )
                                         walletSummary.address?.let { address ->
                                             Text(
                                                 text = "Address: ${if (address.length > 12) "${address.take(6)}...${address.takeLast(4)}" else address}",
                                                 fontSize = 11.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.onSurface.copy(alpha = 0.6f)
                                             )
                                         }
@@ -549,7 +549,7 @@ fun AboutSheet(
                                             Text(
                                                 text = warning,
                                                 fontSize = 11.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.error.copy(alpha = 0.9f)
                                             )
                                         }
@@ -557,7 +557,7 @@ fun AboutSheet(
                                             Text(
                                                 text = issue,
                                                 fontSize = 11.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.error.copy(alpha = 0.9f)
                                             )
                                         }
@@ -565,7 +565,7 @@ fun AboutSheet(
                                             Text(
                                                 text = audit,
                                                 fontSize = 11.sp,
-                                                fontFamily = CourierPrimeFamily,
+                                                fontFamily = SatoshiFamily,
                                                 color = colorScheme.onSurface.copy(alpha = 0.5f)
                                             )
                                         }
@@ -602,14 +602,14 @@ fun AboutSheet(
                                     Text(
                                         text = stringResource(R.string.about_emergency_title),
                                         fontSize = 12.sp,
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         fontWeight = FontWeight.Bold,
                                         color = errorColor
                                     )
                                     Text(
                                         text = stringResource(R.string.about_emergency_tip),
                                         fontSize = 12.sp,
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         color = colorScheme.onSurface.copy(alpha = 0.8f)
                                     )
                                 }
@@ -636,14 +636,14 @@ fun AboutSheet(
                                     Text(
                                         text = stringResource(R.string.about_debug_settings),
                                         fontSize = 12.sp,
-                                        fontFamily = CourierPrimeFamily
+                                        fontFamily = SatoshiFamily
                                     )
                                 }
                             }
                             Text(
                                 text = stringResource(R.string.about_footer),
                                 fontSize = 12.sp,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             )
 
@@ -725,7 +725,7 @@ fun PasswordPromptDialog(
                         onValueChange = onPasswordChange,
                         label = { Text(stringResource(R.string.pwd_label), style = MaterialTheme.typography.bodyMedium) },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = CourierPrimeFamily
+                            fontFamily = SatoshiFamily
                         ),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = colorScheme.primary,

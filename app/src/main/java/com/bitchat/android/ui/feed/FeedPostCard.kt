@@ -27,7 +27,7 @@ import com.bitchat.android.data.local.entities.FeedPostEntity
 import com.bitchat.android.data.local.entities.FeedReactionEntity
 import com.bitchat.android.data.local.entities.FeedReplyEntity
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -69,13 +69,13 @@ fun FeedPostCard(
                 text = "@${post.authorNickname}",
                 style = MaterialTheme.typography.labelMedium,
                 color = nicknameColor,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             )
             Text(
                 text = formatRelativeTime(post.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = BitchatColors.TextTertiary,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             )
         }
 
@@ -86,7 +86,7 @@ fun FeedPostCard(
             text = post.content,
             style = MaterialTheme.typography.bodyMedium,
             color = BitchatColors.TextPrimary,
-            fontFamily = CourierPrimeFamily
+            fontFamily = SatoshiFamily
         )
 
         // Image
@@ -148,7 +148,7 @@ fun FeedPostCard(
                 text = if (isExpanded) "hide replies" else "$replyCount ${if (replyCount == 1) "reply" else "replies"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = BitchatColors.TextSecondary,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             )
         }
 
@@ -209,7 +209,7 @@ private fun ReactionBar(
                     text = "${reactionList.size}",
                     style = MaterialTheme.typography.labelSmall,
                     color = BitchatColors.TextSecondary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 )
             }
         }
@@ -219,7 +219,7 @@ private fun ReactionBar(
             text = "+",
             style = MaterialTheme.typography.labelMedium,
             color = BitchatColors.TextSecondary,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             modifier = Modifier
                 .background(BitchatColors.BackgroundElevated, RoundedCornerShape(12.dp))
                 .border(1.dp, BitchatColors.Border, RoundedCornerShape(12.dp))
@@ -254,7 +254,7 @@ private fun ReplyInput(
                 onValueChange = { text = it },
                 textStyle = MaterialTheme.typography.bodySmall.copy(
                     color = BitchatColors.TextPrimary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 ),
                 cursorBrush = SolidColor(colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -272,7 +272,7 @@ private fun ReplyInput(
                     text = "Reply...",
                     style = MaterialTheme.typography.bodySmall,
                     color = BitchatColors.TextTertiary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 )
             }
         }
@@ -281,7 +281,7 @@ private fun ReplyInput(
             text = "send",
             style = MaterialTheme.typography.labelSmall,
             color = if (text.text.isNotBlank()) BitchatColors.AccentGreen else BitchatColors.TextDisabled,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             modifier = Modifier
                 .clickable(enabled = text.text.isNotBlank()) {
                     if (text.text.isNotBlank()) {

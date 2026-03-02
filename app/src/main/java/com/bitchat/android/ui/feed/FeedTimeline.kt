@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bitchat.android.ui.ChatViewModel
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @Composable
 fun FeedTimeline(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
@@ -30,7 +30,7 @@ fun FeedTimeline(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
             Text(
                 text = "No posts yet",
                 color = BitchatColors.TextSecondary,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 style = MaterialTheme.typography.bodyMedium
             )
         }

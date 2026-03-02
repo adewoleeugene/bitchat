@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * Permission explanation screen shown before requesting permissions
@@ -63,7 +63,7 @@ fun PermissionExplanationScreen(
                     Text(
                         text = stringResource(R.string.app_name),
                         style = MaterialTheme.typography.headlineLarge.copy(
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 32.sp
                         ),
@@ -74,7 +74,7 @@ fun PermissionExplanationScreen(
                 Text(
                     text = stringResource(R.string.about_tagline),
                     fontSize = 12.sp,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = colorScheme.onBackground.copy(alpha = 0.7f)
                 )
             }
@@ -112,7 +112,7 @@ fun PermissionExplanationScreen(
                             Text(
                                 text = stringResource(R.string.privacy_bullets),
                                 style = MaterialTheme.typography.bodySmall,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = colorScheme.onBackground.copy(alpha = 0.8f)
                             )
                         }
@@ -159,7 +159,7 @@ fun PermissionExplanationScreen(
                 Text(
                     text = stringResource(R.string.grant_permissions),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     modifier = Modifier.padding(vertical = 4.dp)
@@ -219,7 +219,7 @@ private fun PermissionCategoryCard(
                     Text(
                         text = stringResource(R.string.location_tracking_warning),
                         style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontWeight = FontWeight.Medium,
                             color = BitchatColors.StatusWarning
                         )

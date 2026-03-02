@@ -23,7 +23,7 @@ import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,11 +102,11 @@ fun DebugSettingsSheet(
                             .background(BitchatColors.SelfMessage.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
                     )
                     Icon(painter = rememberAppIconPainter(AppIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
-                    Text(stringResource(R.string.debug_tools), fontFamily = CourierPrimeFamily, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.debug_tools), fontFamily = SatoshiFamily, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 }
                 Text(
                     text = stringResource(R.string.debug_tools_desc),
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 12.sp,
                     color = colorScheme.onSurface.copy(alpha = 0.7f)
                 )
@@ -118,13 +118,13 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Network), contentDescription = null, tint = BitchatColors.StatusSuccess)
-                            Text(stringResource(R.string.debug_verbose_logging), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_verbose_logging), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = verboseLogging, onCheckedChange = { manager.setVerboseLoggingEnabled(it) })
                         }
                         Text(
                             stringResource(R.string.debug_verbose_hint),
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontSize = 12.sp,
                             color = colorScheme.onSurface.copy(alpha = 0.7f)
                         )
@@ -138,10 +138,10 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
-                            Text(stringResource(R.string.debug_bluetooth_roles), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_bluetooth_roles), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.debug_gatt_server), fontFamily = CourierPrimeFamily, modifier = Modifier.weight(1f))
+                            Text(stringResource(R.string.debug_gatt_server), fontFamily = SatoshiFamily, modifier = Modifier.weight(1f))
                             Switch(checked = gattServerEnabled, onCheckedChange = {
                                 manager.setGattServerEnabled(it)
                                 scope.launch {
@@ -150,9 +150,9 @@ fun DebugSettingsSheet(
                             })
                         }
                         val serverCount = connectedDevices.count { it.connectionType == ConnectionType.GATT_SERVER }
-                        Text(stringResource(R.string.debug_connections_fmt, serverCount, maxServer), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_connections_fmt, serverCount, maxServer), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.debug_max_server), fontFamily = CourierPrimeFamily, modifier = Modifier.width(90.dp))
+                            Text(stringResource(R.string.debug_max_server), fontFamily = SatoshiFamily, modifier = Modifier.width(90.dp))
                             Slider(
                                 value = maxServer.toFloat(),
                                 onValueChange = { manager.setMaxServerConnections(it.toInt().coerceAtLeast(1)) },
@@ -161,7 +161,7 @@ fun DebugSettingsSheet(
                             )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.debug_gatt_client), fontFamily = CourierPrimeFamily, modifier = Modifier.weight(1f))
+                            Text(stringResource(R.string.debug_gatt_client), fontFamily = SatoshiFamily, modifier = Modifier.weight(1f))
                             Switch(checked = gattClientEnabled, onCheckedChange = {
                                 manager.setGattClientEnabled(it)
                                 scope.launch {
@@ -170,9 +170,9 @@ fun DebugSettingsSheet(
                             })
                         }
                         val clientCount = connectedDevices.count { it.connectionType == ConnectionType.GATT_CLIENT }
-                        Text(stringResource(R.string.debug_connections_fmt, clientCount, maxClient), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_connections_fmt, clientCount, maxClient), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.debug_max_client), fontFamily = CourierPrimeFamily, modifier = Modifier.width(90.dp))
+                            Text(stringResource(R.string.debug_max_client), fontFamily = SatoshiFamily, modifier = Modifier.width(90.dp))
                             Slider(
                                 value = maxClient.toFloat(),
                                 onValueChange = { manager.setMaxClientConnections(it.toInt().coerceAtLeast(1)) },
@@ -181,9 +181,9 @@ fun DebugSettingsSheet(
                             )
                         }
                         val overallCount = connectedDevices.size
-                        Text(stringResource(R.string.debug_overall_connections_fmt, overallCount, maxOverall), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_overall_connections_fmt, overallCount, maxOverall), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.debug_max_overall), fontFamily = CourierPrimeFamily, modifier = Modifier.width(90.dp))
+                            Text(stringResource(R.string.debug_max_overall), fontFamily = SatoshiFamily, modifier = Modifier.width(90.dp))
                             Slider(
                                 value = maxOverall.toFloat(),
                                 onValueChange = { manager.setMaxConnectionsOverall(it.toInt().coerceAtLeast(1)) },
@@ -193,7 +193,7 @@ fun DebugSettingsSheet(
                         }
                         Text(
                             stringResource(R.string.debug_roles_hint),
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontSize = 12.sp,
                             color = colorScheme.onSurface.copy(alpha = 0.7f)
                         )
@@ -207,12 +207,12 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Power), contentDescription = null, tint = BitchatColors.SelfMessage)
-                            Text(stringResource(R.string.debug_packet_relay), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_packet_relay), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = packetRelayEnabled, onCheckedChange = { manager.setPacketRelayEnabled(it) })
                         }
-                        Text(stringResource(R.string.debug_since_start_fmt, relayStats.totalRelaysCount), fontFamily = CourierPrimeFamily, fontSize = 11.sp)
-                        Text(stringResource(R.string.debug_relays_window_fmt, relayStats.last10SecondRelays, relayStats.lastMinuteRelays, relayStats.last15MinuteRelays), fontFamily = CourierPrimeFamily, fontSize = 11.sp)
+                        Text(stringResource(R.string.debug_since_start_fmt, relayStats.totalRelaysCount), fontFamily = SatoshiFamily, fontSize = 11.sp)
+                        Text(stringResource(R.string.debug_relays_window_fmt, relayStats.last10SecondRelays, relayStats.lastMinuteRelays, relayStats.last15MinuteRelays), fontFamily = SatoshiFamily, fontSize = 11.sp)
                         // Realtime graph: per-second relays, full-width canvas, bottom-up bars, fast decay
                         var series by remember { mutableStateOf(List(60) { 0f }) }
                         LaunchedEffect(isPresented) {
@@ -264,7 +264,7 @@ fun DebugSettingsSheet(
                                     // Unit label on the far left, centered vertically
                                     Text(
                                         "p/s",
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         fontSize = 12.sp,
                                         color = colorScheme.onSurface.copy(alpha = 0.7f),
                                         modifier = Modifier.align(Alignment.CenterStart).padding(start = 2.dp).rotate(-90f)
@@ -272,14 +272,14 @@ fun DebugSettingsSheet(
                                     // Tick labels right-aligned in gutter, top and bottom aligned
                                     Text(
                                         "${maxVal.toInt()}",
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         fontSize = 12.sp,
                                         color = colorScheme.onSurface.copy(alpha = 0.7f),
                                         modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 0.dp)
                                     )
                                     Text(
                                         "0",
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         fontSize = 12.sp,
                                         color = colorScheme.onSurface.copy(alpha = 0.7f),
                                         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 0.dp)
@@ -298,17 +298,17 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Network), contentDescription = null, tint = BitchatColors.NostrIndicator)
-                            Text("sync settings", fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text("sync settings", fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
-                        Text(stringResource(R.string.debug_max_packets_per_sync_fmt, seenCapacity), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_max_packets_per_sync_fmt, seenCapacity), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Slider(value = seenCapacity.toFloat(), onValueChange = { manager.setSeenPacketCapacity(it.toInt()) }, valueRange = 10f..1000f, steps = 99)
-                        Text(stringResource(R.string.debug_max_gcs_filter_size_fmt, gcsMaxBytes), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_max_gcs_filter_size_fmt, gcsMaxBytes), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Slider(value = gcsMaxBytes.toFloat(), onValueChange = { manager.setGcsMaxBytes(it.toInt()) }, valueRange = 128f..1024f, steps = 0)
-                        Text(stringResource(R.string.debug_target_fpr_fmt, gcsFpr), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_target_fpr_fmt, gcsFpr), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Slider(value = gcsFpr.toFloat(), onValueChange = { manager.setGcsFprPercent(it.toDouble()) }, valueRange = 0.1f..5.0f, steps = 49)
                         val p = remember(gcsFpr) { com.bitchat.android.sync.GCSFilter.deriveP(gcsFpr / 100.0) }
                         val nmax = remember(gcsFpr, gcsMaxBytes) { com.bitchat.android.sync.GCSFilter.estimateMaxElementsForSize(gcsMaxBytes, p) }
-                        Text(stringResource(R.string.debug_derived_p_fmt, p.toString(), nmax.toString()), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_derived_p_fmt, p.toString(), nmax.toString()), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                     }
                 }
             }
@@ -319,22 +319,22 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Devices), contentDescription = null, tint = BitchatColors.AccentGreen)
-                            Text(stringResource(R.string.debug_connected_devices), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_connected_devices), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         val localAddr = remember { meshService.connectionManager.getLocalAdapterAddress() }
-                        Text(stringResource(R.string.debug_our_device_id_fmt, localAddr ?: stringResource(R.string.unknown)), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.debug_our_device_id_fmt, localAddr ?: stringResource(R.string.unknown)), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         if (connectedDevices.isEmpty()) {
-                            Text("none", fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text("none", fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
                         } else {
                             connectedDevices.forEach { dev ->
                                 Surface(shape = BitchatShapes.Large, color = BitchatColors.SurfaceVariant.copy(alpha = 0.4f)) {
                                     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
-                                            Text((dev.peerID ?: stringResource(R.string.unknown)) + " • ${dev.deviceAddress}", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
+                                            Text((dev.peerID ?: stringResource(R.string.unknown)) + " • ${dev.deviceAddress}", fontFamily = SatoshiFamily, fontSize = 12.sp)
                                             val roleLabel = if (dev.connectionType == ConnectionType.GATT_SERVER) stringResource(R.string.debug_role_server) else stringResource(R.string.debug_role_client)
-                                            Text("${dev.nickname ?: ""} • " + stringResource(R.string.debug_rssi_fmt, dev.rssi ?: stringResource(R.string.debug_question_mark)) + " • $roleLabel" + (if (dev.isDirectConnection) stringResource(R.string.debug_direct_suffix) else ""), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                                            Text("${dev.nickname ?: ""} • " + stringResource(R.string.debug_rssi_fmt, dev.rssi ?: stringResource(R.string.debug_question_mark)) + " • $roleLabel" + (if (dev.isDirectConnection) stringResource(R.string.debug_direct_suffix) else ""), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                                         }
-                                        Text(stringResource(R.string.debug_disconnect), color = BitchatColors.Destructive, fontFamily = CourierPrimeFamily, modifier = Modifier.clickable {
+                                        Text(stringResource(R.string.debug_disconnect), color = BitchatColors.Destructive, fontFamily = SatoshiFamily, modifier = Modifier.clickable {
                                             meshService.connectionManager.disconnectAddress(dev.deviceAddress)
                                         })
                                     }
@@ -351,19 +351,19 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
-                            Text(stringResource(R.string.debug_recent_scan_results), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_recent_scan_results), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         if (scanResults.isEmpty()) {
-                            Text(stringResource(R.string.debug_none), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(stringResource(R.string.debug_none), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
                         } else {
                             scanResults.forEach { res ->
                                 Surface(shape = BitchatShapes.Large, color = BitchatColors.SurfaceVariant.copy(alpha = 0.4f)) {
                                     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
-                                            Text((res.peerID ?: stringResource(R.string.unknown)) + " • ${res.deviceAddress}", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
-                                            Text(stringResource(R.string.debug_rssi_fmt, res.rssi.toString()), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                                            Text((res.peerID ?: stringResource(R.string.unknown)) + " • ${res.deviceAddress}", fontFamily = SatoshiFamily, fontSize = 12.sp)
+                                            Text(stringResource(R.string.debug_rssi_fmt, res.rssi.toString()), fontFamily = SatoshiFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                                         }
-                                        Text(stringResource(R.string.debug_connect), color = BitchatColors.StatusSuccess, fontFamily = CourierPrimeFamily, modifier = Modifier.clickable {
+                                        Text(stringResource(R.string.debug_connect), color = BitchatColors.StatusSuccess, fontFamily = SatoshiFamily, modifier = Modifier.clickable {
                                             meshService.connectionManager.connectToAddress(res.deviceAddress)
                                         })
                                     }
@@ -380,15 +380,15 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(painter = rememberAppIconPainter(AppIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
-                            Text(stringResource(R.string.debug_debug_console), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_debug_console), fontFamily = SatoshiFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
-                            Text(stringResource(R.string.debug_clear), color = BitchatColors.Destructive, fontFamily = CourierPrimeFamily, modifier = Modifier.clickable {
+                            Text(stringResource(R.string.debug_clear), color = BitchatColors.Destructive, fontFamily = SatoshiFamily, modifier = Modifier.clickable {
                                 manager.clearDebugMessages()
                             })
                         }
                         Column(Modifier.heightIn(max = 260.dp).background(colorScheme.surface.copy(alpha = 0.5f)).padding(8.dp)) {
                             debugMessages.takeLast(100).reversed().forEach { msg ->
-                                Text("${msg.content}", fontFamily = CourierPrimeFamily, fontSize = 11.sp)
+                                Text("${msg.content}", fontFamily = SatoshiFamily, fontSize = 11.sp)
                             }
                         }
                     }

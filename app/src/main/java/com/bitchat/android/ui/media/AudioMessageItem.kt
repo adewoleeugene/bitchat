@@ -25,7 +25,7 @@ import com.bitchat.android.model.BitchatMessage
 import androidx.compose.material3.ColorScheme
 import java.text.SimpleDateFormat
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @Composable
 fun AudioMessageItem(
@@ -64,7 +64,7 @@ fun AudioMessageItem(
             var headerLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
             Text(
                 text = headerText,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 color = colorScheme.onSurface,
                 modifier = Modifier.pointerInput(message.id) {
                     detectTapGestures(onTap = { pos ->

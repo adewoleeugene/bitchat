@@ -43,7 +43,7 @@ import com.bitchat.android.ui.media.ImagePickerButton
 import com.bitchat.android.ui.media.FilePickerButton
 import com.bitchat.android.ui.icons.LucideIcon
 import com.bitchat.android.ui.icons.LucideIconSet
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import com.bitchat.android.ui.theme.BitchatShapes
 import androidx.compose.ui.draw.shadow
 
@@ -72,7 +72,7 @@ class SlashCommandVisualTransformation : VisualTransformation {
                 withStyle(
                     style = SpanStyle(
                         color = BitchatColors.AccentGreen,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Medium,
                         background = BitchatColors.BackgroundElevated
                     )
@@ -116,7 +116,7 @@ class MentionVisualTransformation : VisualTransformation {
                 withStyle(
                     style = SpanStyle(
                         color = BitchatColors.SelfMessage,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.SemiBold
                     )
                 ) {
@@ -204,7 +204,7 @@ fun MessageInput(
                 onValueChange = onValueChange,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = colorScheme.primary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 ),
                 cursorBrush = SolidColor(if (isRecording) Color.Transparent else colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -227,7 +227,7 @@ fun MessageInput(
                 Text(
                     text = stringResource(R.string.type_a_message_placeholder),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     ),
                     color = colorScheme.onSurface.copy(alpha = 0.5f), // Muted grey
                     modifier = Modifier.fillMaxWidth()
@@ -250,7 +250,7 @@ fun MessageInput(
                     val maxSs = maxSecs % 60
                     Text(
                         text = String.format("%02d:%02d / %02d:%02d", mm, ss, maxMm, maxSs),
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         color = colorScheme.primary,
                         fontSize = (BASE_FONT_SIZE - 3).sp
                     )
@@ -432,7 +432,7 @@ fun CommandSuggestionItem(
         Text(
             text = commandText,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Medium
             ),
             color = colorScheme.primary,
@@ -445,7 +445,7 @@ fun CommandSuggestionItem(
         Text(
             text = suggestion.description,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             ),
             color = colorScheme.onSurface.copy(alpha = 0.5f),
             fontSize = (BASE_FONT_SIZE - 3).sp,
@@ -495,7 +495,7 @@ fun MentionSuggestionItem(
         Text(
             text = stringResource(R.string.mention_suggestion_at, suggestion),
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.SemiBold
             ),
             color = BitchatColors.SelfMessage,
@@ -507,7 +507,7 @@ fun MentionSuggestionItem(
         Text(
             text = stringResource(R.string.mention),
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             ),
             color = colorScheme.onSurface.copy(alpha = 0.7f),
             fontSize = (BASE_FONT_SIZE - 3).sp

@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import java.net.URL
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 /**
  * LinkPreviewPill - A compact link preview component that matches the iOS design
@@ -110,7 +110,7 @@ fun LinkPreviewPill(
                 // Title - matches iOS styling
                 Text(
                     text = displayTitle,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = BASE_FONT_SIZE.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = textColor,
@@ -121,7 +121,7 @@ fun LinkPreviewPill(
                 // Host - matches iOS styling
                 Text(
                     text = displayHost,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 12.sp,
                     color = textColor.copy(alpha = 0.6f),
                     maxLines = 1,

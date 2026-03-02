@@ -40,7 +40,7 @@ import com.bitchat.android.geohash.Geohash
 import com.bitchat.android.geohash.LocationChannelManager
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 class GeohashPickerActivity : OrientationAwareActivity() {
@@ -177,7 +177,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                 text = stringResource(R.string.pan_zoom_instruction),
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
@@ -202,7 +202,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                 Text(
                                     text = if (currentGeohash.isNotEmpty()) "#${currentGeohash}" else "select location",
                                     fontSize = BASE_FONT_SIZE.sp,
-                                    fontFamily = CourierPrimeFamily,
+                                    fontFamily = SatoshiFamily,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier
@@ -268,7 +268,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                         Text(
                                             text = stringResource(R.string.select),
                                             fontSize = (BASE_FONT_SIZE - 2).sp,
-                                            fontFamily = CourierPrimeFamily
+                                            fontFamily = SatoshiFamily
                                         )
                                     }
                                 }

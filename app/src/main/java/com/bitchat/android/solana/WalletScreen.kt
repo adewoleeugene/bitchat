@@ -46,7 +46,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,7 +103,7 @@ fun WalletScreen(
                 title = {
                     Text(
                         "Solana Wallet",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -136,7 +136,7 @@ fun WalletScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "Loading wallet...",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         color = BitchatColors.TextSecondary
                     )
                 }
@@ -194,20 +194,20 @@ fun WalletScreen(
             title = {
                 Text(
                     "Error",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Text(
                     errorMessage!!,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = BitchatColors.TextSecondary
                 )
             },
             confirmButton = {
                 TextButton(onClick = { viewModel.dismissError() }) {
-                    Text("OK", fontFamily = CourierPrimeFamily)
+                    Text("OK", fontFamily = SatoshiFamily)
                 }
             }
         )
@@ -345,25 +345,25 @@ private fun ExportAuthMethodDialog(
         title = {
             Text(
                 "Authenticate Export",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
             Text(
                 "Choose how to unlock private key export.",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 color = BitchatColors.TextSecondary
             )
         },
         confirmButton = {
             TextButton(onClick = onUseDeviceAuth) {
-                Text("Device Security", fontFamily = CourierPrimeFamily)
+                Text("Device Security", fontFamily = SatoshiFamily)
             }
         },
         dismissButton = {
             TextButton(onClick = onUsePasscode) {
-                Text("App Passcode", fontFamily = CourierPrimeFamily)
+                Text("App Passcode", fontFamily = SatoshiFamily)
             }
         }
     )
@@ -382,7 +382,7 @@ private fun SetExportPasscodeDialog(
         title = {
             Text(
                 "Set App Passcode",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Bold
             )
         },
@@ -390,13 +390,13 @@ private fun SetExportPasscodeDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "Create a passcode for private key export fallback.",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = BitchatColors.TextSecondary
                 )
                 OutlinedTextField(
                     value = passcode,
                     onValueChange = { passcode = it },
-                    label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                    label = { Text("Passcode", fontFamily = SatoshiFamily) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     visualTransformation = PasswordVisualTransformation()
@@ -404,7 +404,7 @@ private fun SetExportPasscodeDialog(
                 OutlinedTextField(
                     value = confirmPasscode,
                     onValueChange = { confirmPasscode = it },
-                    label = { Text("Confirm Passcode", fontFamily = CourierPrimeFamily) },
+                    label = { Text("Confirm Passcode", fontFamily = SatoshiFamily) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     visualTransformation = PasswordVisualTransformation()
@@ -420,12 +420,12 @@ private fun SetExportPasscodeDialog(
                 },
                 enabled = passcode.isNotBlank() && confirmPasscode.isNotBlank() && passcode == confirmPasscode
             ) {
-                Text("Save", fontFamily = CourierPrimeFamily)
+                Text("Save", fontFamily = SatoshiFamily)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", fontFamily = CourierPrimeFamily)
+                Text("Cancel", fontFamily = SatoshiFamily)
             }
         }
     )
@@ -442,7 +442,7 @@ private fun VerifyExportPasscodeDialog(
         title = {
             Text(
                 "Enter App Passcode",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Bold
             )
         },
@@ -450,7 +450,7 @@ private fun VerifyExportPasscodeDialog(
             OutlinedTextField(
                 value = passcode,
                 onValueChange = { passcode = it },
-                label = { Text("Passcode", fontFamily = CourierPrimeFamily) },
+                label = { Text("Passcode", fontFamily = SatoshiFamily) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 visualTransformation = PasswordVisualTransformation()
@@ -458,12 +458,12 @@ private fun VerifyExportPasscodeDialog(
         },
         confirmButton = {
             TextButton(onClick = { onVerify(passcode) }, enabled = passcode.isNotBlank()) {
-                Text("Unlock", fontFamily = CourierPrimeFamily)
+                Text("Unlock", fontFamily = SatoshiFamily)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", fontFamily = CourierPrimeFamily)
+                Text("Cancel", fontFamily = SatoshiFamily)
             }
         }
     )
@@ -489,7 +489,7 @@ private fun NoWalletContent(
 
     Text(
         text = "Solana Wallet",
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         color = BitchatColors.TextPrimary
@@ -499,7 +499,7 @@ private fun NoWalletContent(
 
     Text(
         text = "Create a wallet to send and receive SOL over the mesh network.",
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
         color = BitchatColors.TextSecondary,
@@ -510,7 +510,7 @@ private fun NoWalletContent(
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = initializationIssue,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             color = BitchatColors.StatusError,
@@ -529,7 +529,7 @@ private fun NoWalletContent(
         ),
         shape = BitchatShapes.Button
     ) {
-        Text("Create New Wallet", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+        Text("Create New Wallet", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
     }
 
     Spacer(modifier = Modifier.height(12.dp))
@@ -543,7 +543,7 @@ private fun NoWalletContent(
         ),
         shape = BitchatShapes.Button
     ) {
-        Text("Restore from Recovery Phrase", fontFamily = CourierPrimeFamily)
+        Text("Restore from Recovery Phrase", fontFamily = SatoshiFamily)
     }
 
     Spacer(modifier = Modifier.height(12.dp))
@@ -557,7 +557,7 @@ private fun NoWalletContent(
         ),
         shape = BitchatShapes.Button
     ) {
-        Text("Import Private Key", fontFamily = CourierPrimeFamily)
+        Text("Import Private Key", fontFamily = SatoshiFamily)
     }
 }
 
@@ -601,7 +601,7 @@ private fun WalletReadyContent(
         ) {
             Text(
                 text = state.balanceUsd ?: "$0",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 36.sp,
                 fontWeight = FontWeight.Bold,
                 color = BitchatColors.TextPrimary
@@ -609,7 +609,7 @@ private fun WalletReadyContent(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "~ ${state.balanceSol}sol",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 14.sp,
                 color = BitchatColors.TextSecondary
             )
@@ -619,7 +619,7 @@ private fun WalletReadyContent(
                     lastUpdated = state.lastUpdated,
                     viaMesh = state.lastRefreshViaMesh
                 ),
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 12.sp,
                 color = BitchatColors.TextSecondary
             )
@@ -627,42 +627,42 @@ private fun WalletReadyContent(
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "USD estimate (last known price)",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 11.sp,
                     color = BitchatColors.TextTertiary
                 )
             }
             Text(
                 text = "Creating or importing a wallet sets a new active wallet",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 10.sp,
                 color = BitchatColors.TextTertiary
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = state.sourceLabel ?: state.label,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 11.sp,
                 color = BitchatColors.TextSecondary
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Public Address",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 11.sp,
                 color = BitchatColors.TextTertiary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = state.shortAddress,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
                 color = BitchatColors.TextPrimary
             )
             Text(
                 text = state.address,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 10.sp,
                 color = BitchatColors.TextSecondary,
                 maxLines = 1,
@@ -683,13 +683,13 @@ private fun WalletReadyContent(
             ) {
                 Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Copy Address", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
+                Text("Copy Address", fontFamily = SatoshiFamily, fontSize = 12.sp)
             }
             if (!state.lifecycleWarning.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = state.lifecycleWarning,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 10.sp,
                     color = BitchatColors.StatusError,
                     textAlign = TextAlign.Center
@@ -699,7 +699,7 @@ private fun WalletReadyContent(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = state.exportAuditSummary,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 10.sp,
                     color = BitchatColors.TextTertiary,
                     textAlign = TextAlign.Center
@@ -726,7 +726,7 @@ private fun WalletReadyContent(
                 contentColor = BitchatColors.TextPrimary
             )
         ) {
-            Text("Receive", fontFamily = CourierPrimeFamily)
+            Text("Receive", fontFamily = SatoshiFamily)
         }
 
         OutlinedButton(
@@ -738,7 +738,7 @@ private fun WalletReadyContent(
                 contentColor = BitchatColors.TextPrimary
             )
         ) {
-            Text("Send", fontFamily = CourierPrimeFamily)
+            Text("Send", fontFamily = SatoshiFamily)
         }
     }
 
@@ -768,7 +768,7 @@ private fun WalletReadyContent(
         }
         Text(
             if (isRefreshing) "Refreshing..." else "Refresh Balance",
-            fontFamily = CourierPrimeFamily
+            fontFamily = SatoshiFamily
         )
     }
 
@@ -900,14 +900,14 @@ private fun WalletReadyContent(
             title = {
                 Text(
                     "Delete Wallet?",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Text(
                     "This will permanently delete your wallet. Make sure you have backed up your recovery phrase. This action cannot be undone.",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = BitchatColors.TextSecondary
                 )
             },
@@ -921,12 +921,12 @@ private fun WalletReadyContent(
                         contentColor = BitchatColors.Destructive
                     )
                 ) {
-                    Text("Delete", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                    Text("Delete", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", fontFamily = CourierPrimeFamily)
+                    Text("Cancel", fontFamily = SatoshiFamily)
                 }
             }
         )
@@ -938,14 +938,14 @@ private fun WalletReadyContent(
             title = {
                 Text(
                     "Replace Wallet?",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Text(
                     "This creates a new mnemonic wallet and makes it active. Your other wallets stay saved and can be switched later.",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     color = BitchatColors.TextSecondary
                 )
             },
@@ -956,12 +956,12 @@ private fun WalletReadyContent(
                         onCreateMnemonicWallet()
                     }
                 ) {
-                    Text("Create", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                    Text("Create", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateMnemonicConfirm = false }) {
-                    Text("Cancel", fontFamily = CourierPrimeFamily)
+                    Text("Cancel", fontFamily = SatoshiFamily)
                 }
             }
         )
@@ -973,7 +973,7 @@ private fun WalletReadyContent(
             title = {
                 Text(
                     "Switch Wallet",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -998,7 +998,7 @@ private fun WalletReadyContent(
                             }
                             Text(
                                 text = if (wallet.publicKey == state.address) "$short (Active)" else short,
-                                fontFamily = CourierPrimeFamily
+                                fontFamily = SatoshiFamily
                             )
                         }
                     }
@@ -1006,7 +1006,7 @@ private fun WalletReadyContent(
             },
             confirmButton = {
                 TextButton(onClick = { showSwitchWalletDialog = false }) {
-                    Text("Close", fontFamily = CourierPrimeFamily)
+                    Text("Close", fontFamily = SatoshiFamily)
                 }
             }
         )
@@ -1030,7 +1030,7 @@ private fun WalletMenuItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 color = BitchatColors.TextPrimary
@@ -1038,7 +1038,7 @@ private fun WalletMenuItem(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 12.sp,
                 color = BitchatColors.TextSecondary
             )
@@ -1070,7 +1070,7 @@ private fun QrCodeCard(address: String) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = address,
-            fontFamily = CourierPrimeFamily,
+            fontFamily = SatoshiFamily,
             fontSize = 11.sp,
             color = BitchatColors.TextSecondary,
             textAlign = TextAlign.Center
@@ -1090,7 +1090,7 @@ private fun QrCodeCard(address: String) {
         ) {
             Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Copy Address", fontFamily = CourierPrimeFamily)
+            Text("Copy Address", fontFamily = SatoshiFamily)
         }
     }
 }
@@ -1115,7 +1115,7 @@ private fun PrivateKeyExportDialog(
             ) {
                 Text(
                     text = "Export Private Key",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = BitchatColors.TextPrimary
@@ -1125,7 +1125,7 @@ private fun PrivateKeyExportDialog(
 
                 Text(
                     text = "Anyone with this key can spend your funds. Keep it offline and private.",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = BitchatColors.StatusError
@@ -1136,7 +1136,7 @@ private fun PrivateKeyExportDialog(
                 if (revealed) {
                     Text(
                         text = privateKeyBase58,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         style = MaterialTheme.typography.bodySmall,
                         color = BitchatColors.TextPrimary,
                         modifier = Modifier
@@ -1162,7 +1162,7 @@ private fun PrivateKeyExportDialog(
                     ) {
                         Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Private Key", fontFamily = CourierPrimeFamily)
+                        Text("Copy Private Key", fontFamily = SatoshiFamily)
                     }
                 } else {
                     Button(
@@ -1176,7 +1176,7 @@ private fun PrivateKeyExportDialog(
                     ) {
                         Icon(painter = rememberAppIconPainter(AppIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reveal Private Key", fontFamily = CourierPrimeFamily)
+                        Text("Reveal Private Key", fontFamily = SatoshiFamily)
                     }
                 }
 
@@ -1191,7 +1191,7 @@ private fun PrivateKeyExportDialog(
                     ),
                     shape = BitchatShapes.Button
                 ) {
-                    Text("Close", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                    Text("Close", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -1220,7 +1220,7 @@ private fun MnemonicBackupDialog(
             ) {
                 Text(
                     text = "Backup Recovery Phrase",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = BitchatColors.TextPrimary
@@ -1230,7 +1230,7 @@ private fun MnemonicBackupDialog(
 
                 Text(
                     text = "Write down these 24 words in order. This is the ONLY way to recover your wallet.",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = BitchatColors.StatusError
@@ -1258,7 +1258,7 @@ private fun MnemonicBackupDialog(
                                     val index = rowIndex * 3 + colIndex + 1
                                     Text(
                                         text = "$index. $word",
-                                        fontFamily = CourierPrimeFamily,
+                                        fontFamily = SatoshiFamily,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = BitchatColors.TextPrimary,
                                         modifier = Modifier.weight(1f)
@@ -1291,7 +1291,7 @@ private fun MnemonicBackupDialog(
                     ) {
                         Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy to Clipboard", fontFamily = CourierPrimeFamily)
+                        Text("Copy to Clipboard", fontFamily = SatoshiFamily)
                     }
                 } else {
                     Button(
@@ -1305,7 +1305,7 @@ private fun MnemonicBackupDialog(
                     ) {
                         Icon(painter = rememberAppIconPainter(AppIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reveal Recovery Phrase", fontFamily = CourierPrimeFamily)
+                        Text("Reveal Recovery Phrase", fontFamily = SatoshiFamily)
                     }
                 }
 
@@ -1322,7 +1322,7 @@ private fun MnemonicBackupDialog(
                 ) {
                     Text(
                         "I've Saved My Recovery Phrase",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1343,7 +1343,7 @@ private fun RestoreWalletDialog(
         title = {
             Text(
                 "Restore Wallet",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Bold
             )
         },
@@ -1351,7 +1351,7 @@ private fun RestoreWalletDialog(
             Column {
                 Text(
                     text = "Enter your 24-word recovery phrase:",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     style = MaterialTheme.typography.bodyMedium,
                     color = BitchatColors.TextSecondary
                 )
@@ -1365,12 +1365,12 @@ private fun RestoreWalletDialog(
                     placeholder = {
                         Text(
                             "word1 word2 word3 ...",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = BitchatColors.TextDisabled
                         )
                     },
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     )
                 )
             }
@@ -1380,12 +1380,12 @@ private fun RestoreWalletDialog(
                 onClick = { onRestore(phrase) },
                 enabled = phrase.trim().split("\\s+".toRegex()).size >= 12
             ) {
-                Text("Restore", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                Text("Restore", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", fontFamily = CourierPrimeFamily)
+                Text("Cancel", fontFamily = SatoshiFamily)
             }
         }
     )
@@ -1403,7 +1403,7 @@ private fun ImportPrivateKeyDialog(
         title = {
             Text(
                 "Import Private Key",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontWeight = FontWeight.Bold
             )
         },
@@ -1411,7 +1411,7 @@ private fun ImportPrivateKeyDialog(
             Column {
                 Text(
                     text = "Paste raw Base58 private key (32-byte Ed25519 key):",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     style = MaterialTheme.typography.bodyMedium,
                     color = BitchatColors.TextSecondary
                 )
@@ -1425,12 +1425,12 @@ private fun ImportPrivateKeyDialog(
                     placeholder = {
                         Text(
                             "Base58 private key",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = BitchatColors.TextDisabled
                         )
                     },
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     )
                 )
             }
@@ -1440,12 +1440,12 @@ private fun ImportPrivateKeyDialog(
                 onClick = { onImport(privateKey) },
                 enabled = privateKey.length >= 32
             ) {
-                Text("Import", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                Text("Import", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", fontFamily = CourierPrimeFamily)
+                Text("Cancel", fontFamily = SatoshiFamily)
             }
         }
     )
@@ -1499,7 +1499,7 @@ private fun TransactionHistoryScreen(
                 title = {
                     Text(
                         "Transactions",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -1527,14 +1527,14 @@ private fun TransactionHistoryScreen(
             ) {
                 Text(
                     text = "No transactions yet",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 16.sp,
                     color = BitchatColors.TextSecondary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Transactions you send will appear here",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 13.sp,
                     color = BitchatColors.TextTertiary
                 )
@@ -1608,14 +1608,14 @@ private fun TransactionRow(
             ) {
                 Text(
                     text = "-${"%.4f".format(solAmount)} SOL",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = BitchatColors.TextPrimary
                 )
                 Text(
                     text = statusLabel,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = statusColor
@@ -1627,7 +1627,7 @@ private fun TransactionRow(
             // Recipient
             Text(
                 text = "To: $shortRecipient",
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 13.sp,
                 color = BitchatColors.TextSecondary
             )
@@ -1637,7 +1637,7 @@ private fun TransactionRow(
             // Date
             Text(
                 text = dateFormat.format(Date(tx.createdAt)),
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 fontSize = 11.sp,
                 color = BitchatColors.TextTertiary
             )
@@ -1653,7 +1653,7 @@ private fun TransactionRow(
                 ) {
                     Text(
                         text = "Sig: ${tx.txSignature!!.take(16)}...",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontSize = 11.sp,
                         color = BitchatColors.SolanaAccent,
                         maxLines = 1,
@@ -1675,7 +1675,7 @@ private fun TransactionRow(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = tx.errorMessage!!,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 11.sp,
                     color = BitchatColors.StatusError,
                     maxLines = 2,
@@ -1713,7 +1713,7 @@ private fun SendScreen(
                     title = {
                         Text(
                             "Amount",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontWeight = FontWeight.Bold
                         )
                     },
@@ -1749,7 +1749,7 @@ private fun SendScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             text = "To",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontSize = 12.sp,
                             color = BitchatColors.TextTertiary
                         )
@@ -1757,7 +1757,7 @@ private fun SendScreen(
                         if (selectedNickname != null) {
                             Text(
                                 text = "@${selectedNickname}",
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = BitchatColors.SelfMessage
@@ -1765,7 +1765,7 @@ private fun SendScreen(
                         }
                         Text(
                             text = selectedAddress,
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontSize = 12.sp,
                             color = BitchatColors.TextSecondary
                         )
@@ -1777,7 +1777,7 @@ private fun SendScreen(
                 // Amount input
                 Text(
                     text = "Amount (SOL)",
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = BitchatColors.TextSecondary
@@ -1796,12 +1796,12 @@ private fun SendScreen(
                     placeholder = {
                         Text(
                             "0.0",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             color = BitchatColors.TextDisabled
                         )
                     },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontSize = 20.sp
                     ),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1842,9 +1842,9 @@ private fun SendScreen(
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Sending...", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                        Text("Sending...", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                     } else {
-                        Text("Send SOL", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                        Text("Send SOL", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -1859,7 +1859,7 @@ private fun SendScreen(
                 title = {
                     Text(
                         "Send",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -1895,7 +1895,7 @@ private fun SendScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "Send",
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = BitchatColors.TextPrimary
@@ -1911,13 +1911,13 @@ private fun SendScreen(
                         placeholder = {
                             Text(
                                 "Solana address",
-                                fontFamily = CourierPrimeFamily,
+                                fontFamily = SatoshiFamily,
                                 color = BitchatColors.TextDisabled,
                                 fontSize = 13.sp
                             )
                         },
                         textStyle = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = CourierPrimeFamily
+                            fontFamily = SatoshiFamily
                         ),
                         singleLine = true,
                         trailingIcon = {
@@ -1964,7 +1964,7 @@ private fun SendScreen(
                             ),
                             shape = BitchatShapes.Button
                         ) {
-                            Text("Continue", fontFamily = CourierPrimeFamily, fontWeight = FontWeight.Medium)
+                            Text("Continue", fontFamily = SatoshiFamily, fontWeight = FontWeight.Medium)
                         }
                     }
 
@@ -1986,7 +1986,7 @@ private fun SendScreen(
                             ) {
                                 Text(
                                     text = "@$nickname",
-                                    fontFamily = CourierPrimeFamily,
+                                    fontFamily = SatoshiFamily,
                                     fontSize = 14.sp,
                                     color = BitchatColors.TextPrimary
                                 )
@@ -1996,7 +1996,7 @@ private fun SendScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = "No peers with Solana addresses found.\nEnter an address above or connect to peers.",
-                            fontFamily = CourierPrimeFamily,
+                            fontFamily = SatoshiFamily,
                             fontSize = 12.sp,
                             color = BitchatColors.TextTertiary,
                             textAlign = TextAlign.Center,

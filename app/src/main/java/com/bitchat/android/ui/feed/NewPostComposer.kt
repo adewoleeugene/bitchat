@@ -25,7 +25,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.bitchat.android.features.media.ImageUtils
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,7 +68,7 @@ fun NewPostComposer(
                 text = "New Post",
                 style = MaterialTheme.typography.titleMedium,
                 color = BitchatColors.TextPrimary,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
@@ -86,7 +86,7 @@ fun NewPostComposer(
                     onValueChange = { if (it.text.length <= 500) text = it },
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
                         color = BitchatColors.TextPrimary,
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     ),
                     cursorBrush = SolidColor(colorScheme.primary),
                     modifier = Modifier.fillMaxWidth()
@@ -96,7 +96,7 @@ fun NewPostComposer(
                         text = "What's on your mind?",
                         style = MaterialTheme.typography.bodyMedium,
                         color = BitchatColors.TextTertiary,
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     )
                 }
             }
@@ -106,7 +106,7 @@ fun NewPostComposer(
                 text = "${text.text.length}/500",
                 style = MaterialTheme.typography.labelSmall,
                 color = BitchatColors.TextTertiary,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 modifier = Modifier
                     .align(Alignment.End)
                     .padding(top = 4.dp)
@@ -135,7 +135,7 @@ fun NewPostComposer(
                     Text(
                         text = "x",
                         color = Color.White,
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(4.dp)
@@ -159,7 +159,7 @@ fun NewPostComposer(
                     text = "[attach image]",
                     style = MaterialTheme.typography.labelSmall,
                     color = BitchatColors.MeshChannel,
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     modifier = Modifier
                         .clickable { imagePicker.launch("image/*") }
                         .padding(8.dp)
@@ -186,7 +186,7 @@ fun NewPostComposer(
                         text = "Post",
                         style = MaterialTheme.typography.labelMedium,
                         color = if (canPost) Color.Black else BitchatColors.TextDisabled,
-                        fontFamily = CourierPrimeFamily
+                        fontFamily = SatoshiFamily
                     )
                 }
             }

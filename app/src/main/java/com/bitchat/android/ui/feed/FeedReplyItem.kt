@@ -10,7 +10,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.bitchat.android.data.local.entities.FeedReplyEntity
 import com.bitchat.android.ui.theme.BitchatColors
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 @Composable
 fun FeedReplyItem(
@@ -38,20 +38,20 @@ fun FeedReplyItem(
                     text = "@${reply.authorNickname}",
                     style = MaterialTheme.typography.labelSmall,
                     color = BitchatColors.MeshChannel,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 )
                 Text(
                     text = formatRelativeTime(reply.timestamp),
                     style = MaterialTheme.typography.labelSmall,
                     color = BitchatColors.TextTertiary,
-                    fontFamily = CourierPrimeFamily
+                    fontFamily = SatoshiFamily
                 )
             }
             Text(
                 text = reply.content,
                 style = MaterialTheme.typography.bodySmall,
                 color = BitchatColors.TextPrimary,
-                fontFamily = CourierPrimeFamily,
+                fontFamily = SatoshiFamily,
                 modifier = Modifier.padding(top = 2.dp)
             )
         }

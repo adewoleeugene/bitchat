@@ -24,7 +24,7 @@ import com.bitchat.android.ui.icons.LucideIconSet
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.CourierPrimeFamily
+import com.bitchat.android.ui.theme.SatoshiFamily
 
 
 /**
@@ -163,7 +163,7 @@ private fun SidebarHeader() {
             text = stringResource(id = R.string.your_network).uppercase(),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Bold,
-                fontFamily = CourierPrimeFamily
+                fontFamily = SatoshiFamily
             ),
             color = colorScheme.onSurface
         )
@@ -680,7 +680,7 @@ private fun PeerItem(
             Text(
                 text = baseName,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = CourierPrimeFamily,
+                    fontFamily = SatoshiFamily,
                     fontSize = BASE_FONT_SIZE.sp,
                     fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal
                 ),
@@ -694,7 +694,7 @@ private fun PeerItem(
                 Text(
                     text = suffix,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = CourierPrimeFamily,
+                        fontFamily = SatoshiFamily,
                         fontSize = BASE_FONT_SIZE.sp
                     ),
                     color = baseColor.copy(alpha = 0.6f)
