@@ -11,17 +11,16 @@ import com.bitchat.android.R
 // Base font size for consistent scaling across the app
 internal const val BASE_FONT_SIZE = com.bitchat.android.util.AppConstants.UI.BASE_FONT_SIZE_SP
 
-// Courier Prime — bundled terminal font per design system
-val CourierPrimeFamily = FontFamily(
-    Font(R.font.courier_prime_regular)
-)
-
 // Satoshi — primary UI typeface (headings, labels, UI chrome)
 val SatoshiFamily = FontFamily(
     Font(R.font.satoshi_variable, weight = FontWeight.Normal),
     Font(R.font.satoshi_variable, weight = FontWeight.Medium),
     Font(R.font.satoshi_variable, weight = FontWeight.Bold)
 )
+
+// Backward-compatible alias used across many screens.
+// Keeping the symbol avoids large refactors while ensuring Satoshi is applied globally.
+val CourierPrimeFamily = SatoshiFamily
 
 // Typography using Satoshi — sized for mobile readability.
 // Terminal/chat-specific surfaces can still opt into CourierPrimeFamily explicitly.
