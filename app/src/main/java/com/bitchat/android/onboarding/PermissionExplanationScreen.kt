@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import com.bitchat.android.ui.theme.BitchatColors
@@ -229,7 +230,7 @@ private fun PermissionCategoryCard(
     }
 }
 
-private fun getPermissionIcon(permissionType: PermissionType): Array<IntArray> {
+private fun getPermissionIcon(permissionType: PermissionType): ImageVector {
     return when (permissionType) {
         PermissionType.NEARBY_DEVICES -> PixelIcons.Bluetooth
         PermissionType.PRECISE_LOCATION -> PixelIcons.LocationPin
