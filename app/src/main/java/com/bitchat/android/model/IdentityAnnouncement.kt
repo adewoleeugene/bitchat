@@ -162,7 +162,9 @@ data class IdentityAnnouncement(
                         solanaLinkProofSignature = value
                     }
                     TLVType.SOLANA_OWNERSHIP_PROOF -> {
-                        SolanaOwnershipProof.decode(value)?.let { solanaOwnershipProofs.add(it) }
+                        if (solanaOwnershipProofs.size < MAX_OWNERSHIP_PROOFS) {
+                            SolanaOwnershipProof.decode(value)?.let { solanaOwnershipProofs.add(it) }
+                        }
                     }
                     TLVType.NFT_PROFILE_MINT -> {
                         nftProfileMint = String(value, Charsets.UTF_8)

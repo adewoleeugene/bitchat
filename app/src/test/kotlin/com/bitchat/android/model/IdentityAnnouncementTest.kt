@@ -40,6 +40,45 @@ class IdentityAnnouncementTest {
     }
 
     @Test
+    fun decode_capsOwnershipProofsAtTwelve() {
+        val nickname = "decode-cap"
+        val nicknameBytes = nickname.toByteArray(Charsets.UTF_8)
+        val noiseKey = ByteArray(32) { 0x33 }
+        val signingKey = ByteArray(32) { 0x44 }
+
+        val proofs = (0 until 15).map { idx ->
+            SolanaOwnershipProof(
+                claimType = SolanaOwnershipProof.ClaimType.SPL_TOKEN,
+                targetAddress = "Mint$idx",
+                minRequired = 1L,
+                observedBalance = 10L + idx,
+                validatedAtMs = 1_735_000_000_000L,
+                expiresAtMs = 1_735_000_060_000L,
+                signature = ByteArray(64) { idx.toByte() }
+            )
+        }
+
+        val data = mutableListOf<Byte>()
+        data.add(0x01); data.add(nicknameBytes.size.toByte()); data.addAll(nicknameBytes.toList())
+        data.add(0x02); data.add(noiseKey.size.toByte()); data.addAll(noiseKey.toList())
+        data.add(0x03); data.add(signingKey.size.toByte()); data.addAll(signingKey.toList())
+
+        proofs.forEach { proof ->
+            val encoded = proof.encode()
+            assertNotNull(encoded)
+            data.add(0x07)
+            data.add(encoded!!.size.toByte())
+            data.addAll(encoded.toList())
+        }
+
+        val decoded = IdentityAnnouncement.decode(data.toByteArray())
+        assertNotNull(decoded)
+        assertEquals(12, decoded!!.solanaOwnershipProofs.size)
+        assertEquals("Mint0", decoded.solanaOwnershipProofs.first().targetAddress)
+        assertEquals("Mint11", decoded.solanaOwnershipProofs.last().targetAddress)
+    }
+
+    @Test
     fun nftProfileMint_roundTripPreservesValue() {
         val mintAddress = "DRpbCBMxVnDK7maPMoGcfEaS3oxNQH6Aog6Hy7KVD8qv"
 

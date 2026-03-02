@@ -148,12 +148,13 @@ This document outlines low-hanging fruit Solana integrations that fit naturally 
 - Natural extension of peer identity
 
 **New ANNOUNCE TLV Fields:**
-- 0x05: Solana Address (32 bytes)
-- 0x06: NFT Mint (32 bytes, optional - for profile pic)
-- 0x07: Token Holdings Proof (variable - cached balances)
+- 0x05: Solana Address (Base58 UTF-8 string, variable length)
+- 0x06: Solana Wallet-Link Proof Signature (variable)
+- 0x07: Token/NFT Ownership Proof (variable, repeated)
+- 0x08: NFT Mint (Base58 UTF-8 string, variable length, optional - profile avatar)
 
 **Integration Points:**
-- Extend ANNOUNCE encoding in BinaryProtocol
+- Extend ANNOUNCE TLV encoding/decoding in `IdentityAnnouncement`
 - Parse Solana fields in MessageHandler
 - Store Solana address per peer in PeerManager
 - Display badges/NFT avatars in peer list UI
