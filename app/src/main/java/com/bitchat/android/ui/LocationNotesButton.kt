@@ -1,8 +1,8 @@
 package com.bitchat.android.ui
 
 import androidx.compose.foundation.layout.size
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +57,7 @@ fun LocationNotesButton(
             modifier = modifier.size(24.dp)
         ) {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.File), // "long.text.page.and.pencil" equivalent
+                painter = rememberAppIconPainter(AppIcons.File), // "long.text.page.and.pencil" equivalent
                 contentDescription = stringResource(R.string.cd_location_notes),
                 modifier = Modifier.size(16.dp),
                 tint = if (hasNotes) colorScheme.primary else Color.Gray

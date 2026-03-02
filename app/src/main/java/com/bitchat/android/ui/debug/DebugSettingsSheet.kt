@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -101,7 +101,7 @@ fun DebugSettingsSheet(
                             .height(20.dp)
                             .background(BitchatColors.SelfMessage.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
                     )
-                    Icon(painter = rememberPixelPainter(PixelIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
+                    Icon(painter = rememberAppIconPainter(AppIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
                     Text(stringResource(R.string.debug_tools), fontFamily = CourierPrimeFamily, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 }
                 Text(
@@ -117,7 +117,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Network), contentDescription = null, tint = BitchatColors.StatusSuccess)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Network), contentDescription = null, tint = BitchatColors.StatusSuccess)
                             Text(stringResource(R.string.debug_verbose_logging), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = verboseLogging, onCheckedChange = { manager.setVerboseLoggingEnabled(it) })
@@ -137,7 +137,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
                             Text(stringResource(R.string.debug_bluetooth_roles), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -206,7 +206,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Power), contentDescription = null, tint = BitchatColors.SelfMessage)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Power), contentDescription = null, tint = BitchatColors.SelfMessage)
                             Text(stringResource(R.string.debug_packet_relay), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = packetRelayEnabled, onCheckedChange = { manager.setPacketRelayEnabled(it) })
@@ -297,7 +297,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Network), contentDescription = null, tint = BitchatColors.NostrIndicator)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Network), contentDescription = null, tint = BitchatColors.NostrIndicator)
                             Text("sync settings", fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         Text(stringResource(R.string.debug_max_packets_per_sync_fmt, seenCapacity), fontFamily = CourierPrimeFamily, fontSize = 12.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
@@ -318,7 +318,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Devices), contentDescription = null, tint = BitchatColors.AccentGreen)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Devices), contentDescription = null, tint = BitchatColors.AccentGreen)
                             Text(stringResource(R.string.debug_connected_devices), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         val localAddr = remember { meshService.connectionManager.getLocalAdapterAddress() }
@@ -350,7 +350,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Bluetooth), contentDescription = null, tint = BitchatColors.MeshChannel)
                             Text(stringResource(R.string.debug_recent_scan_results), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         if (scanResults.isEmpty()) {
@@ -379,7 +379,7 @@ fun DebugSettingsSheet(
                 Surface(shape = BitchatShapes.Card, color = BitchatColors.BackgroundElevated.copy(alpha = 0.6f)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
+                            Icon(painter = rememberAppIconPainter(AppIcons.Bug), contentDescription = null, tint = BitchatColors.SelfMessage)
                             Text(stringResource(R.string.debug_debug_console), fontFamily = CourierPrimeFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Text(stringResource(R.string.debug_clear), color = BitchatColors.Destructive, fontFamily = CourierPrimeFamily, modifier = Modifier.clickable {

@@ -14,8 +14,8 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -227,7 +227,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(painter = rememberPixelPainter(PixelIcons.Remove), contentDescription = stringResource(R.string.cd_decrease_precision))
+                                        Icon(painter = rememberAppIconPainter(AppIcons.Remove), contentDescription = stringResource(R.string.cd_decrease_precision))
                                     }
                                 }
 
@@ -243,7 +243,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(painter = rememberPixelPainter(PixelIcons.Add), contentDescription = stringResource(R.string.cd_increase_precision))
+                                        Icon(painter = rememberAppIconPainter(AppIcons.Add), contentDescription = stringResource(R.string.cd_increase_precision))
                                     }
                                 }
 
@@ -263,7 +263,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                                     )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(painter = rememberPixelPainter(PixelIcons.Check), contentDescription = stringResource(R.string.cd_select_geohash))
+                                        Icon(painter = rememberAppIconPainter(AppIcons.Check), contentDescription = stringResource(R.string.cd_select_geohash))
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             text = stringResource(R.string.select),

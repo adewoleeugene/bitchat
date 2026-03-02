@@ -203,67 +203,142 @@ class CommandProcessor(
                 null
             }
             "member" -> {
-                if (parts.size < 3 || parts[2].lowercase() != "remove") {
+                if (parts.size < 3) {
                     return CommandResult(
-                        prefillText = "/channel member remove ",
-                        hintText = "usage: /channel member remove [#channel] @nickname"
+                        prefillText = "/channel member ",
+                        hintText = "usage: /channel member <remove|admin|member> @nickname"
                     )
                 }
 
-                val subject = parts.getOrNull(3)
-                if (subject.isNullOrBlank()) {
-                    return CommandResult(
-                        prefillText = "/channel member remove @",
-                        hintText = "which user should be removed?"
+                when (parts[2].lowercase()) {
+                    "remove" -> {
+                        val subject = parts.getOrNull(3)
+                        if (subject.isNullOrBlank()) {
+                            return CommandResult(
+                                prefillText = "/channel member remove @",
+                                hintText = "which user should be removed?"
+                            )
+                        }
+
+                        val looksLikeChannel =
+                            subject.startsWith("#") || subject.startsWith("mesh:") || subject.startsWith("geo:")
+                        val channelArg = if (looksLikeChannel) subject else null
+                        val nicknameArg = if (looksLikeChannel) parts.getOrNull(4) else subject
+
+                        if (nicknameArg.isNullOrBlank()) {
+                            val prefill = if (channelArg != null) "/channel member remove $channelArg @" else "/channel member remove @"
+                            return CommandResult(
+                                prefillText = prefill,
+                                hintText = "which user should be removed?"
+                            )
+                        }
+
+                        val target = requireChannelAdmin(
+                            channelArg = channelArg,
+                            myPeerID = myPeerID,
+                            viewModel = viewModel,
+                            action = "remove channel members"
+                        ) ?: return null
+                        val (channelTag, channelKey) = target
+
+                        val targetName = nicknameArg.removePrefix("@")
+                        val targetPeerID = getPeerIDForNickname(targetName, meshService, viewModel)
+                        if (targetPeerID == null) {
+                            addSystemMessage("can't find '$targetName' — are they online? check /w")
+                            return null
+                        }
+
+                        if (targetPeerID == myPeerID) {
+                            addSystemMessage("use leave channel instead of removing yourself from $channelTag.")
+                            return null
+                        }
+
+                        if (channelManager.isChannelCreator(channelKey, targetPeerID)) {
+                            addSystemMessage("can't remove channel owner from $channelTag. transfer ownership first.")
+                            return null
+                        }
+
+                        if (!channelManager.getChannelMembers(channelKey).contains(targetPeerID)) {
+                            addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is not a tracked member of $channelTag.")
+                            return null
+                        }
+
+                        channelManager.removeChannelMember(channelKey, targetPeerID)
+                        val nextVersion = channelManager.nextChannelRoleVersion(channelKey)
+                        channelManager.buildChannelRolePolicy(channelKey, roleVersion = nextVersion)?.let { payload ->
+                            meshService.broadcastChannelRolePolicy(payload)
+                        }
+                        addSystemMessage("removed @${getPeerNickname(targetPeerID, meshService, viewModel)} from $channelTag.")
+                        null
+                    }
+                    "admin", "member" -> {
+                        val subject = parts.getOrNull(3)
+                        if (subject.isNullOrBlank()) {
+                            val prefill = "/channel member ${parts[2].lowercase()} @"
+                            val hint = if (parts[2].lowercase() == "admin") {
+                                "who should become admin?"
+                            } else {
+                                "who should be demoted to member?"
+                            }
+                            return CommandResult(prefillText = prefill, hintText = hint)
+                        }
+
+                        val looksLikeChannel =
+                            subject.startsWith("#") || subject.startsWith("mesh:") || subject.startsWith("geo:")
+                        if (looksLikeChannel) {
+                            addSystemMessage("role changes are channel-local. switch to the channel first, then use /channel member ${parts[2].lowercase()} @nickname.")
+                            return null
+                        }
+
+                        val target = requireChannelAdmin(
+                            channelArg = null,
+                            myPeerID = myPeerID,
+                            viewModel = viewModel,
+                            action = "change member roles"
+                        ) ?: return null
+                        val (channelTag, channelKey) = target
+
+                        val targetName = subject.removePrefix("@")
+                        val targetPeerID = getPeerIDForNickname(targetName, meshService, viewModel)
+                        if (targetPeerID == null) {
+                            addSystemMessage("can't find '$targetName' — are they online? check /w")
+                            return null
+                        }
+                        if (!channelManager.getChannelMembers(channelKey).contains(targetPeerID)) {
+                            addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is not a tracked member of $channelTag.")
+                            return null
+                        }
+
+                        val isPromote = parts[2].lowercase() == "admin"
+                        val changed = if (isPromote) {
+                            channelManager.setChannelAdmin(channelKey, myPeerID, targetPeerID)
+                        } else {
+                            channelManager.setChannelMember(channelKey, myPeerID, targetPeerID)
+                        }
+
+                        if (!changed) {
+                            val action = if (isPromote) "promote" else "demote"
+                            addSystemMessage("couldn't $action @${getPeerNickname(targetPeerID, meshService, viewModel)} in $channelTag.")
+                            return null
+                        }
+
+                        val nextVersion = channelManager.nextChannelRoleVersion(channelKey)
+                        channelManager.buildChannelRolePolicy(channelKey, roleVersion = nextVersion)?.let { payload ->
+                            meshService.broadcastChannelRolePolicy(payload)
+                        }
+
+                        if (isPromote) {
+                            addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is now admin in $channelTag.")
+                        } else {
+                            addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is now member in $channelTag.")
+                        }
+                        null
+                    }
+                    else -> CommandResult(
+                        prefillText = "/channel member ",
+                        hintText = "usage: /channel member <remove|admin|member> @nickname"
                     )
                 }
-
-                val looksLikeChannel =
-                    subject.startsWith("#") || subject.startsWith("mesh:") || subject.startsWith("geo:")
-                val channelArg = if (looksLikeChannel) subject else null
-                val nicknameArg = if (looksLikeChannel) parts.getOrNull(4) else subject
-
-                if (nicknameArg.isNullOrBlank()) {
-                    val prefill = if (channelArg != null) "/channel member remove $channelArg @" else "/channel member remove @"
-                    return CommandResult(
-                        prefillText = prefill,
-                        hintText = "which user should be removed?"
-                    )
-                }
-
-                val target = requireChannelAdmin(
-                    channelArg = channelArg,
-                    myPeerID = myPeerID,
-                    viewModel = viewModel,
-                    action = "remove channel members"
-                ) ?: return null
-                val (channelTag, channelKey) = target
-
-                val targetName = nicknameArg.removePrefix("@")
-                val targetPeerID = getPeerIDForNickname(targetName, meshService, viewModel)
-                if (targetPeerID == null) {
-                    addSystemMessage("can't find '$targetName' — are they online? check /w")
-                    return null
-                }
-
-                if (targetPeerID == myPeerID) {
-                    addSystemMessage("use leave channel instead of removing yourself from $channelTag.")
-                    return null
-                }
-
-                if (channelManager.isChannelCreator(channelKey, targetPeerID)) {
-                    addSystemMessage("can't remove channel owner from $channelTag. transfer ownership first.")
-                    return null
-                }
-
-                if (!channelManager.getChannelMembers(channelKey).contains(targetPeerID)) {
-                    addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is not a tracked member of $channelTag.")
-                    return null
-                }
-
-                channelManager.removeChannelMember(channelKey, targetPeerID)
-                addSystemMessage("removed @${getPeerNickname(targetPeerID, meshService, viewModel)} from $channelTag.")
-                null
             }
             "owner" -> {
                 if (parts.size < 3 || parts[2].lowercase() != "transfer") {
@@ -312,6 +387,11 @@ class CommandProcessor(
                 if (!channelManager.transferChannelOwnership(channelKey, targetPeerID)) {
                     addSystemMessage("couldn't transfer ownership for $channelTag.")
                     return null
+                }
+
+                val nextVersion = channelManager.nextChannelRoleVersion(channelKey)
+                channelManager.buildChannelRolePolicy(channelKey, roleVersion = nextVersion)?.let { payload ->
+                    meshService.broadcastChannelRolePolicy(payload)
                 }
 
                 val newOwnerName = getPeerNickname(targetPeerID, meshService, viewModel)
@@ -1202,6 +1282,8 @@ class CommandProcessor(
                     CommandSuggestion("/gate refresh", emptyList(), "[#channel]", "alias: channel gate refresh (admin)"),
                     CommandSuggestion("/gate remove", emptyList(), "[#channel]", "alias: channel gate remove (admin)"),
                     CommandSuggestion("/channel member remove", emptyList(), "[#channel] @nickname", "remove member from channel (admin)"),
+                    CommandSuggestion("/channel member admin", emptyList(), "@nickname", "promote member to admin (channel-local)"),
+                    CommandSuggestion("/channel member member", emptyList(), "@nickname", "demote admin to member (channel-local)"),
                     CommandSuggestion("/channel gate set", emptyList(), "#channel <type> ...", "set token gate (admin)"),
                     CommandSuggestion("/channel gate refresh", emptyList(), "[#channel]", "re-check gate status"),
                     CommandSuggestion("/channel gate remove", emptyList(), "[#channel]", "remove token gate (admin)")
@@ -1249,6 +1331,8 @@ class CommandProcessor(
             "/channel exit" -> CommandResult(prefillText = "/channel exit", hintText = "or /channel exit #channel")
             "/channel users" -> CommandResult(prefillText = "/channel users #", hintText = "or use in current channel")
             "/channel member remove" -> CommandResult(prefillText = "/channel member remove @", hintText = "or /channel member remove #channel @name")
+            "/channel member admin" -> CommandResult(prefillText = "/channel member admin @", hintText = "channel-local only; switch channels first")
+            "/channel member member" -> CommandResult(prefillText = "/channel member member @", hintText = "channel-local only; switch channels first")
             "/channel owner transfer" -> CommandResult(prefillText = "/channel owner transfer @", hintText = "or /channel owner transfer #channel @name")
             "/channel gate show" -> CommandResult(prefillText = "/channel gate show #", hintText = "or use in current channel")
             "/channel gate set" -> CommandResult(prefillText = "/channel gate set #", hintText = "usage: /channel gate set #vip <spl|sol|nft-specific|nft-collection> ...")

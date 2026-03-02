@@ -7,8 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -164,7 +164,7 @@ fun AboutSheet(
                                 .padding(vertical = 8.dp)
                         ) {
                             Icon(
-                                painter = rememberPixelPainter(PixelIcons.Bluetooth),
+                                painter = rememberAppIconPainter(AppIcons.Bluetooth),
                                 contentDescription = stringResource(R.string.cd_offline_mesh_chat),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
@@ -196,7 +196,7 @@ fun AboutSheet(
                                 .padding(vertical = 8.dp)
                         ) {
                             Icon(
-                                painter = rememberPixelPainter(PixelIcons.Globe),
+                                painter = rememberAppIconPainter(AppIcons.Globe),
                                 contentDescription = stringResource(R.string.cd_online_geohash_channels),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
@@ -228,7 +228,7 @@ fun AboutSheet(
                                 .padding(vertical = 8.dp)
                         ) {
                             Icon(
-                                painter = rememberPixelPainter(PixelIcons.Lock),
+                                painter = rememberAppIconPainter(AppIcons.Lock),
                                 contentDescription = stringResource(R.string.cd_end_to_end_encryption),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
@@ -518,7 +518,7 @@ fun AboutSheet(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        painter = rememberPixelPainter(PixelIcons.Wallet),
+                                        painter = rememberAppIconPainter(AppIcons.Wallet),
                                         contentDescription = "Solana Wallet",
                                         tint = BitchatColors.SolanaAccent,
                                         modifier = Modifier.size(24.dp)
@@ -593,7 +593,7 @@ fun AboutSheet(
                                 verticalAlignment = Alignment.Top
                             ) {
                                 Icon(
-                                    painter = rememberPixelPainter(PixelIcons.Warning),
+                                    painter = rememberAppIconPainter(AppIcons.Warning),
                                     contentDescription = stringResource(R.string.cd_warning),
                                     tint = errorColor,
                                     modifier = Modifier.size(16.dp)

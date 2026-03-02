@@ -31,8 +31,8 @@ import com.bitchat.android.model.DeliveryStatus
 import com.bitchat.android.mesh.BluetoothMeshService
 import java.text.SimpleDateFormat
 import java.util.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
@@ -519,7 +519,7 @@ private fun BubbleFileContent(
                         .clickable { onCancelTransfer?.invoke(message) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(painter = rememberPixelPainter(PixelIcons.Close), contentDescription = stringResource(R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(painter = rememberAppIconPainter(AppIcons.Close), contentDescription = stringResource(R.string.cd_cancel), tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
         } else {

@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -134,7 +134,7 @@ private fun BatteryOptimizationEnabledContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            painter = rememberPixelPainter(PixelIcons.Power),
+                            painter = rememberAppIconPainter(AppIcons.Power),
                             contentDescription = stringResource(R.string.cd_battery_optimization),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -174,7 +174,7 @@ private fun BatteryOptimizationEnabledContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            painter = rememberPixelPainter(PixelIcons.Check),
+                            painter = rememberAppIconPainter(AppIcons.Check),
                             contentDescription = stringResource(R.string.cd_benefits),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -310,7 +310,7 @@ private fun BatteryOptimizationCheckingContent(
         )
         
         Icon(
-            painter = rememberPixelPainter(PixelIcons.Battery),
+            painter = rememberAppIconPainter(AppIcons.Battery),
             contentDescription = stringResource(R.string.cd_checking_battery_optimization),
             modifier = Modifier
                 .size(64.dp)
@@ -362,7 +362,7 @@ private fun BatteryOptimizationNotSupportedContent(
         }
         
         Icon(
-            painter = rememberPixelPainter(PixelIcons.Check),
+            painter = rememberAppIconPainter(AppIcons.Check),
             contentDescription = stringResource(R.string.cd_not_supported_battery_optimization),
             modifier = Modifier.size(64.dp),
             tint = colorScheme.primary

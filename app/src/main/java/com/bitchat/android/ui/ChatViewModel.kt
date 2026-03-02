@@ -11,6 +11,7 @@ import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
+import com.bitchat.android.model.ChannelRolePolicyPayload
 import com.bitchat.android.protocol.BitchatPacket
 import dagger.hilt.android.EntryPointAccessors
 
@@ -39,12 +40,14 @@ class ChatViewModel(
     private var walletLinkAnnounceJob: kotlinx.coroutines.Job? = null
     private var tokenGateRevalidationJob: kotlinx.coroutines.Job? = null
     private var tokenGatePolicySyncJob: kotlinx.coroutines.Job? = null
+    private var channelRolePolicySyncJob: kotlinx.coroutines.Job? = null
     private val tokenGateDenyStrikes = mutableMapOf<String, Int>()
 
     companion object {
         private const val TAG = "ChatViewModel"
         private const val TOKEN_GATE_REVALIDATION_INTERVAL_MS = 60_000L
         private const val TOKEN_GATE_POLICY_SYNC_INTERVAL_MS = 5 * 60_000L
+        private const val CHANNEL_ROLE_POLICY_SYNC_INTERVAL_MS = 90_000L
         private const val TOKEN_GATE_DENY_STRIKES_TO_KICK = 2
     }
 
@@ -273,6 +276,7 @@ class ChatViewModel(
             }
 
             val walletService = solanaEntryPoint.solanaWalletService()
+            val rpcService = solanaEntryPoint.solanaRpcService()
             // Set local Solana address on mesh service for identity announcements
             meshService.solanaAddress = walletService.getPublicKeyBase58()
             lastAnnouncedWalletAddress = meshService.solanaAddress
@@ -343,6 +347,44 @@ class ChatViewModel(
                 } catch (_: Exception) {
                     emptyList()
                 }
+            }
+            meshService.verifyOwnershipProofsOnline = { _, solanaAddress, proofs ->
+                var hadDeterminateResult = false
+                val kept = mutableListOf<com.bitchat.android.model.SolanaOwnershipProof>()
+                for (proof in proofs) {
+                    val holds: Boolean? = when (proof.claimType) {
+                        com.bitchat.android.model.SolanaOwnershipProof.ClaimType.SPL_TOKEN,
+                        com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_MINT -> {
+                            rpcService.getTokenBalance(solanaAddress, proof.targetAddress)
+                                .getOrNull()
+                                ?.let { balance -> balance >= proof.minRequired }
+                        }
+                        com.bitchat.android.model.SolanaOwnershipProof.ClaimType.NFT_COLLECTION -> {
+                            rpcService.hasNftFromCollection(solanaAddress, proof.targetAddress)
+                                .getOrNull()
+                                ?.let { ownsCollection ->
+                                    val observed = if (ownsCollection) 1L else 0L
+                                    observed >= proof.minRequired
+                                }
+                        }
+                    }
+
+                    when (holds) {
+                        true -> {
+                            hadDeterminateResult = true
+                            kept.add(proof)
+                        }
+                        false -> {
+                            hadDeterminateResult = true
+                            // Drop proof when online check deterministically fails.
+                        }
+                        null -> {
+                            // If online check is unavailable/fails, keep offline-verified proof.
+                            kept.add(proof)
+                        }
+                    }
+                }
+                if (hadDeterminateResult) kept else null
             }
 
             // Keep username->wallet mapping current when active wallet changes.
@@ -465,6 +507,13 @@ class ChatViewModel(
             Log.w(TAG, "Solana services not available: ${e.message}")
         }
 
+        startChannelRolePolicySyncLoop()
+        meshService.onChannelRolePolicyReceived = { fromPeer, payload ->
+            viewModelScope.launch {
+                handleIncomingChannelRolePolicy(fromPeer, payload)
+            }
+        }
+
         // Wire up Feed service via Hilt EntryPoint
         try {
             val feedEntryPoint = EntryPointAccessors.fromApplication(
@@ -498,9 +547,12 @@ class ChatViewModel(
         super.onCleared()
         tokenGateRevalidationJob?.cancel()
         tokenGatePolicySyncJob?.cancel()
+        channelRolePolicySyncJob?.cancel()
         walletLinkAnnounceJob?.cancel()
         tokenGateDenyStrikes.clear()
         meshService.onTokenGatePolicyReceived = null
+        meshService.onChannelRolePolicyReceived = null
+        meshService.verifyOwnershipProofsOnline = null
         // Note: Mesh service lifecycle is now managed by MainActivity
     }
 
@@ -568,6 +620,36 @@ class ChatViewModel(
                 delay(TOKEN_GATE_POLICY_SYNC_INTERVAL_MS)
             }
         }
+    }
+
+    private fun startChannelRolePolicySyncLoop() {
+        channelRolePolicySyncJob?.cancel()
+        channelRolePolicySyncJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    val myPeerID = meshService.myPeerID
+                    for (channelKey in state.getJoinedChannelsValue()) {
+                        if (!channelManager.isChannelAdmin(channelKey, myPeerID)) continue
+                        val payload = channelManager.buildChannelRolePolicy(channelKey) ?: continue
+                        meshService.broadcastChannelRolePolicy(payload)
+                    }
+                }.onFailure { error ->
+                    Log.d(TAG, "Channel role policy sync skipped: ${error.message}")
+                }
+                delay(CHANNEL_ROLE_POLICY_SYNC_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun handleIncomingChannelRolePolicy(fromPeer: String, payload: ChannelRolePolicyPayload) {
+        val applied = channelManager.applySyncedRolePolicy(
+            senderPeerID = fromPeer,
+            payload = payload
+        )
+        if (!applied) return
+
+        val channelTag = ChannelKeys.parseChannelName(payload.channelKey)
+        messageManager.addSystemMessage("role sync applied for $channelTag (v${payload.roleVersion}).")
     }
     
     // MARK: - Nickname Management
@@ -1085,6 +1167,7 @@ class ChatViewModel(
         // When new peers connect, try to broadcast any pending Solana transactions via mesh relay
         if (peers.isNotEmpty()) {
             solanaPaymentManager?.tryBroadcastPending()
+            broadcastCurrentChannelRoleSnapshots()
         }
     }
     
@@ -1110,6 +1193,15 @@ class ChatViewModel(
     
     override fun isFavorite(peerID: String): Boolean {
         return meshDelegateHandler.isFavorite(peerID)
+    }
+
+    private fun broadcastCurrentChannelRoleSnapshots() {
+        val myPeerID = meshService.myPeerID
+        for (channelKey in state.getJoinedChannelsValue()) {
+            if (!channelManager.isChannelAdmin(channelKey, myPeerID)) continue
+            val payload = channelManager.buildChannelRolePolicy(channelKey) ?: continue
+            meshService.broadcastChannelRolePolicy(payload)
+        }
     }
     
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager

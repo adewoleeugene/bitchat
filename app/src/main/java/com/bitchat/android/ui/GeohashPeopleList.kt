@@ -4,8 +4,8 @@ import android.util.Log
 import androidx.compose.foundation.*
 import com.bitchat.android.ui.theme.BitchatColors
 import androidx.compose.foundation.layout.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -60,7 +60,7 @@ fun GeohashPeopleList(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.LocationPin),
+                painter = rememberAppIconPainter(AppIcons.LocationPin),
                 contentDescription = null,
                 modifier = Modifier.size(12.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.6f)
@@ -182,7 +182,7 @@ private fun GeohashPersonItem(
         if (hasUnreadDM) {
             // Unread DM indicator (orange envelope)
             Icon(
-                painter = rememberPixelPainter(PixelIcons.Email),
+                painter = rememberAppIconPainter(AppIcons.Email),
                 contentDescription = stringResource(R.string.cd_unread_message),
                 modifier = Modifier.size(12.dp),
                 tint = BitchatColors.SelfMessage
@@ -198,12 +198,12 @@ private fun GeohashPersonItem(
             
             // Use appropriate pixel icon (closest match to iOS SF Symbols)
             val pixelIcon = when (iconName) {
-                "face.dashed" -> PixelIcons.Explore
-                else -> PixelIcons.LocationPin
+                "face.dashed" -> AppIcons.Explore
+                else -> AppIcons.LocationPin
             }
 
             Icon(
-                painter = rememberPixelPainter(pixelIcon),
+                painter = rememberAppIconPainter(pixelIcon),
                 contentDescription = if (isTeleported || isMyTeleported) "Teleported user" else "User",
                 modifier = Modifier.size(12.dp),
                 tint = iconColor.copy(alpha = if (iconName == "face.dashed") 0.6f else 1.0f) // Make dashed faces slightly transparent

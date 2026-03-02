@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -81,7 +81,7 @@ fun FileSendingAnimation(
     ) {
         // File icon
         Icon(
-            painter = rememberPixelPainter(PixelIcons.File),
+            painter = rememberAppIconPainter(AppIcons.File),
             contentDescription = stringResource(R.string.cd_file),
             tint = BitchatColors.StatusSuccess, // Green like app theme
             modifier = Modifier.size(32.dp)

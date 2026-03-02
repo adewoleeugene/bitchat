@@ -2,8 +2,8 @@ package com.bitchat.android.onboarding
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,7 +71,7 @@ private fun BluetoothDisabledContent(
     ) {
         // Bluetooth icon - using Bluetooth outlined icon in app's green color
         Icon(
-            painter = rememberPixelPainter(PixelIcons.Bluetooth),
+            painter = rememberAppIconPainter(AppIcons.Bluetooth),
             contentDescription = stringResource(R.string.cd_bluetooth),
             modifier = Modifier.size(64.dp),
             tint = BitchatColors.StatusSuccess // App's main green color

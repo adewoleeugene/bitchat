@@ -9,8 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -54,7 +54,7 @@ fun MediaPickerOptions(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.Add),
+                painter = rememberAppIconPainter(AppIcons.Add),
                 contentDescription = stringResource(R.string.cd_pick_media),
                 tint = Color.Black,
                 modifier = Modifier.size(20.dp)
@@ -94,7 +94,7 @@ fun MediaPickerOptions(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            painter = rememberPixelPainter(PixelIcons.Add),
+                            painter = rememberAppIconPainter(AppIcons.Add),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(16.dp)
@@ -122,7 +122,7 @@ fun MediaPickerOptions(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            painter = rememberPixelPainter(PixelIcons.File),
+                            painter = rememberAppIconPainter(AppIcons.File),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.size(16.dp)

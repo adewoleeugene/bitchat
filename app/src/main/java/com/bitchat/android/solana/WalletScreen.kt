@@ -21,8 +21,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
 import com.bitchat.android.data.models.TransactionStatus
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -109,7 +109,7 @@ fun WalletScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.ArrowBack), contentDescription = "Back")
+                        Icon(painter = rememberAppIconPainter(AppIcons.ArrowBack), contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -681,7 +681,7 @@ private fun WalletReadyContent(
                     contentColor = BitchatColors.TextPrimary
                 )
             ) {
-                Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
+                Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Copy Address", fontFamily = CourierPrimeFamily, fontSize = 12.sp)
             }
@@ -795,7 +795,7 @@ private fun WalletReadyContent(
         onClick = onTransactionHistory,
         trailing = {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                painter = rememberAppIconPainter(AppIcons.ArrowRight),
                 contentDescription = null,
                 tint = BitchatColors.TextDisabled,
                 modifier = Modifier.size(24.dp)
@@ -809,7 +809,7 @@ private fun WalletReadyContent(
         onClick = { autoPaymentsEnabled = !autoPaymentsEnabled },
         trailing = {
             Icon(
-                painter = rememberPixelPainter(if (autoPaymentsEnabled) PixelIcons.CheckboxOn else PixelIcons.CheckboxOff),
+                painter = rememberAppIconPainter(if (autoPaymentsEnabled) AppIcons.CheckboxOn else AppIcons.CheckboxOff),
                 contentDescription = null,
                 tint = BitchatColors.TextDisabled,
                 modifier = Modifier.size(24.dp)
@@ -824,7 +824,7 @@ private fun WalletReadyContent(
             onClick = { showSwitchWalletDialog = true },
             trailing = {
                 Icon(
-                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    painter = rememberAppIconPainter(AppIcons.ArrowRight),
                     contentDescription = null,
                     tint = BitchatColors.TextDisabled,
                     modifier = Modifier.size(24.dp)
@@ -840,7 +840,7 @@ private fun WalletReadyContent(
             onClick = { showCreateMnemonicConfirm = true },
             trailing = {
                 Icon(
-                    painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                    painter = rememberAppIconPainter(AppIcons.ArrowRight),
                     contentDescription = null,
                     tint = BitchatColors.TextDisabled,
                     modifier = Modifier.size(24.dp)
@@ -855,7 +855,7 @@ private fun WalletReadyContent(
         onClick = onImportPrivateKey,
         trailing = {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                painter = rememberAppIconPainter(AppIcons.ArrowRight),
                 contentDescription = null,
                 tint = BitchatColors.TextDisabled,
                 modifier = Modifier.size(24.dp)
@@ -869,7 +869,7 @@ private fun WalletReadyContent(
         onClick = onExportPrivateKey,
         trailing = {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                painter = rememberAppIconPainter(AppIcons.ArrowRight),
                 contentDescription = null,
                 tint = BitchatColors.TextDisabled,
                 modifier = Modifier.size(24.dp)
@@ -883,7 +883,7 @@ private fun WalletReadyContent(
         onClick = onExportRecoveryPhrase,
         trailing = {
             Icon(
-                painter = rememberPixelPainter(PixelIcons.ArrowRight),
+                painter = rememberAppIconPainter(AppIcons.ArrowRight),
                 contentDescription = null,
                 tint = BitchatColors.TextDisabled,
                 modifier = Modifier.size(24.dp)
@@ -1088,7 +1088,7 @@ private fun QrCodeCard(address: String) {
                 contentColor = BitchatColors.TextPrimary
             )
         ) {
-            Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text("Copy Address", fontFamily = CourierPrimeFamily)
         }
@@ -1160,7 +1160,7 @@ private fun PrivateKeyExportDialog(
                         ),
                         shape = BitchatShapes.Button
                     ) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Copy Private Key", fontFamily = CourierPrimeFamily)
                     }
@@ -1174,7 +1174,7 @@ private fun PrivateKeyExportDialog(
                         ),
                         shape = BitchatShapes.Button
                     ) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(painter = rememberAppIconPainter(AppIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Reveal Private Key", fontFamily = CourierPrimeFamily)
                     }
@@ -1289,7 +1289,7 @@ private fun MnemonicBackupDialog(
                         ),
                         shape = BitchatShapes.Button
                     ) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Copy to Clipboard", fontFamily = CourierPrimeFamily)
                     }
@@ -1303,7 +1303,7 @@ private fun MnemonicBackupDialog(
                         ),
                         shape = BitchatShapes.Button
                     ) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(painter = rememberAppIconPainter(AppIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Reveal Recovery Phrase", fontFamily = CourierPrimeFamily)
                     }
@@ -1505,7 +1505,7 @@ private fun TransactionHistoryScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.ArrowBack), contentDescription = "Back")
+                        Icon(painter = rememberAppIconPainter(AppIcons.ArrowBack), contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1662,7 +1662,7 @@ private fun TransactionRow(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Copy),
+                        painter = rememberAppIconPainter(AppIcons.Copy),
                         contentDescription = "Copy signature",
                         tint = BitchatColors.SolanaAccent,
                         modifier = Modifier.size(14.dp)
@@ -1719,7 +1719,7 @@ private fun SendScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = { showAmountInput = false }) {
-                            Icon(painter = rememberPixelPainter(PixelIcons.ArrowBack), contentDescription = "Back")
+                            Icon(painter = rememberAppIconPainter(AppIcons.ArrowBack), contentDescription = "Back")
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -1865,7 +1865,7 @@ private fun SendScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(painter = rememberPixelPainter(PixelIcons.ArrowBack), contentDescription = "Back")
+                        Icon(painter = rememberAppIconPainter(AppIcons.ArrowBack), contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1932,7 +1932,7 @@ private fun SendScreen(
                                 }
                             ) {
                                 Icon(
-                                    painter = rememberPixelPainter(PixelIcons.QrCode),
+                                    painter = rememberAppIconPainter(AppIcons.QrCode),
                                     contentDescription = "Scan QR",
                                     tint = BitchatColors.TextSecondary,
                                     modifier = Modifier.size(20.dp)

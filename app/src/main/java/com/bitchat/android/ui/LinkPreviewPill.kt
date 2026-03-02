@@ -7,8 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -94,7 +94,7 @@ fun LinkPreviewPill(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Link),
+                        painter = rememberAppIconPainter(AppIcons.Link),
                         contentDescription = stringResource(com.bitchat.android.R.string.cd_link),
                         modifier = Modifier.size(24.dp),
                         tint = Color.Blue

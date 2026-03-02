@@ -2,8 +2,8 @@ package com.bitchat.android.onboarding
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,7 +71,7 @@ private fun LocationDisabledContent(
     ) {
         // Location icon - using LocationOn outlined icon in app's green color
         Icon(
-            painter = rememberPixelPainter(PixelIcons.LocationPin),
+            painter = rememberAppIconPainter(AppIcons.LocationPin),
             contentDescription = stringResource(R.string.cd_location_services),
             modifier = Modifier.size(64.dp),
             tint = BitchatColors.StatusSuccess // App's main green color
@@ -104,7 +104,7 @@ private fun LocationDisabledContent(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Shield),
+                        painter = rememberAppIconPainter(AppIcons.Shield),
                         contentDescription = stringResource(R.string.cd_privacy),
                         tint = BitchatColors.AccentGreen,
                         modifier = Modifier.size(20.dp)
@@ -200,7 +200,7 @@ private fun LocationNotAvailableContent(
     ) {
         // Error icon
         Icon(
-            painter = rememberPixelPainter(PixelIcons.Warning),
+            painter = rememberAppIconPainter(AppIcons.Warning),
             contentDescription = stringResource(R.string.cd_error),
             modifier = Modifier.size(64.dp),
             tint = colorScheme.error

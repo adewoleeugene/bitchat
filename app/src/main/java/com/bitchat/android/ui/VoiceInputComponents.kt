@@ -6,8 +6,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -138,7 +138,7 @@ fun VoiceRecordButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            painter = rememberPixelPainter(PixelIcons.Mic),
+            painter = rememberAppIconPainter(AppIcons.Mic),
             contentDescription = stringResource(com.bitchat.android.R.string.cd_record_voice),
             tint = Color.Black,
             modifier = Modifier.size(20.dp)

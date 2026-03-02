@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -94,7 +94,7 @@ fun PermissionExplanationScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            painter = rememberPixelPainter(PixelIcons.Shield),
+                            painter = rememberAppIconPainter(AppIcons.Shield),
                             contentDescription = stringResource(R.string.cd_privacy_protected),
                             tint = colorScheme.primary,
                             modifier = Modifier
@@ -181,7 +181,7 @@ private fun PermissionCategoryCard(
             .padding(vertical = 8.dp)
     ) {
         Icon(
-            painter = rememberPixelPainter(getPermissionIcon(category.type)),
+            painter = rememberAppIconPainter(getPermissionIcon(category.type)),
             contentDescription = category.type.nameValue,
             tint = colorScheme.primary,
             modifier = Modifier
@@ -211,7 +211,7 @@ private fun PermissionCategoryCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Warning),
+                        painter = rememberAppIconPainter(AppIcons.Warning),
                         contentDescription = stringResource(R.string.cd_warning),
                         tint = BitchatColors.StatusWarning,
                         modifier = Modifier.size(16.dp)
@@ -232,11 +232,11 @@ private fun PermissionCategoryCard(
 
 private fun getPermissionIcon(permissionType: PermissionType): ImageVector {
     return when (permissionType) {
-        PermissionType.NEARBY_DEVICES -> PixelIcons.Bluetooth
-        PermissionType.PRECISE_LOCATION -> PixelIcons.LocationPin
-        PermissionType.MICROPHONE -> PixelIcons.Mic
-        PermissionType.NOTIFICATIONS -> PixelIcons.Bell
-        PermissionType.BATTERY_OPTIMIZATION -> PixelIcons.Power
-        PermissionType.OTHER -> PixelIcons.Settings
+        PermissionType.NEARBY_DEVICES -> AppIcons.Bluetooth
+        PermissionType.PRECISE_LOCATION -> AppIcons.LocationPin
+        PermissionType.MICROPHONE -> AppIcons.Mic
+        PermissionType.NOTIFICATIONS -> AppIcons.Bell
+        PermissionType.BATTERY_OPTIMIZATION -> AppIcons.Power
+        PermissionType.OTHER -> AppIcons.Settings
     }
 }

@@ -1,6 +1,7 @@
 package com.bitchat.android.ui
 
 import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.model.ChannelRolePolicyPayload
 import com.bitchat.android.solana.GateDecision
 import com.bitchat.android.solana.TokenGateService
 import com.bitchat.android.solana.ValidationMode
@@ -174,6 +175,9 @@ class ChannelManager(
     fun assignChannelCreator(channel: String, creatorPeerID: String) {
         dataManager.addChannelCreator(channel, creatorPeerID)
         dataManager.addChannelMember(channel, creatorPeerID)
+        if (dataManager.getChannelRoleVersion(channel) <= 0L) {
+            dataManager.nextChannelRoleVersion(channel)
+        }
         saveChannelData()
     }
     
@@ -341,6 +345,49 @@ class ChannelManager(
 
     fun getChannelMembers(channel: String): Set<String> {
         return dataManager.getChannelMembers(channel)
+    }
+
+    fun getChannelAdmins(channel: String): Set<String> {
+        return dataManager.getChannelAdmins(channel)
+    }
+
+    fun getChannelRoleVersion(channel: String): Long {
+        return dataManager.getChannelRoleVersion(channel)
+    }
+
+    fun nextChannelRoleVersion(channel: String): Long {
+        val version = dataManager.nextChannelRoleVersion(channel)
+        saveChannelData()
+        return version
+    }
+
+    fun applySyncedRolePolicy(
+        senderPeerID: String,
+        payload: ChannelRolePolicyPayload
+    ): Boolean {
+        val applied = dataManager.applySyncedRolePolicy(
+            senderPeerID = senderPeerID,
+            channel = payload.channelKey,
+            ownerPeerID = payload.ownerPeerId,
+            adminPeerIDs = payload.adminPeerIds,
+            roleVersion = payload.roleVersion
+        )
+        if (applied) {
+            saveChannelData()
+        }
+        return applied
+    }
+
+    fun buildChannelRolePolicy(channel: String, roleVersion: Long = getChannelRoleVersion(channel)): ChannelRolePolicyPayload? {
+        val owner = dataManager.channelCreators[channel] ?: return null
+        val normalizedVersion = if (roleVersion <= 0L) 1L else roleVersion
+        return ChannelRolePolicyPayload(
+            channelKey = channel,
+            ownerPeerId = owner,
+            adminPeerIds = dataManager.getChannelAdmins(channel).toList().sorted(),
+            roleVersion = normalizedVersion,
+            updatedAt = System.currentTimeMillis()
+        )
     }
     
     fun isChannelTokenGated(channel: String): Boolean {

@@ -10,8 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -266,7 +266,7 @@ fun LocationChannelsSheet(
                                 trailingContent = {
                                 IconButton(onClick = { bookmarksStore.toggle(channel.geohash) }) {
                                     Icon(
-                                        painter = rememberPixelPainter(if (isBookmarked) PixelIcons.BookmarkFilled else PixelIcons.BookmarkOutline),
+                                        painter = rememberAppIconPainter(if (isBookmarked) AppIcons.BookmarkFilled else AppIcons.BookmarkOutline),
                                         contentDescription = if (isBookmarked) stringResource(R.string.cd_remove_bookmark) else stringResource(R.string.cd_add_bookmark),
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                     )
@@ -329,7 +329,7 @@ fun LocationChannelsSheet(
                                 trailingContent = {
                                     IconButton(onClick = { bookmarksStore.toggle(gh) }) {
                                         Icon(
-                                            painter = rememberPixelPainter(PixelIcons.BookmarkFilled),
+                                            painter = rememberAppIconPainter(AppIcons.BookmarkFilled),
                                             contentDescription = stringResource(R.string.cd_remove_bookmark),
                                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                         )
@@ -436,7 +436,7 @@ fun LocationChannelsSheet(
                                     mapPickerLauncher.launch(intent)
                                 }) {
                                     Icon(
-                                        painter = rememberPixelPainter(PixelIcons.Map),
+                                        painter = rememberAppIconPainter(AppIcons.Map),
                                         contentDescription = stringResource(R.string.cd_open_map),
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                                     )
@@ -475,7 +475,7 @@ fun LocationChannelsSheet(
                                             fontFamily = CourierPrimeFamily
                                         )
                                         Icon(
-                                            painter = rememberPixelPainter(PixelIcons.PinDrop),
+                                            painter = rememberAppIconPainter(AppIcons.PinDrop),
                                             contentDescription = stringResource(R.string.cd_teleport),
                                             modifier = Modifier.size(14.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
@@ -663,7 +663,7 @@ private fun ChannelRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isSelected) {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Check),
+                        painter = rememberAppIconPainter(AppIcons.Check),
                         contentDescription = stringResource(R.string.cd_selected),
                         tint = BitchatColors.AccentGreen, // iOS green for checkmark
                         modifier = Modifier.size(20.dp)

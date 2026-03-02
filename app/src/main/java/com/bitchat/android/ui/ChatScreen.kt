@@ -14,8 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
@@ -333,7 +333,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
             ) {
                 IconButton(onClick = { forceScrollToBottom = !forceScrollToBottom }) {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.ArrowDown),
+                        painter = rememberAppIconPainter(AppIcons.ArrowDown),
                         contentDescription = stringResource(com.bitchat.android.R.string.cd_scroll_to_bottom),
                         tint = BitchatColors.StatusSuccess
                     )

@@ -5,8 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -93,7 +93,7 @@ fun VoiceNotePlayer(
         val controlsEnabled = isPrepared && !isError && progressOverride == null
         FilledTonalIconButton(onClick = { if (controlsEnabled) isPlaying = !isPlaying }, enabled = controlsEnabled, modifier = Modifier.size(28.dp)) {
             Icon(
-                painter = rememberPixelPainter(if (isPlaying) PixelIcons.Pause else PixelIcons.Play),
+                painter = rememberAppIconPainter(if (isPlaying) AppIcons.Pause else AppIcons.Play),
                 contentDescription = if (isPlaying) "Pause" else "Play"
             )
         }

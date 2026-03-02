@@ -4,10 +4,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.bitchat.android.ui.icons.LucideIconSet
 
 /**
- * Legacy compatibility aliases.
- * Callers can keep using `PixelIcons.*` while rendering Lucide vectors.
+ * App-wide icon aliases backed by Lucide vectors.
  */
-object PixelIcons {
+object AppIcons {
     val Add: ImageVector = LucideIconSet.Plus
     val Remove: ImageVector = LucideIconSet.Minus
     val ArrowBack: ImageVector = LucideIconSet.ArrowLeft
@@ -63,3 +62,6 @@ object PixelIcons {
     val Menu: ImageVector = LucideIconSet.Settings
     val Person: ImageVector = LucideIconSet.Users
 }
+
+@Deprecated("Use AppIcons", ReplaceWith("AppIcons"))
+typealias PixelIcons = AppIcons

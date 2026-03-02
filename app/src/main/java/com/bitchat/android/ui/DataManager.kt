@@ -24,12 +24,14 @@ class DataManager(private val context: Context) {
     private val _blockedUsers = mutableSetOf<String>()
     private val _channelMembers = mutableMapOf<String, MutableSet<String>>()
     private val _channelRoles = mutableMapOf<String, MutableMap<String, String>>()
+    private val _channelRoleVersions = mutableMapOf<String, Long>()
     
     val channelCreators: Map<String, String> get() = _channelCreators
     val favoritePeers: Set<String> get() = _favoritePeers
     val blockedUsers: Set<String> get() = _blockedUsers
     val channelMembers: Map<String, MutableSet<String>> get() = _channelMembers
     val channelRoles: Map<String, MutableMap<String, String>> get() = _channelRoles
+    val channelRoleVersions: Map<String, Long> get() = _channelRoleVersions
     
     // MARK: - Nickname Management
     
@@ -133,6 +135,23 @@ class DataManager(private val context: Context) {
             // Ignore parsing errors
         }
 
+        // Load channel role versions
+        val roleVersionsJson = prefs.getString("channel_role_versions", "{}")
+        try {
+            val raw = gson.fromJson(roleVersionsJson, Map::class.java) as? Map<*, *>
+            raw?.forEach { (channelKeyAny, versionAny) ->
+                val channelKey = ChannelKeys.normalize(channelKeyAny?.toString().orEmpty())
+                if (channelKey.isBlank()) return@forEach
+                val version = when (versionAny) {
+                    is Number -> versionAny.toLong()
+                    else -> versionAny?.toString()?.toLongOrNull() ?: 0L
+                }
+                _channelRoleVersions[channelKey] = version.coerceAtLeast(0L)
+            }
+        } catch (_: Exception) {
+            // Ignore parsing errors
+        }
+
         // Initialize channel members for loaded channels
         normalizedChannels.forEach { channel ->
             if (!_channelMembers.containsKey(channel)) {
@@ -149,6 +168,7 @@ class DataManager(private val context: Context) {
             putStringSet("password_protected_channels", passwordProtectedChannels)
             putString("channel_creators", gson.toJson(_channelCreators))
             putString("channel_roles", gson.toJson(_channelRoles))
+            putString("channel_role_versions", gson.toJson(_channelRoleVersions))
             apply()
         }
     }
@@ -221,6 +241,7 @@ class DataManager(private val context: Context) {
     fun removeChannelMembers(channel: String) {
         _channelMembers.remove(channel)
         _channelRoles.remove(channel)
+        _channelRoleVersions.remove(channel)
     }
     
     fun cleanupDisconnectedMembers(channel: String, connectedPeers: List<String>, myPeerID: String) {
@@ -250,6 +271,84 @@ class DataManager(private val context: Context) {
             _channelRoles[channel] = mutableMapOf()
         }
         _channelRoles[channel]?.set(peerID, normalized)
+    }
+
+    fun getChannelRoleVersion(channel: String): Long {
+        return _channelRoleVersions[channel] ?: 0L
+    }
+
+    fun nextChannelRoleVersion(channel: String): Long {
+        val next = getChannelRoleVersion(channel) + 1L
+        _channelRoleVersions[channel] = next
+        return next
+    }
+
+    fun getChannelAdmins(channel: String): Set<String> {
+        return _channelRoles[channel]
+            ?.filterValues { it == ChannelRoles.ADMIN }
+            ?.keys
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    /**
+     * Apply a signed mesh role snapshot.
+     *
+     * Returns true when applied, false when rejected (stale/duplicate/unauthorized/invalid).
+     */
+    fun applySyncedRolePolicy(
+        senderPeerID: String,
+        channel: String,
+        ownerPeerID: String,
+        adminPeerIDs: List<String>,
+        roleVersion: Long
+    ): Boolean {
+        if (channel.isBlank() || senderPeerID.isBlank() || ownerPeerID.isBlank() || roleVersion <= 0L) {
+            return false
+        }
+
+        val currentVersion = getChannelRoleVersion(channel)
+        if (roleVersion <= currentVersion) {
+            return false
+        }
+
+        val currentOwner = _channelCreators[channel]
+        if (currentOwner.isNullOrBlank()) {
+            // Bootstrap path: only the announced owner may seed the first role snapshot.
+            if (senderPeerID != ownerPeerID) return false
+        } else {
+            // Only current admins can update role state.
+            if (!isChannelAdmin(channel, senderPeerID)) return false
+            // Ownership transfer can only be emitted by current owner.
+            if (ownerPeerID != currentOwner && senderPeerID != currentOwner) return false
+        }
+
+        val cleanedAdmins = adminPeerIDs
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != ownerPeerID }
+            .distinct()
+
+        if (!_channelMembers.containsKey(channel)) {
+            _channelMembers[channel] = mutableSetOf()
+        }
+
+        val members = _channelMembers[channel]!!
+        members.add(ownerPeerID)
+        members.addAll(cleanedAdmins)
+
+        val newRoles = mutableMapOf<String, String>()
+        members.forEach { peerID ->
+            newRoles[peerID] = ChannelRoles.MEMBER
+        }
+        newRoles[ownerPeerID] = ChannelRoles.OWNER
+        cleanedAdmins.forEach { adminID ->
+            newRoles[adminID] = ChannelRoles.ADMIN
+        }
+
+        _channelCreators[channel] = ownerPeerID
+        _channelRoles[channel] = newRoles
+        _channelRoleVersions[channel] = roleVersion
+        return true
     }
 
     fun getChannelRole(channel: String, peerID: String): String {
@@ -370,6 +469,7 @@ class DataManager(private val context: Context) {
         _geohashBlockedUsers.clear()
         _channelMembers.clear()
         _channelRoles.clear()
+        _channelRoleVersions.clear()
         prefs.edit().clear().apply()
     }
 }

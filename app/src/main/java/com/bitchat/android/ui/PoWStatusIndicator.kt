@@ -2,8 +2,8 @@ package com.bitchat.android.ui
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,7 +55,7 @@ fun PoWStatusIndicator(
                     )
                     
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Shield),
+                        painter = rememberAppIconPainter(AppIcons.Shield),
                         contentDescription = stringResource(R.string.cd_mining_pow),
                         tint = BitchatColors.SelfMessage, // Orange for mining
                         modifier = Modifier
@@ -64,7 +64,7 @@ fun PoWStatusIndicator(
                     )
                 } else {
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Shield),
+                        painter = rememberAppIconPainter(AppIcons.Shield),
                         contentDescription = stringResource(R.string.cd_pow_enabled),
                         tint = BitchatColors.AccentGreen, // Green when ready
                         modifier = Modifier.size(16.dp)
@@ -86,7 +86,7 @@ fun PoWStatusIndicator(
                 ) {
                     // PoW icon
                     Icon(
-                        painter = rememberPixelPainter(PixelIcons.Shield),
+                        painter = rememberAppIconPainter(AppIcons.Shield),
                         contentDescription = stringResource(R.string.cd_proof_of_work),
                         tint = if (isMining) BitchatColors.SelfMessage else {
                             BitchatColors.AccentGreen

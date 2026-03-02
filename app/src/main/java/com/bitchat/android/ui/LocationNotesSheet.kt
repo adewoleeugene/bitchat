@@ -7,8 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -535,7 +535,7 @@ private fun LocationNotesInputSection(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    painter = rememberPixelPainter(PixelIcons.ArrowUp),
+                    painter = rememberAppIconPainter(AppIcons.ArrowUp),
                     contentDescription = stringResource(R.string.send_message),
                     modifier = Modifier.size(20.dp),
                     tint = if (!sendButtonEnabled) {

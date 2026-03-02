@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.theme.AppIcons
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -120,7 +120,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             .clickable { saveToDownloads(context, imagePaths[pagerState.currentPage].toString()) },
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.material3.Icon(painter = rememberPixelPainter(PixelIcons.Download), contentDescription = stringResource(R.string.cd_save_current_image), tint = Color.White)
+                        androidx.compose.material3.Icon(painter = rememberAppIconPainter(AppIcons.Download), contentDescription = stringResource(R.string.cd_save_current_image), tint = Color.White)
                     }
                     Spacer(Modifier.width(12.dp))
                     Box(
@@ -130,7 +130,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             .clickable { onClose() },
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.material3.Icon(painter = rememberPixelPainter(PixelIcons.Close), contentDescription = stringResource(R.string.cd_close), tint = Color.White)
+                        androidx.compose.material3.Icon(painter = rememberAppIconPainter(AppIcons.Close), contentDescription = stringResource(R.string.cd_close), tint = Color.White)
                     }
                 }
             }
