@@ -30,8 +30,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.CourierPrimeFamily
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
+import com.bitchat.android.ui.icons.LucideIcon
+import com.bitchat.android.ui.icons.LucideIconSet
 
 /**
  * Header components for ChatScreen
@@ -86,35 +86,36 @@ fun NoiseSessionIcon(
     sessionState: String?,
     modifier: Modifier = Modifier
 ) {
-    val grid: Array<IntArray>
+    val icon = when (sessionState) {
+        "uninitialized" -> LucideIconSet.LockOpen
+        "handshaking" -> LucideIconSet.RefreshCw
+        "established" -> LucideIconSet.Lock
+        else -> LucideIconSet.AlertTriangle // "failed" or any other state
+    }
     val color: Color
     val contentDescription: String
 
     when (sessionState) {
         "uninitialized" -> {
-            grid = PixelIcons.Unlock
             color = BitchatColors.TextDisabled // Grey - ready to establish
             contentDescription = stringResource(R.string.cd_ready_for_handshake)
         }
         "handshaking" -> {
-            grid = PixelIcons.Sync
             color = BitchatColors.TextDisabled // Grey - in progress
             contentDescription = stringResource(R.string.cd_handshake_in_progress)
         }
         "established" -> {
-            grid = PixelIcons.Lock
             color = BitchatColors.SelfMessage // Orange - secure
             contentDescription = stringResource(R.string.cd_encrypted)
         }
-        else -> { // "failed" or any other state
-            grid = PixelIcons.Warning
+        else -> {
             color = BitchatColors.StatusError // Red - error
             contentDescription = stringResource(R.string.cd_handshake_failed)
         }
     }
 
-    Icon(
-        painter = rememberPixelPainter(grid),
+    LucideIcon(
+        imageVector = icon,
         contentDescription = contentDescription,
         modifier = modifier,
         tint = color
@@ -202,8 +203,8 @@ fun PeerCounter(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.clickable { onClick() }.padding(end = 8.dp) // Added right margin to match "bitchat" logo spacing
     ) {
-        Icon(
-            painter = rememberPixelPainter(PixelIcons.Group),
+        LucideIcon(
+            imageVector = LucideIconSet.Users,
             contentDescription = when (selectedLocationChannel) {
                 is com.bitchat.android.geohash.ChannelID.Location -> stringResource(R.string.cd_geohash_participants)
                 else -> stringResource(R.string.cd_connected_peers)
@@ -380,8 +381,8 @@ private fun PrivateChatHeader(
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.ArrowBack),
+                LucideIcon(
+                    imageVector = LucideIconSet.ArrowLeft,
                     contentDescription = stringResource(R.string.back),
                     modifier = Modifier.size(22.dp),
                     tint = colorScheme.primary
@@ -412,9 +413,9 @@ private fun PrivateChatHeader(
             // Show a globe when chatting via Nostr alias, or when mesh session not established but mutual favorite exists
             val showGlobe = isNostrDM || (sessionState != "established" && isMutualFavorite)
             if (showGlobe) {
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.Globe),
-                contentDescription = stringResource(R.string.cd_nostr_reachable),
+                LucideIcon(
+                    imageVector = LucideIconSet.Globe,
+                    contentDescription = stringResource(R.string.cd_nostr_reachable),
                     modifier = Modifier.size(20.dp),
                     tint = BitchatColors.NostrIndicator // Purple like iOS
                 )
@@ -435,8 +436,8 @@ private fun PrivateChatHeader(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         ) {
-            Icon(
-                painter = rememberPixelPainter(if (isFavorite) PixelIcons.StarFilled else PixelIcons.StarOutline),
+            LucideIcon(
+                imageVector = LucideIconSet.Star,
                 contentDescription = if (isFavorite) stringResource(R.string.cd_remove_favorite) else stringResource(R.string.cd_add_favorite),
                 modifier = Modifier.size(20.dp), // Slightly larger than sidebar icon
                 tint = if (isFavorite) BitchatColors.FavoriteStar else BitchatColors.TextDisabled // Yellow or grey
@@ -464,8 +465,8 @@ private fun ChannelHeader(
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.ArrowBack),
+                LucideIcon(
+                    imageVector = LucideIconSet.ArrowLeft,
                     contentDescription = stringResource(R.string.back),
                     modifier = Modifier.size(22.dp),
                     tint = colorScheme.primary
@@ -568,8 +569,8 @@ private fun MainHeader(
                     onClick = { viewModel.openLatestUnreadPrivateChat() },
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(
-                        painter = rememberPixelPainter(PixelIcons.Email),
+                    LucideIcon(
+                        imageVector = LucideIconSet.Mail,
                         contentDescription = stringResource(R.string.cd_unread_private_messages),
                         modifier = Modifier.size(22.dp),
                         tint = BitchatColors.SelfMessage
@@ -588,8 +589,8 @@ private fun MainHeader(
                     onClick = { bookmarksStore.toggle(currentGeohash) },
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(
-                        painter = rememberPixelPainter(if (isBookmarked) PixelIcons.BookmarkFilled else PixelIcons.BookmarkOutline),
+                    LucideIcon(
+                        imageVector = if (isBookmarked) LucideIconSet.BookmarkCheck else LucideIconSet.Bookmark,
                         contentDescription = stringResource(R.string.cd_toggle_bookmark),
                         tint = if (isBookmarked) BitchatColors.StatusSuccess else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                         modifier = Modifier.size(22.dp)
@@ -608,8 +609,8 @@ private fun MainHeader(
                 onClick = onShowWallet,
                 modifier = Modifier.size(40.dp)
             ) {
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.Wallet),
+                LucideIcon(
+                    imageVector = LucideIconSet.Wallet,
                     contentDescription = "Wallet",
                     modifier = Modifier.size(22.dp),
                     tint = BitchatColors.SolanaAccent
@@ -685,8 +686,8 @@ private fun LocationChannelsButton(
             // Teleportation indicator (like iOS)
             if (teleported) {
                 Spacer(modifier = Modifier.width(2.dp))
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.PinDrop),
+                LucideIcon(
+                    imageVector = LucideIconSet.MapPin,
                     contentDescription = stringResource(R.string.cd_teleported),
                     modifier = Modifier.size(18.dp),
                     tint = badgeColor

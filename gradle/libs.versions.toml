@@ -60,6 +60,7 @@ kbase58 = "0.1"
 # QR Code
 zxing-core = "3.5.2"
 zxing-android-embedded = "4.3.0"
+icons-lucide = "1.1.0"
 
 # Testing
 junit = "4.13.2"
@@ -139,6 +140,7 @@ kbase58 = { module = "com.github.komputing:kbase58", version.ref = "kbase58" }
 # QR Code
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing-core" }
 zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxing-android-embedded" }
+icons-lucide = { module = "com.composables:icons-lucide", version.ref = "icons-lucide" }
 
 # Testing
 junit = { module = "junit:junit", version.ref = "junit" }

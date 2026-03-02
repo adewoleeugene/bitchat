@@ -8,18 +8,19 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
+import com.bitchat.android.ui.icons.LucideIcon
+import com.bitchat.android.ui.icons.LucideIconSet
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
@@ -189,7 +190,7 @@ fun ChannelsSection(
         // Mesh channels section
         if (meshChannels.isNotEmpty()) {
             ChannelGroupHeader(
-                iconGrid = PixelIcons.Bluetooth,
+                icon = LucideIconSet.Bluetooth,
                 title = "MESH",
                 colorScheme = colorScheme
             )
@@ -214,7 +215,7 @@ fun ChannelsSection(
             }
 
             ChannelGroupHeader(
-                iconGrid = PixelIcons.Globe,
+                icon = LucideIconSet.Globe,
                 title = "GEO $geohash",
                 colorScheme = colorScheme
             )
@@ -236,7 +237,7 @@ fun ChannelsSection(
 
 @Composable
 private fun ChannelGroupHeader(
-    iconGrid: Array<IntArray>,
+    icon: ImageVector,
     title: String,
     colorScheme: ColorScheme
 ) {
@@ -253,8 +254,8 @@ private fun ChannelGroupHeader(
                 .background(BitchatColors.SectionAccentLine.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
         )
         Spacer(modifier = Modifier.width(6.dp))
-        Icon(
-            painter = rememberPixelPainter(iconGrid),
+        LucideIcon(
+            imageVector = icon,
             contentDescription = null,
             modifier = Modifier.size(14.dp),
             tint = colorScheme.onSurface.copy(alpha = 0.6f)
@@ -312,8 +313,8 @@ private fun ChannelItem(
             onClick = { onLeaveChannel(channelKey) },
             modifier = Modifier.size(24.dp)
         ) {
-            Icon(
-                painter = rememberPixelPainter(PixelIcons.Close),
+            LucideIcon(
+                imageVector = LucideIconSet.X,
                 contentDescription = stringResource(com.bitchat.android.R.string.cd_leave_channel),
                 modifier = Modifier.size(16.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.5f)
@@ -348,8 +349,8 @@ fun PeopleSection(
                     .background(BitchatColors.SectionAccentLine.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Icon(
-                painter = rememberPixelPainter(PixelIcons.Group),
+            LucideIcon(
+                imageVector = LucideIconSet.Users,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = colorScheme.onSurface.copy(alpha = 0.6f)
@@ -634,8 +635,8 @@ private fun PeerItem(
         // Show unread badge or signal strength  
         if (hasUnreadDM) {
             // Show mail icon for unread DMs (iOS orange)
-            Icon(
-                painter = rememberPixelPainter(PixelIcons.Email),
+            LucideIcon(
+                imageVector = LucideIconSet.Mail,
                 contentDescription = stringResource(com.bitchat.android.R.string.cd_unread_message),
                 modifier = Modifier.size(18.dp),
                 tint = BitchatColors.SelfMessage // iOS orange
@@ -644,23 +645,23 @@ private fun PeerItem(
             // Connection indicator icons
             if (showNostrGlobe) {
                 // Purple globe to indicate Nostr availability
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.Globe),
+                LucideIcon(
+                    imageVector = LucideIconSet.Globe,
                     contentDescription = stringResource(com.bitchat.android.R.string.cd_reachable_via_nostr),
                     modifier = Modifier.size(18.dp),
                     tint = BitchatColors.NostrIndicator // Purple
                 )
             } else if (!isDirect && isFavorite) {
                 // Offline favorited user: show outlined circle icon
-                Icon(
-                    painter = rememberPixelPainter(PixelIcons.Circle),
+                LucideIcon(
+                    imageVector = LucideIconSet.Circle,
                     contentDescription = stringResource(com.bitchat.android.R.string.cd_offline_favorite),
                     modifier = Modifier.size(18.dp),
                     tint = BitchatColors.TextSecondary
                 )
             } else {
-                Icon(
-                    painter = rememberPixelPainter(if (isDirect) PixelIcons.Antenna else PixelIcons.Route),
+                LucideIcon(
+                    imageVector = if (isDirect) LucideIconSet.Antenna else LucideIconSet.Route,
                     contentDescription = if (isDirect) "Direct Bluetooth" else "Routed",
                     modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurface.copy(alpha = 0.8f)
@@ -706,8 +707,8 @@ private fun PeerItem(
             onClick = onToggleFavorite,
             modifier = Modifier.size(24.dp)
         ) {
-            Icon(
-                painter = rememberPixelPainter(if (isFavorite) PixelIcons.StarFilled else PixelIcons.StarOutline),
+            LucideIcon(
+                imageVector = LucideIconSet.Star,
                 contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                 modifier = Modifier.size(18.dp),
                 tint = if (isFavorite) BitchatColors.FavoriteStar else BitchatColors.TextTertiary

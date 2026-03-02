@@ -72,6 +72,7 @@ dependencies {
     // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.bundles.compose)
+    implementation(libs.icons.lucide)
 
     // Lifecycle
     implementation(libs.bundles.lifecycle)

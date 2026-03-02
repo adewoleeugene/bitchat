@@ -41,10 +41,10 @@ import com.bitchat.android.features.voice.AudioWaveformExtractor
 import com.bitchat.android.ui.media.RealtimeScrollingWaveform
 import com.bitchat.android.ui.media.ImagePickerButton
 import com.bitchat.android.ui.media.FilePickerButton
+import com.bitchat.android.ui.icons.LucideIcon
+import com.bitchat.android.ui.icons.LucideIconSet
 import com.bitchat.android.ui.theme.CourierPrimeFamily
 import com.bitchat.android.ui.theme.BitchatShapes
-import com.bitchat.android.ui.theme.PixelIcons
-import com.bitchat.android.ui.theme.rememberPixelPainter
 import androidx.compose.ui.draw.shadow
 
 /**
@@ -358,8 +358,8 @@ fun MessageInput(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        painter = rememberPixelPainter(PixelIcons.ArrowUp),
+                    LucideIcon(
+                        imageVector = LucideIconSet.ArrowUp,
                         contentDescription = stringResource(id = R.string.send_message),
                         modifier = Modifier.size(24.dp),
                         tint = if (!hasText) {

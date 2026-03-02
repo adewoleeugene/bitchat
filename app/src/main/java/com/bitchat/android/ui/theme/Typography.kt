@@ -16,67 +16,75 @@ val CourierPrimeFamily = FontFamily(
     Font(R.font.courier_prime_regular)
 )
 
-// Typography using Courier Prime — sized for mobile readability
+// Satoshi — primary UI typeface (headings, labels, UI chrome)
+val SatoshiFamily = FontFamily(
+    Font(R.font.satoshi_variable, weight = FontWeight.Normal),
+    Font(R.font.satoshi_variable, weight = FontWeight.Medium),
+    Font(R.font.satoshi_variable, weight = FontWeight.Bold)
+)
+
+// Typography using Satoshi — sized for mobile readability.
+// Terminal/chat-specific surfaces can still opt into CourierPrimeFamily explicitly.
 // Minimum 12sp for any visible text (WCAG mobile guideline)
 val Typography = Typography(
     bodyLarge = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = (BASE_FONT_SIZE + 1).sp,
         lineHeight = (BASE_FONT_SIZE + 8).sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = BASE_FONT_SIZE.sp,
         lineHeight = (BASE_FONT_SIZE + 6).sp
     ),
     bodySmall = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = (BASE_FONT_SIZE - 2).sp,    // 13sp (was 12sp)
         lineHeight = (BASE_FONT_SIZE + 2).sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = (BASE_FONT_SIZE + 3).sp,
         lineHeight = (BASE_FONT_SIZE + 10).sp
     ),
     titleLarge = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Bold,
         fontSize = (BASE_FONT_SIZE + 5).sp,
         lineHeight = (BASE_FONT_SIZE + 12).sp
     ),
     titleMedium = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = (BASE_FONT_SIZE + 1).sp,
         lineHeight = (BASE_FONT_SIZE + 8).sp
     ),
     titleSmall = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Bold,
         fontSize = (BASE_FONT_SIZE - 1).sp,
         lineHeight = (BASE_FONT_SIZE + 6).sp
     ),
     labelLarge = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Medium,
         fontSize = BASE_FONT_SIZE.sp,
         lineHeight = (BASE_FONT_SIZE + 6).sp,
         letterSpacing = 0.5.sp
     ),
     labelMedium = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Normal,
         fontSize = (BASE_FONT_SIZE - 2).sp,    // 13sp (was 13sp, unchanged)
         lineHeight = (BASE_FONT_SIZE + 4).sp,
         letterSpacing = 0.8.sp
     ),
     labelSmall = TextStyle(
-        fontFamily = CourierPrimeFamily,
+        fontFamily = SatoshiFamily,
         fontWeight = FontWeight.Medium,         // Medium weight for better readability at small size
         fontSize = (BASE_FONT_SIZE - 3).sp,    // 12sp (was 11sp)
         lineHeight = (BASE_FONT_SIZE + 2).sp,
