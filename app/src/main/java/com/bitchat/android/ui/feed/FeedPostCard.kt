@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -18,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -30,6 +33,7 @@ import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.SatoshiFamily
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
 
 @Composable
 fun FeedPostCard(
@@ -41,23 +45,47 @@ fun FeedPostCard(
     onToggleExpand: () -> Unit,
     onReaction: (String) -> Unit,
     onReply: (String) -> Unit,
+    canManagePin: Boolean,
+    onTogglePin: (Boolean) -> Unit,
+    isFocused: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val nicknameColor = if (post.isOwnPost) {
+    val peerAccentPalette = listOf(
+        BitchatColors.MeshChannel,
+        BitchatColors.StatusSuccess,
+        BitchatColors.StatusInfo,
+        BitchatColors.NostrIndicator,
+        BitchatColors.FavoriteStar
+    )
+    val seed = post.authorPeerID.ifBlank { post.authorNickname }
+    val accentColor = if (post.isOwnPost) {
         BitchatColors.SelfMessage
     } else {
-        BitchatColors.MeshChannel
+        peerAccentPalette[abs(seed.hashCode()) % peerAccentPalette.size]
     }
+    val bubbleBg = if (post.isOwnPost) BitchatColors.MessageBubbleSelf else BitchatColors.MessageBubblePeer
+    val borderColor = accentColor.copy(alpha = 0.35f)
+    val focusStrength by animateFloatAsState(
+        targetValue = if (isFocused) 1f else 0f,
+        label = "feed_focus_strength"
+    )
+    val cardBackground = lerp(bubbleBg, accentColor.copy(alpha = 0.16f), focusStrength)
+    val cardBorderColor = lerp(borderColor, accentColor.copy(alpha = 0.92f), focusStrength)
+    val cardBorderWidth = if (focusStrength > 0.5f) 2.dp else 1.dp
 
     var showEmojiPicker by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .background(BitchatColors.SurfaceVariant, RoundedCornerShape(8.dp))
-            .border(1.dp, BitchatColors.Border, RoundedCornerShape(8.dp))
-            .padding(12.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .background(cardBackground, RoundedCornerShape(12.dp))
+            .border(
+                width = cardBorderWidth,
+                color = cardBorderColor,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 9.dp)
     ) {
         // Header: author + timestamp
         Row(
@@ -67,31 +95,56 @@ fun FeedPostCard(
         ) {
             Text(
                 text = "@${post.authorNickname}",
-                style = MaterialTheme.typography.labelMedium,
-                color = nicknameColor,
-                fontFamily = SatoshiFamily
-            )
-            Text(
-                text = formatRelativeTime(post.timestamp),
                 style = MaterialTheme.typography.labelSmall,
-                color = BitchatColors.TextTertiary,
-                fontFamily = SatoshiFamily
+                color = accentColor,
+                fontFamily = SatoshiFamily,
+                fontWeight = FontWeight.SemiBold
             )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (post.isPinned) {
+                    Text(
+                        text = "PINNED",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accentColor,
+                        fontFamily = SatoshiFamily,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (canManagePin) {
+                    Text(
+                        text = if (post.isPinned) "unpin" else "pin",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BitchatColors.TextSecondary,
+                        fontFamily = SatoshiFamily,
+                        modifier = Modifier.clickable { onTogglePin(!post.isPinned) }
+                    )
+                }
+                Text(
+                    text = formatRelativeTime(post.timestamp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = BitchatColors.TextTertiary,
+                    fontFamily = SatoshiFamily
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Content
         Text(
             text = post.content,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = BitchatColors.TextPrimary,
-            fontFamily = SatoshiFamily
+            fontFamily = SatoshiFamily,
+            lineHeight = 19.sp
         )
 
         // Image
         if (post.hasImage && post.imagePath != null) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             val bitmap = remember(post.imagePath) {
                 try {
                     BitmapFactory.decodeFile(post.imagePath)
@@ -103,15 +156,16 @@ fun FeedPostCard(
                     bitmap = bmp.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier
-                        .widthIn(max = 300.dp)
+                        .fillMaxWidth()
                         .aspectRatio(aspect)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, borderColor.copy(alpha = 0.65f), RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Fit
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Reaction bar
         ReactionBar(
@@ -126,7 +180,7 @@ fun FeedPostCard(
 
         // Emoji picker
         if (showEmojiPicker) {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             EmojiReactionPicker(
                 onEmojiSelected = { emoji ->
                     onReaction(emoji)
@@ -136,11 +190,11 @@ fun FeedPostCard(
         }
 
         // Reply count + expand toggle
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         Row(
             modifier = Modifier
                 .clickable { onToggleExpand() }
-                .padding(vertical = 4.dp),
+                .padding(vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val replyCount = post.replyCount
@@ -148,19 +202,20 @@ fun FeedPostCard(
                 text = if (isExpanded) "hide replies" else "$replyCount ${if (replyCount == 1) "reply" else "replies"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = BitchatColors.TextSecondary,
-                fontFamily = SatoshiFamily
+                fontFamily = SatoshiFamily,
+                fontWeight = FontWeight.Medium
             )
         }
 
         // Expanded: replies + reply input
         if (isExpanded) {
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             replies.forEach { reply ->
                 FeedReplyItem(reply = reply)
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(1.dp))
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             ReplyInput(onReply = onReply)
         }
     }
@@ -224,7 +279,7 @@ private fun ReactionBar(
                 .background(BitchatColors.BackgroundElevated, RoundedCornerShape(12.dp))
                 .border(1.dp, BitchatColors.Border, RoundedCornerShape(12.dp))
                 .clickable { onAddReaction() }
-                .padding(horizontal = 10.dp, vertical = 3.dp)
+                .padding(horizontal = 9.dp, vertical = 3.dp)
         )
     }
 }
