@@ -17,6 +17,9 @@ interface FeedDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPost(post: FeedPostEntity)
 
+    @Query("SELECT * FROM feed_posts WHERE channelKey = :channelKey ORDER BY timestamp DESC")
+    fun observePostsByChannel(channelKey: String): Flow<List<FeedPostEntity>>
+
     @Query("SELECT * FROM feed_posts ORDER BY timestamp DESC")
     fun observeAllPosts(): Flow<List<FeedPostEntity>>
 
@@ -35,6 +38,57 @@ interface FeedDao {
     @Query("UPDATE feed_posts SET replyCount = :count WHERE postId = :postId")
     suspend fun updateReplyCount(postId: String, count: Int)
 
+    @Query(
+        """
+        UPDATE feed_posts
+        SET hasImage = CASE WHEN hasImage = 1 THEN 1 ELSE :hasImage END,
+            imagePath = CASE
+                WHEN imagePath IS NOT NULL AND imagePath != '' THEN imagePath
+                ELSE :imagePath
+            END,
+            hasAudio = CASE WHEN hasAudio = 1 THEN 1 ELSE :hasAudio END,
+            audioPath = CASE
+                WHEN audioPath IS NOT NULL AND audioPath != '' THEN audioPath
+                ELSE :audioPath
+            END
+        WHERE postId = :postId
+        """
+    )
+    suspend fun mergePostMedia(
+        postId: String,
+        hasImage: Boolean,
+        imagePath: String?,
+        hasAudio: Boolean,
+        audioPath: String?
+    ): Int
+
+    @Query(
+        """
+        UPDATE feed_posts
+        SET isPinned = :isPinned,
+            pinnedAt = :pinnedAt,
+            pinnedByPeerID = :pinnedByPeerID,
+            pinVersion = :pinVersion
+        WHERE postId = :postId
+        """
+    )
+    suspend fun updatePinState(
+        postId: String,
+        isPinned: Boolean,
+        pinnedAt: Long?,
+        pinnedByPeerID: String?,
+        pinVersion: Long
+    ): Int
+
+    @Query("SELECT COUNT(*) FROM feed_posts WHERE channelKey = :channelKey AND isPinned = 1")
+    suspend fun getPinnedCount(channelKey: String): Int
+
+    @Query(
+        "SELECT postId FROM feed_posts WHERE channelKey = :channelKey AND isPinned = 1 " +
+            "ORDER BY COALESCE(pinnedAt, timestamp) ASC LIMIT 1"
+    )
+    suspend fun getOldestPinnedPostId(channelKey: String): String?
+
     // --- Reactions ---
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -48,6 +102,9 @@ interface FeedDao {
 
     @Query("SELECT * FROM feed_reactions WHERE postId = :postId")
     suspend fun getReactionsForPost(postId: String): List<FeedReactionEntity>
+
+    @Query("SELECT * FROM feed_reactions ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentReactions(limit: Int = 200): List<FeedReactionEntity>
 
     @Query("SELECT EXISTS(SELECT 1 FROM feed_reactions WHERE postId = :postId AND reactorPeerID = :peerID AND emoji = :emoji)")
     suspend fun hasReaction(postId: String, peerID: String, emoji: String): Boolean
@@ -65,6 +122,9 @@ interface FeedDao {
 
     @Query("SELECT * FROM feed_replies WHERE parentPostId = :postId ORDER BY timestamp ASC")
     suspend fun getRepliesForPost(postId: String): List<FeedReplyEntity>
+
+    @Query("SELECT * FROM feed_replies ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentReplies(limit: Int = 200): List<FeedReplyEntity>
 
     @Query("SELECT EXISTS(SELECT 1 FROM feed_replies WHERE replyId = :replyId)")
     suspend fun replyExists(replyId: String): Boolean

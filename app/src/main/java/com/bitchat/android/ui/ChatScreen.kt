@@ -6,6 +6,8 @@ package com.bitchat.android.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +30,8 @@ import androidx.compose.ui.zIndex
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.ui.media.FullScreenImageViewer
 import com.bitchat.android.ui.theme.BitchatColors
+import com.bitchat.android.ui.theme.BitchatShapes
+import kotlinx.coroutines.launch
 
 /**
  * Main ChatScreen - REFACTORED to use component-based architecture
@@ -53,8 +57,11 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val privateChats by viewModel.privateChats.observeAsState(emptyMap())
     val channelMessages by viewModel.channelMessages.observeAsState(emptyMap())
     val showSidebar by viewModel.showSidebar.observeAsState(false)
-    val showCommandSuggestions by viewModel.showCommandSuggestions.observeAsState(false)
-    val commandSuggestions by viewModel.commandSuggestions.observeAsState(emptyList())
+    val selectedLocationChannel by viewModel.selectedLocationChannel.observeAsState()
+    val commandSheetSuggestions = remember(
+        selectedPrivatePeer,
+        currentChannel
+    ) { viewModel.getAllSlashCommands() }
     val showMentionSuggestions by viewModel.showMentionSuggestions.observeAsState(false)
     val mentionSuggestions by viewModel.mentionSuggestions.observeAsState(emptyList())
     val showAppInfo by viewModel.showAppInfo.observeAsState(false)
@@ -67,6 +74,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showLocationChannelsSheet by remember { mutableStateOf(false) }
     var showLocationNotesSheet by remember { mutableStateOf(false) }
     var showUserSheet by remember { mutableStateOf(false) }
+    var showCommandSheet by remember { mutableStateOf(false) }
     var selectedUserForSheet by remember { mutableStateOf("") }
     var selectedMessageForSheet by remember { mutableStateOf<BitchatMessage?>(null) }
     var showFullScreenImageViewer by remember { mutableStateOf(false) }
@@ -75,6 +83,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var forceScrollToBottom by remember { mutableStateOf(false) }
     var isScrolledUp by remember { mutableStateOf(false) }
     var showWalletScreen by remember { mutableStateOf(false) }
+    var showNotificationsSheet by remember { mutableStateOf(false) }
+    var feedJumpTargetPostId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val selectedTab by viewModel.selectedTab.observeAsState("chat")
     val showNewPostComposer by viewModel.showNewPostComposer.observeAsState(false)
 
@@ -85,9 +96,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
 
     val isConnected by viewModel.isConnected.observeAsState(false)
     val passwordPromptChannel by viewModel.passwordPromptChannel.observeAsState(null)
-
-    // Get location channel info for timeline switching
-    val selectedLocationChannel by viewModel.selectedLocationChannel.observeAsState()
 
     // Determine what messages to show based on current context (unified timelines)
     val displayMessages = when {
@@ -147,6 +155,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 // Feed view
                 com.bitchat.android.ui.feed.FeedTimeline(
                     viewModel = viewModel,
+                    jumpToPostId = feedJumpTargetPostId,
+                    onJumpHandled = { feedJumpTargetPostId = null },
                     modifier = Modifier.weight(1f)
                 )
                 com.bitchat.android.ui.feed.FeedInputBar(
@@ -207,7 +217,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     messageText = messageText,
                     onMessageTextChange = { newText: TextFieldValue ->
                         messageText = newText
-                        viewModel.updateCommandSuggestions(newText.text)
                         viewModel.updateMentionSuggestions(newText.text)
                         if (!newText.text.startsWith("/")) commandHint = null
                     },
@@ -228,6 +237,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
                             forceScrollToBottom = !forceScrollToBottom
                         }
                     },
+                    onOpenCommandSheet = { showCommandSheet = true },
                     onSendVoiceNote = { peer, onionOrChannel, path ->
                         viewModel.sendVoiceNote(peer, onionOrChannel, path)
                     },
@@ -238,19 +248,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
                         viewModel.sendFileNote(peer, onionOrChannel, path)
                     },
                     commandHint = commandHint,
-                    showCommandSuggestions = showCommandSuggestions,
-                    commandSuggestions = commandSuggestions,
                     showMentionSuggestions = showMentionSuggestions,
                     mentionSuggestions = mentionSuggestions,
-                    onCommandSuggestionClick = { suggestion: CommandSuggestion ->
-                        val result = viewModel.selectCommandSuggestion(suggestion)
-                        val text = result.prefillText ?: "${suggestion.command} "
-                        messageText = TextFieldValue(
-                            text = text,
-                            selection = TextRange(result.cursorPosition ?: text.length)
-                        )
-                        commandHint = result.hintText
-                    },
                     onMentionSuggestionClick = { mention: String ->
                         val mentionText = viewModel.selectMentionSuggestion(mention, messageText.text)
                         messageText = TextFieldValue(
@@ -280,7 +279,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onPanicClear = { viewModel.panicClearAllData() },
             onLocationChannelsClick = { showLocationChannelsSheet = true },
             onLocationNotesClick = { showLocationNotesSheet = true },
-            onShowWallet = { showWalletScreen = true }
+            onShowWallet = { showWalletScreen = true },
+            onNotificationsClick = { showNotificationsSheet = true }
         )
 
         // Divider under header - positioned after status bar + header height
@@ -370,11 +370,37 @@ fun ChatScreen(viewModel: ChatViewModel) {
         )
     }
 
+    if (showCommandSheet) {
+        CommandPickerSheet(
+            suggestions = commandSheetSuggestions,
+            onDismiss = { showCommandSheet = false },
+            onCommandSelected = { suggestion ->
+                val autoRunCommands = setOf("/clear", "/w", "/channels", "/wallet")
+                if (suggestion.command in autoRunCommands) {
+                    viewModel.sendMessage(suggestion.command)
+                    messageText = TextFieldValue("")
+                    commandHint = null
+                    showCommandSheet = false
+                    return@CommandPickerSheet
+                }
+                val result = viewModel.selectCommandSuggestion(suggestion)
+                val text = result.prefillText ?: "${suggestion.command} "
+                messageText = TextFieldValue(
+                    text = text,
+                    selection = TextRange(result.cursorPosition ?: text.length)
+                )
+                commandHint = result.hintText
+                viewModel.updateCommandSuggestions(text)
+                showCommandSheet = false
+            }
+        )
+    }
+
     // New Post Composer
     if (showNewPostComposer) {
         com.bitchat.android.ui.feed.NewPostComposer(
-            onPost = { content, imageBytes ->
-                viewModel.createFeedPost(content, imageBytes)
+            onPost = { content, imageBytes, audioBytes, audioPath ->
+                viewModel.createFeedPost(content, imageBytes, audioBytes, audioPath)
                 viewModel.hideNewPostComposer()
             },
             onDismiss = { viewModel.hideNewPostComposer() }
@@ -424,6 +450,63 @@ fun ChatScreen(viewModel: ChatViewModel) {
             getPeersWithSolana = { viewModel.getPeersWithSolanaAddresses() }
         )
     }
+
+    if (showNotificationsSheet) {
+        InAppNotificationsSheet(
+            viewModel = viewModel,
+            onNotificationClick = { item ->
+                val targetId = extractNotificationTarget(item.id)
+                when (item.type) {
+                    "dm" -> {
+                        if (!targetId.isNullOrBlank()) {
+                            viewModel.startPrivateChat(targetId)
+                            viewModel.selectTab("chat")
+                            showNotificationsSheet = false
+                        }
+                    }
+                    "geohash" -> {
+                        if (!targetId.isNullOrBlank()) {
+                            val level = ChannelKeys.levelForGeohashLength(targetId.length)
+                            val geohashChannel = com.bitchat.android.geohash.GeohashChannel(level, targetId)
+                            viewModel.endPrivateChat()
+                            viewModel.selectLocationChannel(com.bitchat.android.geohash.ChannelID.Location(geohashChannel))
+                            viewModel.clearNotificationsForGeohash(targetId)
+                            viewModel.selectTab("chat")
+                            showNotificationsSheet = false
+                        }
+                    }
+                    "feed" -> {
+                        val postId = item.targetId ?: targetId
+                        if (!postId.isNullOrBlank()) {
+                            scope.launch {
+                                val targetChannelKey = item.targetChannelKey
+                                    ?: viewModel.getFeedPostChannelKey(postId)
+                                viewModel.openFeedChannelScope(targetChannelKey)
+                                feedJumpTargetPostId = postId
+                                viewModel.selectTab("feed")
+                                viewModel.expandPost(postId)
+                                viewModel.clearNotificationsForFeedPost(postId)
+                                showNotificationsSheet = false
+                            }
+                        }
+                    }
+                    "mention" -> {
+                        viewModel.endPrivateChat()
+                        viewModel.selectLocationChannel(com.bitchat.android.geohash.ChannelID.Mesh)
+                        viewModel.clearMeshMentionNotifications()
+                        viewModel.selectTab("chat")
+                        showNotificationsSheet = false
+                    }
+                }
+            },
+            onDismiss = { showNotificationsSheet = false }
+        )
+    }
+}
+
+private fun extractNotificationTarget(id: String): String? {
+    val target = id.substringAfterLast(':', "")
+    return target.takeIf { it.isNotBlank() }
 }
 
 @Composable
@@ -431,15 +514,13 @@ private fun ChatInputSection(
     messageText: TextFieldValue,
     onMessageTextChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
+    onOpenCommandSheet: () -> Unit,
     onSendVoiceNote: (String?, String?, String) -> Unit,
     onSendImageNote: (String?, String?, String) -> Unit,
     onSendFileNote: (String?, String?, String) -> Unit,
     commandHint: String?,
-    showCommandSuggestions: Boolean,
-    commandSuggestions: List<CommandSuggestion>,
     showMentionSuggestions: Boolean,
     mentionSuggestions: List<String>,
-    onCommandSuggestionClick: (CommandSuggestion) -> Unit,
     onMentionSuggestionClick: (String) -> Unit,
     selectedPrivatePeer: String?,
     currentChannel: String?,
@@ -453,15 +534,6 @@ private fun ChatInputSection(
     ) {
         Column {
             HorizontalDivider(color = BitchatColors.InputFieldBorder)
-            // Command suggestions box
-            if (showCommandSuggestions && commandSuggestions.isNotEmpty()) {
-                CommandSuggestionsBox(
-                    suggestions = commandSuggestions,
-                    onSuggestionClick = onCommandSuggestionClick,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.2f))
-            }
             // Mention suggestions box
             if (showMentionSuggestions && mentionSuggestions.isNotEmpty()) {
                 MentionSuggestionsBox(
@@ -487,6 +559,7 @@ private fun ChatInputSection(
                 value = messageText,
                 onValueChange = onMessageTextChange,
                 onSend = onSend,
+                onOpenCommandSheet = onOpenCommandSheet,
                 onSendVoiceNote = onSendVoiceNote,
                 onSendImageNote = onSendImageNote,
                 onSendFileNote = onSendFileNote,
@@ -496,6 +569,179 @@ private fun ChatInputSection(
                 showMediaButtons = showMediaButtons,
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InAppNotificationsSheet(
+    viewModel: ChatViewModel,
+    onNotificationClick: (NotificationManager.InAppNotificationItem) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val notifications by viewModel.inAppNotifications.observeAsState(emptyList())
+    val colorScheme = MaterialTheme.colorScheme
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BitchatColors.BackgroundLayer1
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Notifications",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colorScheme.onSurface
+                )
+                TextButton(onClick = { viewModel.clearInAppNotifications() }) {
+                    Text("Clear all")
+                }
+            }
+            if (notifications.isEmpty()) {
+                Text(
+                    text = "No notifications yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = BitchatColors.TextSecondary,
+                    modifier = Modifier.padding(vertical = 18.dp)
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(notifications, key = { it.id }) { item ->
+                        Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                            color = BitchatColors.InputFieldBg,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onNotificationClick(item) }
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = BitchatColors.TextPrimary
+                                    )
+                                    Text(
+                                        text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                                            .format(java.util.Date(item.timestamp)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = BitchatColors.TextTertiary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = item.body,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = BitchatColors.TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommandPickerSheet(
+    suggestions: List<CommandSuggestion>,
+    onDismiss: () -> Unit,
+    onCommandSelected: (CommandSuggestion) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BitchatColors.BackgroundLayer1
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Commands",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = com.bitchat.android.ui.theme.SatoshiFamily,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                ),
+                color = colorScheme.onSurface
+            )
+            Text(
+                text = "Tap a command to insert it",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = com.bitchat.android.ui.theme.SatoshiFamily
+                ),
+                color = BitchatColors.TextTertiary
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(suggestions) { cmd ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onCommandSelected(cmd) },
+                        shape = BitchatShapes.Card,
+                        color = BitchatColors.InputFieldBg,
+                        border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val syntaxPart = cmd.syntax?.let { " $it" } ?: ""
+                            Text(
+                                text = "${cmd.command}$syntaxPart",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontFamily = com.bitchat.android.ui.theme.SatoshiFamily,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                                ),
+                                color = colorScheme.primary,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = cmd.description,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = com.bitchat.android.ui.theme.SatoshiFamily
+                                ),
+                                color = colorScheme.onSurface.copy(alpha = 0.75f),
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
@@ -533,7 +779,7 @@ private fun ChatTabBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .padding(horizontal = 16.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
@@ -627,7 +873,8 @@ private fun ChatFloatingHeader(
     onPanicClear: () -> Unit,
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
-    onShowWallet: () -> Unit = {}
+    onShowWallet: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
@@ -661,7 +908,8 @@ private fun ChatFloatingHeader(
                         locationManager.refreshChannels()
                         onLocationNotesClick()
                     },
-                    onShowWallet = onShowWallet
+                    onShowWallet = onShowWallet,
+                    onNotificationsClick = onNotificationsClick
                 )
             },
             colors = TopAppBarDefaults.topAppBarColors(

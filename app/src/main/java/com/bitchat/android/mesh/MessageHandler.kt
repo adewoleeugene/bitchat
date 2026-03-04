@@ -23,6 +23,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     
     companion object {
         private const val TAG = "MessageHandler"
+        private const val MAX_OWNERSHIP_PROOFS_TO_VERIFY = 24
+        private const val OWNERSHIP_ONLINE_VERIFY_TIMEOUT_MS = 3_000L
     }
     
     // Delegate for callbacks
@@ -295,7 +297,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             if (!verifiedSolanaAddress.isNullOrBlank() && announcement.solanaOwnershipProofs.isNotEmpty()) {
                 announcement.solanaOwnershipProofs
                     .asSequence()
-                    .take(12) // Keep ANNOUNCE bounded and resilient against proof flooding.
+                    // Hard cap expensive signature checks to bound ANNOUNCE verification cost.
+                    .take(MAX_OWNERSHIP_PROOFS_TO_VERIFY)
                     .filter { proof ->
                         SolanaOwnershipProofUtil.verifyProof(
                             nickname = nickname,
@@ -304,17 +307,46 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                             proof = proof
                         )
                     }
+                    // Prefer freshest proof per claim target to prevent duplicate/flood entries.
+                    .sortedByDescending { it.validatedAtMs }
+                    .distinctBy { "${it.claimType.name}:${it.targetAddress.lowercase()}" }
+                    .take(12) // Keep ANNOUNCE bounded and resilient against proof flooding.
                     .toList()
             } else {
                 emptyList()
             }
 
+        val finalOwnershipProofs = if (!verifiedSolanaAddress.isNullOrBlank() && verifiedOwnershipProofs.isNotEmpty()) {
+            val onlineVerified = try {
+                withTimeoutOrNull(OWNERSHIP_ONLINE_VERIFY_TIMEOUT_MS) {
+                    delegate?.verifyOwnershipProofsOnline(
+                        nickname = nickname,
+                        solanaAddress = verifiedSolanaAddress,
+                        proofs = verifiedOwnershipProofs
+                    )
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (onlineVerified != null) {
+                onlineVerified
+                    .asSequence()
+                    .distinctBy { "${it.claimType.name}:${it.targetAddress.lowercase()}" }
+                    .take(12)
+                    .toList()
+            } else {
+                verifiedOwnershipProofs
+            }
+        } else {
+            verifiedOwnershipProofs
+        }
+
         if (announcement.solanaOwnershipProofs.isNotEmpty() &&
-            verifiedOwnershipProofs.size != announcement.solanaOwnershipProofs.size
+            finalOwnershipProofs.size != announcement.solanaOwnershipProofs.size
         ) {
             Log.w(
                 TAG,
-                "Dropped ${announcement.solanaOwnershipProofs.size - verifiedOwnershipProofs.size} invalid Solana ownership proofs from $peerID"
+                "Dropped ${announcement.solanaOwnershipProofs.size - finalOwnershipProofs.size} invalid Solana ownership proofs from $peerID"
             )
         }
 
@@ -339,7 +371,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             signingPublicKey = signingPublicKey,
             isVerified = true,
             solanaAddress = verifiedSolanaAddress,
-            solanaOwnershipProofs = verifiedOwnershipProofs,
+            solanaOwnershipProofs = finalOwnershipProofs,
             nftProfileMint = validatedNftProfileMint
         ) ?: false
 
@@ -464,14 +496,24 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                 if (isFileTransfer) {
                     Log.d(TAG, "📥 FILE_TRANSFER decode success (broadcast): name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}', from=${peerID.take(8)}")
                 }
-                val savedPath = com.bitchat.android.features.file.FileUtils.saveIncomingFile(appContext, file)
+                val feedPostId = com.bitchat.android.feed.FeedService.decodeFeedAudioPostId(file.fileName)
+                if (feedPostId != null && file.mimeType.lowercase().startsWith("audio/")) {
+                    delegate?.onFeedAudioAttachment(feedPostId, file.content, peerID)
+                    return
+                }
+                val (decodedFileName, decodedChannelKey) =
+                    com.bitchat.android.features.file.FileUtils.decodeChannelFromFileName(file.fileName)
+                val normalizedChannelKey = decodedChannelKey?.let { com.bitchat.android.ui.ChannelKeys.normalize(it) }
+                val normalizedFile = file.copy(fileName = decodedFileName)
+                val savedPath = com.bitchat.android.features.file.FileUtils.saveIncomingFile(appContext, normalizedFile)
                 val message = BitchatMessage(
                     id = java.util.UUID.randomUUID().toString().uppercase(),
                     sender = delegate?.getPeerNickname(peerID) ?: "unknown",
                     content = savedPath,
                     type = com.bitchat.android.features.file.FileUtils.messageTypeForMime(file.mimeType),
                     senderPeerID = peerID,
-                    timestamp = Date(packet.timestamp.toLong())
+                    timestamp = Date(packet.timestamp.toLong()),
+                    channel = normalizedChannelKey
                 )
                 Log.d(TAG, "📄 Saved incoming file to $savedPath")
                 delegate?.onMessageReceived(message)
@@ -697,6 +739,11 @@ interface MessageHandlerDelegate {
     fun encryptForPeer(data: ByteArray, recipientPeerID: String): ByteArray?
     fun decryptFromPeer(encryptedData: ByteArray, senderPeerID: String): ByteArray?
     fun verifyEd25519Signature(signature: ByteArray, data: ByteArray, publicKey: ByteArray): Boolean
+    suspend fun verifyOwnershipProofsOnline(
+        nickname: String,
+        solanaAddress: String,
+        proofs: List<SolanaOwnershipProof>
+    ): List<SolanaOwnershipProof>?
     
     // Noise protocol operations
     fun hasNoiseSession(peerID: String): Boolean
@@ -707,6 +754,7 @@ interface MessageHandlerDelegate {
     
     // Message operations
     fun decryptChannelMessage(encryptedContent: ByteArray, channel: String): String?
+    fun onFeedAudioAttachment(postId: String, audioBytes: ByteArray, fromPeerID: String)
 
     // Callbacks
     fun onMessageReceived(message: BitchatMessage)

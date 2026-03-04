@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import com.bitchat.android.di.SolanaEntryPoint
 import com.bitchat.android.mesh.BluetoothMeshDelegate
@@ -41,7 +43,14 @@ class ChatViewModel(
     private var tokenGateRevalidationJob: kotlinx.coroutines.Job? = null
     private var tokenGatePolicySyncJob: kotlinx.coroutines.Job? = null
     private var channelRolePolicySyncJob: kotlinx.coroutines.Job? = null
+    private var feedPostsJob: kotlinx.coroutines.Job? = null
     private val tokenGateDenyStrikes = mutableMapOf<String, Int>()
+    private val feedScopeObserver = Observer<Any?> {
+        restartFeedPostsObservation()
+    }
+    private val channelMessagesPersistenceObserver = Observer<Map<String, List<BitchatMessage>>> { channels ->
+        dataManager.saveChannelMessages(channels ?: emptyMap())
+    }
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -49,6 +58,7 @@ class ChatViewModel(
         private const val TOKEN_GATE_POLICY_SYNC_INTERVAL_MS = 5 * 60_000L
         private const val CHANNEL_ROLE_POLICY_SYNC_INTERVAL_MS = 90_000L
         private const val TOKEN_GATE_DENY_STRIKES_TO_KICK = 2
+        private const val FEED_REPLY_NOTIFICATION_MAX_AGE_MS = 15 * 60_000L
     }
 
     fun sendVoiceNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
@@ -89,6 +99,10 @@ class ChatViewModel(
       NotificationManagerCompat.from(application.applicationContext),
       NotificationIntervalManager()
     )
+    private val _inAppNotificationCount = MutableLiveData(0)
+    val inAppNotificationCount: LiveData<Int> = _inAppNotificationCount
+    private val _inAppNotifications = MutableLiveData<List<NotificationManager.InAppNotificationItem>>(emptyList())
+    val inAppNotifications: LiveData<List<NotificationManager.InAppNotificationItem>> = _inAppNotifications
 
     // Media file sending manager
     private val mediaSendingManager = MediaSendingManager(state, messageManager, channelManager, meshService)
@@ -166,8 +180,13 @@ class ChatViewModel(
     private var feedService: com.bitchat.android.feed.FeedService? = null
 
     init {
+        notificationManager.onNotificationStateChanged = {
+            refreshInAppNotificationState()
+        }
         // Note: Mesh service delegate is now set by MainActivity
         loadAndInitialize()
+        state.channelMessages.observeForever(channelMessagesPersistenceObserver)
+        refreshInAppNotificationState()
         // Subscribe to BLE transfer progress and reflect in message deliveryStatus
         viewModelScope.launch {
             com.bitchat.android.mesh.TransferProgressManager.events.collect { evt ->
@@ -192,6 +211,12 @@ class ChatViewModel(
         val (joinedChannels, protectedChannels) = channelManager.loadChannelData()
         state.setJoinedChannels(joinedChannels)
         state.setPasswordProtectedChannels(protectedChannels)
+
+        // Restore persisted channel timeline history before initializing missing channels.
+        val persistedChannelMessages = dataManager.loadChannelMessages()
+        if (persistedChannelMessages.isNotEmpty()) {
+            state.setChannelMessages(persistedChannelMessages)
+        }
         
         // Initialize channel messages
         joinedChannels.forEach { channel ->
@@ -521,6 +546,7 @@ class ChatViewModel(
             )
             feedService = feedEntryPoint.feedService()
             meshService.feedService = feedService
+            runCatching { meshService.flushPendingFeedPackets() }
 
             feedService?.onBroadcastFeedPost = { payload ->
                 meshService.broadcastFeedPost(payload)
@@ -531,13 +557,18 @@ class ChatViewModel(
             feedService?.onBroadcastFeedReply = { payload ->
                 meshService.broadcastFeedReply(payload)
             }
-
-            // Observe feed posts from Room
-            viewModelScope.launch {
-                feedService?.observePosts()?.collect { posts ->
-                    state.postFeedPosts(posts)
+            feedService?.onBroadcastFeedPin = { payload ->
+                meshService.broadcastFeedPin(payload)
+            }
+            feedService?.onFeedReplyNotification = { event ->
+                viewModelScope.launch {
+                    handleFeedReplyNotification(event)
                 }
             }
+
+            state.currentChannel.observeForever(feedScopeObserver)
+            state.selectedLocationChannel.observeForever(feedScopeObserver)
+            restartFeedPostsObservation()
         } catch (e: Exception) {
             Log.w(TAG, "Feed service not available: ${e.message}")
         }
@@ -549,6 +580,10 @@ class ChatViewModel(
         tokenGatePolicySyncJob?.cancel()
         channelRolePolicySyncJob?.cancel()
         walletLinkAnnounceJob?.cancel()
+        feedPostsJob?.cancel()
+        runCatching { state.currentChannel.removeObserver(feedScopeObserver) }
+        runCatching { state.selectedLocationChannel.removeObserver(feedScopeObserver) }
+        runCatching { state.channelMessages.removeObserver(channelMessagesPersistenceObserver) }
         tokenGateDenyStrikes.clear()
         meshService.onTokenGatePolicyReceived = null
         meshService.onChannelRolePolicyReceived = null
@@ -1119,14 +1154,47 @@ class ChatViewModel(
         notificationManager.setCurrentGeohash(geohash)
     }
 
+    private fun handleFeedReplyNotification(event: com.bitchat.android.feed.FeedService.FeedReplyNotificationEvent) {
+        val now = System.currentTimeMillis()
+        if (now - event.timestamp > FEED_REPLY_NOTIFICATION_MAX_AGE_MS) return
+
+        val myPeerID = meshService.myPeerID
+        if (event.senderPeerID == myPeerID) return
+
+        val iAmOriginalPoster = event.parentPostAuthorPeerID == myPeerID
+        val iAmPriorCommenter = event.priorCommenterPeerIDs.contains(myPeerID)
+        if (!iAmOriginalPoster && !iAmPriorCommenter) return
+
+        val reason = when {
+            iAmOriginalPoster && iAmPriorCommenter -> "New reply in your post thread"
+            iAmOriginalPoster -> "New reply to your post"
+            else -> "New reply in a thread you commented on"
+        }
+
+        notificationManager.showFeedReplyNotification(
+            postId = event.parentPostId,
+            senderNickname = event.senderNickname,
+            messageContent = event.content,
+            reason = reason,
+            channelKey = event.parentPostChannelKey
+        )
+    }
+
     fun clearNotificationsForSender(peerID: String) {
         // Clear notifications when user opens a chat
         notificationManager.clearNotificationsForSender(peerID)
+        refreshInAppNotificationState()
     }
     
     fun clearNotificationsForGeohash(geohash: String) {
         // Clear notifications when user opens a geohash chat
         notificationManager.clearNotificationsForGeohash(geohash)
+        refreshInAppNotificationState()
+    }
+
+    fun clearNotificationsForFeedPost(postId: String) {
+        notificationManager.clearNotificationsForFeedPost(postId)
+        refreshInAppNotificationState()
     }
 
     /**
@@ -1134,6 +1202,17 @@ class ChatViewModel(
      */
     fun clearMeshMentionNotifications() {
         notificationManager.clearMeshMentionNotifications()
+        refreshInAppNotificationState()
+    }
+
+    fun clearInAppNotifications() {
+        notificationManager.clearAllNotifications()
+        refreshInAppNotificationState()
+    }
+
+    private fun refreshInAppNotificationState() {
+        _inAppNotificationCount.postValue(notificationManager.getPendingNotificationCount())
+        _inAppNotifications.postValue(notificationManager.getRecentInAppNotifications())
     }
 
     // MARK: - Command Autocomplete (delegated)
@@ -1144,6 +1223,10 @@ class ChatViewModel(
     
     fun selectCommandSuggestion(suggestion: CommandSuggestion): CommandResult {
         return commandProcessor.selectCommandSuggestion(suggestion)
+    }
+
+    fun getAllSlashCommands(): List<CommandSuggestion> {
+        return commandProcessor.getAllSlashCommands(meshService.myPeerID)
     }
     
     // MARK: - Mention Autocomplete
@@ -1667,17 +1750,29 @@ class ChatViewModel(
 
     fun selectTab(tab: String) {
         state.setSelectedTab(tab)
+        notificationManager.setCurrentTab(tab)
     }
 
-    fun createFeedPost(content: String, imageBytes: ByteArray?) {
+    fun createFeedPost(
+        content: String,
+        imageBytes: ByteArray?,
+        audioBytes: ByteArray?,
+        audioPath: String?
+    ) {
         val service = feedService ?: return
         viewModelScope.launch {
-            service.createPost(
-                content, imageBytes,
-                meshService.myPeerID,
-                state.getNicknameValue() ?: meshService.myPeerID,
-                getApplication()
-            )
+            runCatching {
+                service.createPost(
+                    content, imageBytes, audioBytes, audioPath,
+                    meshService.myPeerID,
+                    state.getNicknameValue() ?: meshService.myPeerID,
+                    currentFeedChannelKey(),
+                    getApplication()
+                )
+            }.onFailure { error ->
+                Log.e(TAG, "Failed to create feed post: ${error.message}", error)
+                messageManager.addSystemMessage("failed to publish post. try a shorter audio clip.")
+            }
         }
     }
 
@@ -1705,6 +1800,24 @@ class ChatViewModel(
         }
     }
 
+    fun setFeedPostPinned(postId: String, isPinned: Boolean) {
+        val service = feedService ?: return
+        viewModelScope.launch {
+            service.setPostPinned(
+                postId = postId,
+                isPinned = isPinned,
+                myPeerID = meshService.myPeerID,
+                myNickname = state.getNicknameValue() ?: meshService.myPeerID,
+                canManageAnyPost = canManageFeedPins()
+            )
+        }
+    }
+
+    fun canManageFeedPins(): Boolean {
+        val channel = state.getCurrentChannelValue() ?: return false
+        return channelManager.isChannelAdmin(channel, meshService.myPeerID)
+    }
+
     fun expandPost(postId: String?) {
         state.setExpandedPostId(postId)
         if (postId != null) {
@@ -1712,6 +1825,61 @@ class ChatViewModel(
                 refreshReactionsForPost(postId)
                 refreshRepliesForPost(postId)
             }
+        }
+    }
+
+    private fun restartFeedPostsObservation() {
+        val service = feedService ?: return
+        val scopeKey = currentFeedChannelKey()
+        feedPostsJob?.cancel()
+        feedPostsJob = viewModelScope.launch {
+            service.observePosts(scopeKey).collect { posts ->
+                state.postFeedPosts(posts)
+            }
+        }
+    }
+
+    private fun currentFeedChannelKey(): String {
+        val activeChannel = state.getCurrentChannelValue()
+        if (!activeChannel.isNullOrBlank()) {
+            return com.bitchat.android.feed.FeedService.normalizeChannelKey(activeChannel)
+        }
+
+        val location = state.selectedLocationChannel.value
+        return when (location) {
+            is com.bitchat.android.geohash.ChannelID.Location ->
+                "geo:${location.channel.geohash}:#mesh"
+            else ->
+                com.bitchat.android.feed.FeedService.DEFAULT_MESH_FEED_CHANNEL_KEY
+        }
+    }
+
+    suspend fun getFeedPostChannelKey(postId: String): String? {
+        val service = feedService ?: return null
+        return service.getPostById(postId)?.channelKey
+    }
+
+    fun openFeedChannelScope(channelKey: String?) {
+        val normalized = com.bitchat.android.feed.FeedService.normalizeChannelKey(channelKey)
+        val channelName = ChannelKeys.parseChannelName(normalized)
+        if (ChannelKeys.isGeo(normalized)) {
+            val geohash = ChannelKeys.parseGeohash(normalized) ?: return
+            val level = ChannelKeys.levelForGeohashLength(geohash.length)
+            val geohashChannel = com.bitchat.android.geohash.GeohashChannel(level, geohash)
+            selectLocationChannel(com.bitchat.android.geohash.ChannelID.Location(geohashChannel))
+            if (channelName == "#mesh") {
+                switchToChannel(null)
+            } else {
+                switchToChannel(normalized)
+            }
+            return
+        }
+
+        selectLocationChannel(com.bitchat.android.geohash.ChannelID.Mesh)
+        if (channelName == "#mesh") {
+            switchToChannel(null)
+        } else {
+            switchToChannel(normalized)
         }
     }
 

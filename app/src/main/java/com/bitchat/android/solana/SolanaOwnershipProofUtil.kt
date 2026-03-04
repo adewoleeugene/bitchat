@@ -11,6 +11,9 @@ import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec
 object SolanaOwnershipProofUtil {
     private const val PROOF_PREFIX = "bitchat-ownership-proof"
     private const val PROOF_VERSION = "v1"
+    private const val MAX_PROOF_VALIDITY_MS = 24 * 60 * 60 * 1000L
+    private const val MAX_CLOCK_SKEW_MS = 2 * 60 * 1000L
+    private val BASE58_REGEX = Regex("^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
     fun buildProofMessage(
         nickname: String,
@@ -41,9 +44,24 @@ object SolanaOwnershipProofUtil {
         proof: SolanaOwnershipProof,
         nowMs: Long = System.currentTimeMillis()
     ): Boolean {
+        if (proof.signature.size != 64) return false
         if (proof.expiresAtMs <= nowMs) return false
         if (proof.validatedAtMs <= 0 || proof.validatedAtMs > proof.expiresAtMs) return false
         if (proof.observedBalance < 0 || proof.minRequired < 0) return false
+        if (proof.observedBalance < proof.minRequired) return false
+        if (proof.validatedAtMs > nowMs + MAX_CLOCK_SKEW_MS) return false
+        if ((proof.expiresAtMs - proof.validatedAtMs) > MAX_PROOF_VALIDITY_MS) return false
+        if (!BASE58_REGEX.matches(proof.targetAddress)) return false
+
+        when (proof.claimType) {
+            SolanaOwnershipProof.ClaimType.NFT_MINT,
+            SolanaOwnershipProof.ClaimType.NFT_COLLECTION -> {
+                if (proof.minRequired <= 0L || proof.observedBalance <= 0L) return false
+            }
+            SolanaOwnershipProof.ClaimType.SPL_TOKEN -> {
+                // Generic fungible-token claim: minRequired/observedBalance already validated above.
+            }
+        }
 
         return try {
             val pubKeyBytes = decodeBase58(solanaAddress)

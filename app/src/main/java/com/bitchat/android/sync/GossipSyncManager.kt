@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Gossip-based synchronization manager using on-demand GCS filters.
- * Tracks seen public packets (ANNOUNCE, broadcast MESSAGE) and periodically requests sync
- * from neighbors. Responds to REQUEST_SYNC by sending missing packets.
+ * Tracks seen public packets (ANNOUNCE + selected broadcast packets) and periodically
+ * requests sync from neighbors. Responds to REQUEST_SYNC by sending missing packets.
  */
 class GossipSyncManager(
     private val myPeerID: String,
@@ -42,7 +42,7 @@ class GossipSyncManager(
     private val defaultFpr = SyncDefaults.DEFAULT_FPR_PERCENT
 
     // Stored packets for sync:
-    // - broadcast messages: keep up to seenCapacity() most recent, keyed by packetId
+    // - broadcast packets: keep up to seenCapacity() most recent, keyed by packetId
     private val messages = LinkedHashMap<String, BitchatPacket>()
     // - announcements: only keep latest per sender peerID
     private val latestAnnouncementByPeer = ConcurrentHashMap<String, Pair<String, BitchatPacket>>()
@@ -94,16 +94,23 @@ class GossipSyncManager(
     }
 
     fun onPublicPacketSeen(packet: BitchatPacket) {
-        // Only ANNOUNCE or broadcast MESSAGE
         val mt = MessageType.fromValue(packet.type)
-        val isBroadcastMessage = (mt == MessageType.MESSAGE && (packet.recipientID == null || packet.recipientID.contentEquals(SpecialRecipients.BROADCAST)))
+        val isBroadcast = (packet.recipientID == null || packet.recipientID.contentEquals(SpecialRecipients.BROADCAST))
+        val isTrackedBroadcast = isBroadcast && when (mt) {
+            MessageType.MESSAGE,
+            MessageType.FEED_POST,
+            MessageType.FEED_REACTION,
+            MessageType.FEED_REPLY,
+            MessageType.FEED_PIN -> true
+            else -> false
+        }
         val isAnnouncement = (mt == MessageType.ANNOUNCE)
-        if (!isBroadcastMessage && !isAnnouncement) return
+        if (!isTrackedBroadcast && !isAnnouncement) return
 
         val idBytes = PacketIdUtil.computeIdBytes(packet)
         val id = idBytes.joinToString("") { b -> "%02x".format(b) }
 
-        if (isBroadcastMessage) {
+        if (isTrackedBroadcast) {
             synchronized(messages) {
                 messages[id] = packet
                 // Enforce capacity (remove oldest when exceeded)

@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.BorderStroke
 import com.bitchat.android.ui.theme.AppIcons
 import com.bitchat.android.ui.theme.rememberAppIconPainter
 import androidx.compose.material3.*
@@ -103,8 +104,6 @@ fun LocationChannelsSheet(
         }
     }
 
-    // iOS system colors (matches iOS exactly)
-    val colorScheme = MaterialTheme.colorScheme
     val standardGreen = BitchatColors.AccentGreen // iOS green
     val standardBlue = BitchatColors.MeshChannel // iOS blue
 
@@ -120,7 +119,7 @@ fun LocationChannelsSheet(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 48.dp, bottom = 16.dp)
+                    contentPadding = PaddingValues(top = 80.dp, bottom = 20.dp)
                 ) {
                     // Header Section
                     item(key = "header") {
@@ -128,8 +127,8 @@ fun LocationChannelsSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 24.dp)
-                                .padding(bottom = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                .padding(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = stringResource(R.string.location_channels_title),
@@ -354,16 +353,16 @@ fun LocationChannelsSheet(
                     // Custom geohash teleport (iOS-style inline form)
                     item(key = "custom_geohash") {
                         Surface(
-                            color = Color.Transparent,
-                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            shape = BitchatShapes.Card,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 2.dp)
+                                .padding(horizontal = 24.dp, vertical = 4.dp)
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -529,6 +528,7 @@ fun LocationChannelsSheet(
                                         standardGreen
                                     }
                                 ),
+                                shape = BitchatShapes.Button,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
@@ -547,7 +547,7 @@ fun LocationChannelsSheet(
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .height(56.dp)
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = topBarAlpha))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha))
                 ) {
                     TextButton(
                         onClick = onDismiss,
@@ -612,17 +612,21 @@ private fun ChannelRow(
         color = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
         } else {
-            BitchatColors.BackgroundElevated.copy(alpha = 0.3f)
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
         },
-        shape = BitchatShapes.Large,
+        shape = BitchatShapes.Card,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isSelected) BitchatColors.AccentGreen.copy(alpha = 0.45f) else Color.Transparent
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 2.dp)
+            .padding(horizontal = 24.dp, vertical = 4.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,7 +38,12 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 @Composable
-fun FeedTimeline(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
+fun FeedTimeline(
+    viewModel: ChatViewModel,
+    jumpToPostId: String? = null,
+    onJumpHandled: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val posts by viewModel.feedPosts.observeAsState(emptyList())
     val expandedPostId by viewModel.expandedPostId.observeAsState(null)
     val reactionsMap by viewModel.feedReactions.observeAsState(emptyMap())
@@ -56,24 +62,54 @@ fun FeedTimeline(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
         val currentFocused = focusedPostId
         val currentTrigger = focusTrigger
         if (currentFocused != null) {
-            delay(1800)
+            delay(2600)
             if (focusedPostId == currentFocused && focusTrigger == currentTrigger) {
                 focusedPostId = null
             }
         }
     }
 
+    LaunchedEffect(jumpToPostId, posts) {
+        val target = jumpToPostId ?: return@LaunchedEffect
+        val index = indexByPostId[target] ?: return@LaunchedEffect
+        focusTrigger += 1
+        focusedPostId = target
+        viewModel.expandPost(target)
+        listState.animateScrollToItem(index = index)
+        onJumpHandled()
+    }
+
     if (posts.isEmpty()) {
         Box(
-            modifier = modifier.fillMaxSize(),
+            modifier = modifier
+                .fillMaxSize()
+                .padding(12.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "No posts yet",
-                color = BitchatColors.TextSecondary,
-                fontFamily = SatoshiFamily,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = BitchatColors.BackgroundElevated,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 24.dp, horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "No posts yet",
+                        color = BitchatColors.TextPrimary,
+                        fontFamily = SatoshiFamily,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Start the conversation with a quick update.",
+                        color = BitchatColors.TextSecondary,
+                        fontFamily = SatoshiFamily,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     } else {
         Column(modifier = modifier.fillMaxSize()) {
@@ -93,8 +129,8 @@ fun FeedTimeline(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp)
+                contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 6.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(posts, key = { it.postId }) { post ->
                     FeedPostCard(
@@ -134,24 +170,24 @@ private fun PinnedLinksBar(
     data class ChipPalette(val background: Color, val text: Color)
     val chipPalettes = listOf(
         ChipPalette(
-            background = Color(0xFFF6E1E8), // muted rose
-            text = Color(0xFF5A2434)
+            background = BitchatColors.BackgroundElevated,
+            text = BitchatColors.TextPrimary
         ),
         ChipPalette(
-            background = Color(0xFFE1EEFB), // muted sky
-            text = Color(0xFF214565)
+            background = BitchatColors.SurfaceVariant,
+            text = BitchatColors.TextPrimary
         ),
         ChipPalette(
-            background = Color(0xFFE2F3E8), // muted mint
-            text = Color(0xFF28503A)
+            background = BitchatColors.BackgroundElevated,
+            text = BitchatColors.TextSecondary
         ),
         ChipPalette(
-            background = Color(0xFFF8EEDB), // muted amber
-            text = Color(0xFF5D441B)
+            background = BitchatColors.SurfaceVariant,
+            text = BitchatColors.TextSecondary
         ),
         ChipPalette(
-            background = Color(0xFFE9E3F8), // muted lavender
-            text = Color(0xFF453169)
+            background = BitchatColors.BackgroundElevated,
+            text = BitchatColors.TextPrimary
         )
     )
 
@@ -159,7 +195,7 @@ private fun PinnedLinksBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(BitchatColors.Background)
-            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -169,7 +205,7 @@ private fun PinnedLinksBar(
             LucideIcon(
                 imageVector = LucideIconSet.Pin,
                 contentDescription = "Pinned links",
-                tint = BitchatColors.MeshChannel,
+                tint = BitchatColors.TextSecondary,
                 modifier = Modifier
                     .size(14.dp)
             )

@@ -491,7 +491,7 @@ fun AboutSheet(
                                     modifier = Modifier
                                         .width(3.dp)
                                         .height(16.dp)
-                                        .background(BitchatColors.SolanaAccent.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
+                                        .background(BitchatColors.AccentGreen.copy(alpha = 0.5f), RoundedCornerShape(1.5.dp))
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
@@ -510,7 +510,7 @@ fun AboutSheet(
                                     },
                                 color = BitchatColors.BackgroundElevated,
                                 shape = BitchatShapes.Card,
-                                border = BorderStroke(1.dp, BitchatColors.SolanaAccent.copy(alpha = 0.3f))
+                                border = BorderStroke(1.dp, BitchatColors.AccentGreen.copy(alpha = 0.35f))
                             ) {
                                 Row(
                                     modifier = Modifier.padding(16.dp),
@@ -520,7 +520,7 @@ fun AboutSheet(
                                     Icon(
                                         painter = rememberAppIconPainter(AppIcons.Wallet),
                                         contentDescription = "Solana Wallet",
-                                        tint = BitchatColors.SolanaAccent,
+                                        tint = BitchatColors.AccentGreen,
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {

@@ -10,9 +10,11 @@ import java.nio.ByteOrder
  * - postId: length-prefixed (1 byte len + data)
  * - authorNickname: length-prefixed (1 byte len + data)
  * - timestamp: 8 bytes (big-endian Long)
- * - flags: 1 byte (bit 0 = hasImage)
+ * - flags: 1 byte (bit 0 = hasImage, bit 1 = hasAudio)
  * - content: length-prefixed (2 byte len + data)
  * - [if hasImage] imageData: length-prefixed (4 byte len + data)
+ * - [if hasAudio] audioData: length-prefixed (4 byte len + data)
+ * - [optional] channelKey: length-prefixed (2 byte len + data)
  *
  * FEED_REACTION (0x41) payload:
  * - postId: length-prefixed (1 byte len + data)
@@ -27,6 +29,13 @@ import java.nio.ByteOrder
  * - authorNickname: length-prefixed (1 byte len + data)
  * - timestamp: 8 bytes (big-endian Long)
  * - content: length-prefixed (2 byte len + data)
+ *
+ * FEED_PIN payload:
+ * - postId: length-prefixed (1 byte len + data)
+ * - actorNickname: length-prefixed (1 byte len + data)
+ * - timestamp: 8 bytes (big-endian Long)
+ * - pinVersion: 8 bytes (big-endian Long)
+ * - isPinned: 1 byte (0=unpin, 1=pin)
  */
 
 data class FeedPostPayload(
@@ -34,19 +43,25 @@ data class FeedPostPayload(
     val authorNickname: String,
     val timestamp: Long,
     val content: String,
-    val imageData: ByteArray? = null
+    val imageData: ByteArray? = null,
+    val audioData: ByteArray? = null,
+    val channelKey: String? = null
 ) {
     fun encode(): ByteArray {
         val postIdBytes = postId.toByteArray(Charsets.UTF_8)
         val nicknameBytes = authorNickname.toByteArray(Charsets.UTF_8)
         val contentBytes = content.toByteArray(Charsets.UTF_8)
+        val channelBytes = channelKey?.toByteArray(Charsets.UTF_8)
         val hasImage = imageData != null
+        val hasAudio = audioData != null
 
         val size = 1 + postIdBytes.size.coerceAtMost(255) +
                 1 + nicknameBytes.size.coerceAtMost(255) +
                 8 + 1 +
                 2 + contentBytes.size.coerceAtMost(65535) +
-                if (hasImage) 4 + (imageData?.size ?: 0) else 0
+                if (hasImage) 4 + (imageData?.size ?: 0) else 0 +
+                if (hasAudio) 4 + (audioData?.size ?: 0) else 0 +
+                if (channelBytes != null) 2 + channelBytes.size.coerceAtMost(65535) else 0
 
         val buffer = ByteBuffer.allocate(size).apply { order(ByteOrder.BIG_ENDIAN) }
 
@@ -64,6 +79,7 @@ data class FeedPostPayload(
         // Flags
         var flags: Byte = 0
         if (hasImage) flags = (flags.toInt() or 0x01).toByte()
+        if (hasAudio) flags = (flags.toInt() or 0x02).toByte()
         buffer.put(flags)
 
         // Content
@@ -71,9 +87,20 @@ data class FeedPostPayload(
         buffer.put(contentBytes.take(65535).toByteArray())
 
         // Image data (if present)
-        if (hasImage && imageData != null) {
+        if (imageData != null) {
             buffer.putInt(imageData.size)
             buffer.put(imageData)
+        }
+
+        // Audio data (if present)
+        if (audioData != null) {
+            buffer.putInt(audioData.size)
+            buffer.put(audioData)
+        }
+
+        if (channelBytes != null) {
+            buffer.putShort(channelBytes.size.coerceAtMost(65535).toShort())
+            buffer.put(channelBytes.take(65535).toByteArray())
         }
 
         val result = ByteArray(buffer.position())
@@ -94,6 +121,11 @@ data class FeedPostPayload(
             if (other.imageData == null) return false
             if (!imageData.contentEquals(other.imageData)) return false
         } else if (other.imageData != null) return false
+        if (audioData != null) {
+            if (other.audioData == null) return false
+            if (!audioData.contentEquals(other.audioData)) return false
+        } else if (other.audioData != null) return false
+        if (channelKey != other.channelKey) return false
         return true
     }
 
@@ -103,6 +135,8 @@ data class FeedPostPayload(
         result = 31 * result + timestamp.hashCode()
         result = 31 * result + content.hashCode()
         result = 31 * result + (imageData?.contentHashCode() ?: 0)
+        result = 31 * result + (audioData?.contentHashCode() ?: 0)
+        result = 31 * result + (channelKey?.hashCode() ?: 0)
         return result
     }
 
@@ -135,6 +169,7 @@ data class FeedPostPayload(
                 if (buffer.remaining() < 1) return null
                 val flags = buffer.get().toInt() and 0xFF
                 val hasImage = (flags and 0x01) != 0
+                val hasAudio = (flags and 0x02) != 0
 
                 // Content
                 if (buffer.remaining() < 2) return null
@@ -154,7 +189,26 @@ data class FeedPostPayload(
                     imgBytes
                 } else null
 
-                return FeedPostPayload(postId, authorNickname, timestamp, content, imageData)
+                val audioData = if (hasAudio) {
+                    if (buffer.remaining() < 4) return null
+                    val audioLen = buffer.getInt()
+                    if (audioLen < 0 || buffer.remaining() < audioLen) return null
+                    val audioBytes = ByteArray(audioLen)
+                    buffer.get(audioBytes)
+                    audioBytes
+                } else null
+
+                val channelKey = if (buffer.remaining() >= 2) {
+                    val channelLen = buffer.getShort().toInt() and 0xFFFF
+                    if (buffer.remaining() < channelLen) return null
+                    val channelBytes = ByteArray(channelLen)
+                    buffer.get(channelBytes)
+                    String(channelBytes, Charsets.UTF_8)
+                } else {
+                    null
+                }
+
+                return FeedPostPayload(postId, authorNickname, timestamp, content, imageData, audioData, channelKey)
             } catch (_: Exception) {
                 return null
             }
@@ -338,6 +392,74 @@ data class FeedReplyPayload(
                 val content = String(contentBytes, Charsets.UTF_8)
 
                 return FeedReplyPayload(replyId, parentPostId, authorNickname, timestamp, content)
+            } catch (_: Exception) {
+                return null
+            }
+        }
+    }
+}
+
+data class FeedPinPayload(
+    val postId: String,
+    val actorNickname: String,
+    val timestamp: Long,
+    val pinVersion: Long,
+    val isPinned: Boolean
+) {
+    fun encode(): ByteArray {
+        val postIdBytes = postId.toByteArray(Charsets.UTF_8)
+        val nicknameBytes = actorNickname.toByteArray(Charsets.UTF_8)
+
+        val size = 1 + postIdBytes.size.coerceAtMost(255) +
+            1 + nicknameBytes.size.coerceAtMost(255) +
+            8 + 8 + 1
+
+        val buffer = ByteBuffer.allocate(size).apply { order(ByteOrder.BIG_ENDIAN) }
+        buffer.put(postIdBytes.size.coerceAtMost(255).toByte())
+        buffer.put(postIdBytes.take(255).toByteArray())
+        buffer.put(nicknameBytes.size.coerceAtMost(255).toByte())
+        buffer.put(nicknameBytes.take(255).toByteArray())
+        buffer.putLong(timestamp)
+        buffer.putLong(pinVersion)
+        buffer.put(if (isPinned) 1.toByte() else 0.toByte())
+
+        val result = ByteArray(buffer.position())
+        buffer.rewind()
+        buffer.get(result)
+        return result
+    }
+
+    companion object {
+        fun decode(data: ByteArray): FeedPinPayload? {
+            try {
+                if (data.size < 19) return null
+                val buffer = ByteBuffer.wrap(data).apply { order(ByteOrder.BIG_ENDIAN) }
+
+                val postIdLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < postIdLen) return null
+                val postIdBytes = ByteArray(postIdLen)
+                buffer.get(postIdBytes)
+                val postId = String(postIdBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 1) return null
+                val nicknameLen = buffer.get().toInt() and 0xFF
+                if (buffer.remaining() < nicknameLen) return null
+                val nicknameBytes = ByteArray(nicknameLen)
+                buffer.get(nicknameBytes)
+                val actorNickname = String(nicknameBytes, Charsets.UTF_8)
+
+                if (buffer.remaining() < 17) return null
+                val timestamp = buffer.getLong()
+                val pinVersion = buffer.getLong()
+                val isPinned = buffer.get().toInt() != 0
+
+                return FeedPinPayload(
+                    postId = postId,
+                    actorNickname = actorNickname,
+                    timestamp = timestamp,
+                    pinVersion = pinVersion,
+                    isPinned = isPinned
+                )
             } catch (_: Exception) {
                 return null
             }

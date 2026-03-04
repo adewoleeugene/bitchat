@@ -26,7 +26,7 @@ import com.bitchat.android.data.local.entities.WalletEntity
         FeedReactionEntity::class,
         FeedReplyEntity::class
     ],
-    version = 6,
+    version = 10,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -174,6 +174,143 @@ abstract class SolanaDatabase : RoomDatabase() {
                         `createdAt`,
                         0
                     FROM `token_gate_configs`
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `pinnedAt` INTEGER
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `pinnedByPeerID` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `pinVersion` INTEGER NOT NULL DEFAULT 0
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `channelKey` TEXT NOT NULL DEFAULT 'mesh:#mesh'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_feed_posts_channelKey_timestamp`
+                    ON `feed_posts` (`channelKey`, `timestamp`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        /**
+         * Normalize feed_posts schema to match the Room entity definition:
+         * - channelKey must NOT carry a DB-level default value.
+         * - no explicit index on (channelKey, timestamp) in current schema.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `feed_posts_new` (
+                        `postId` TEXT NOT NULL PRIMARY KEY,
+                        `channelKey` TEXT NOT NULL,
+                        `authorPeerID` TEXT NOT NULL,
+                        `authorNickname` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `hasImage` INTEGER NOT NULL,
+                        `imagePath` TEXT,
+                        `timestamp` INTEGER NOT NULL,
+                        `receivedAt` INTEGER NOT NULL,
+                        `reactionCount` INTEGER NOT NULL,
+                        `replyCount` INTEGER NOT NULL,
+                        `isOwnPost` INTEGER NOT NULL,
+                        `isPinned` INTEGER NOT NULL,
+                        `pinnedAt` INTEGER,
+                        `pinnedByPeerID` TEXT,
+                        `pinVersion` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `feed_posts_new` (
+                        `postId`,
+                        `channelKey`,
+                        `authorPeerID`,
+                        `authorNickname`,
+                        `content`,
+                        `hasImage`,
+                        `imagePath`,
+                        `timestamp`,
+                        `receivedAt`,
+                        `reactionCount`,
+                        `replyCount`,
+                        `isOwnPost`,
+                        `isPinned`,
+                        `pinnedAt`,
+                        `pinnedByPeerID`,
+                        `pinVersion`
+                    )
+                    SELECT
+                        `postId`,
+                        `channelKey`,
+                        `authorPeerID`,
+                        `authorNickname`,
+                        `content`,
+                        `hasImage`,
+                        `imagePath`,
+                        `timestamp`,
+                        `receivedAt`,
+                        `reactionCount`,
+                        `replyCount`,
+                        `isOwnPost`,
+                        `isPinned`,
+                        `pinnedAt`,
+                        `pinnedByPeerID`,
+                        `pinVersion`
+                    FROM `feed_posts`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `feed_posts`")
+                db.execSQL("ALTER TABLE `feed_posts_new` RENAME TO `feed_posts`")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `hasAudio` INTEGER NOT NULL DEFAULT 0
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `feed_posts`
+                    ADD COLUMN `audioPath` TEXT
                     """.trimIndent()
                 )
             }

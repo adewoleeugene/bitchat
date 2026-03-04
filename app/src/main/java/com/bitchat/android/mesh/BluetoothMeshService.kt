@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.util.Log
 import com.bitchat.android.crypto.EncryptionService
 import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.model.ChannelRolePolicyPayload
 import com.bitchat.android.protocol.MessagePadding
 import com.bitchat.android.model.RoutedPacket
 import com.bitchat.android.model.IdentityAnnouncement
@@ -15,6 +16,7 @@ import com.bitchat.android.protocol.MessageType
 import com.bitchat.android.protocol.SpecialRecipients
 import com.bitchat.android.model.RequestSyncPacket
 import com.bitchat.android.feed.FeedPostPayload
+import com.bitchat.android.feed.FeedPinPayload
 import com.bitchat.android.feed.FeedReactionPayload
 import com.bitchat.android.feed.FeedReplyPayload
 import com.bitchat.android.feed.FeedService
@@ -54,6 +56,10 @@ class BluetoothMeshService(private val context: Context) {
     companion object {
         private const val TAG = "BluetoothMeshService"
         private val MAX_TTL: UByte = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS
+        private const val PUBLIC_HISTORY_MAX_PACKETS = 200
+        private const val PUBLIC_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000L
+        private const val MAX_PENDING_FEED_PACKETS = 256
+        private const val MAX_PENDING_FEED_AUDIO_ATTACHMENTS = 256
     }
     
     // Core components - each handling specific responsibilities
@@ -83,6 +89,9 @@ class BluetoothMeshService(private val context: Context) {
     var onBlockhashResponseReceived: ((SolanaBlockhashResponse) -> Unit)? = null
     var onBalanceResponseReceived: ((SolanaBalanceResponse) -> Unit)? = null
     var onTokenGatePolicyReceived: ((String, TokenGatePolicyPayload) -> Unit)? = null
+    var onChannelRolePolicyReceived: ((String, ChannelRolePolicyPayload) -> Unit)? = null
+    var verifyOwnershipProofsOnline:
+        (suspend (nickname: String, solanaAddress: String, proofs: List<SolanaOwnershipProof>) -> List<SolanaOwnershipProof>?)? = null
 
     // Feed service for social feed (set from ChatViewModel)
     var feedService: FeedService? = null
@@ -99,6 +108,10 @@ class BluetoothMeshService(private val context: Context) {
 
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val recentPublicHistory = Collections.synchronizedList(mutableListOf<BitchatPacket>())
+    private val pendingFeedPackets = Collections.synchronizedList(mutableListOf<Pair<String, BitchatPacket>>())
+    private val pendingFeedAudioAttachments =
+        Collections.synchronizedList(mutableListOf<Triple<String, String, ByteArray>>())
     
     init {
         setupDelegates()
@@ -208,6 +221,9 @@ class BluetoothMeshService(private val context: Context) {
                     
                     delay(1000)
                     storeForwardManager.sendCachedMessages(peerID)
+                    sendFeedHistoryToPeer(peerID)
+                    sendRecentPublicHistoryToPeer(peerID)
+                    try { gossipSyncManager.scheduleInitialSyncToPeer(peerID, 300) } catch (_: Exception) { }
                 }
             }
             
@@ -332,6 +348,15 @@ class BluetoothMeshService(private val context: Context) {
             override fun verifyEd25519Signature(signature: ByteArray, data: ByteArray, publicKey: ByteArray): Boolean {
                 return encryptionService.verifyEd25519Signature(signature, data, publicKey)
             }
+
+            override suspend fun verifyOwnershipProofsOnline(
+                nickname: String,
+                solanaAddress: String,
+                proofs: List<SolanaOwnershipProof>
+            ): List<SolanaOwnershipProof>? {
+                val verifier = verifyOwnershipProofsOnline ?: return null
+                return verifier.invoke(nickname, solanaAddress, proofs)
+            }
             
             // Noise protocol operations
             override fun hasNoiseSession(peerID: String): Boolean {
@@ -404,6 +429,17 @@ class BluetoothMeshService(private val context: Context) {
             // Message operations  
             override fun decryptChannelMessage(encryptedContent: ByteArray, channel: String): String? {
                 return delegate?.decryptChannelMessage(encryptedContent, channel)
+            }
+
+            override fun onFeedAudioAttachment(postId: String, audioBytes: ByteArray, fromPeerID: String) {
+                val service = feedService
+                if (service == null) {
+                    enqueuePendingFeedAudioAttachment(fromPeerID, postId, audioBytes)
+                    return
+                }
+                serviceScope.launch {
+                    service.handleIncomingPostAudioAttachment(postId, fromPeerID, audioBytes, context)
+                }
             }
             
             // Callbacks
@@ -484,6 +520,11 @@ class BluetoothMeshService(private val context: Context) {
 
                             // Schedule initial sync for this new directly connected peer only
                             try { gossipSyncManager.scheduleInitialSyncToPeer(pid, 1_000) } catch (_: Exception) { }
+                            // Push recent history immediately so newly mapped peers catch up fast.
+                            try {
+                                sendFeedHistoryToPeer(pid)
+                                sendRecentPublicHistoryToPeer(pid)
+                            } catch (_: Exception) { }
                         }
                     }
                     // Track for sync
@@ -498,6 +539,7 @@ class BluetoothMeshService(private val context: Context) {
                     val pkt = routed.packet
                     val isBroadcast = (pkt.recipientID == null || pkt.recipientID.contentEquals(SpecialRecipients.BROADCAST))
                     if (isBroadcast && pkt.type == MessageType.MESSAGE.value) {
+                        rememberPublicPacket(pkt)
                         gossipSyncManager.onPublicPacketSeen(pkt)
                     }
                 } catch (_: Exception) { }
@@ -535,6 +577,10 @@ class BluetoothMeshService(private val context: Context) {
                 val fromPeer = routed.peerID ?: return
                 val req = RequestSyncPacket.decode(routed.packet.payload) ?: return
                 gossipSyncManager.handleRequestSync(fromPeer, req)
+                serviceScope.launch {
+                    sendFeedHistoryToPeer(fromPeer)
+                    sendRecentPublicHistoryToPeer(fromPeer)
+                }
             }
 
             override fun handleSolanaTxRelay(routed: RoutedPacket) {
@@ -635,11 +681,16 @@ class BluetoothMeshService(private val context: Context) {
 
             override fun handleFeedPost(routed: RoutedPacket) {
                 val fromPeer = routed.peerID ?: return
+                rememberPublicPacket(routed.packet)
                 val payload = FeedPostPayload.decode(routed.packet.payload) ?: run {
                     Log.w(TAG, "Failed to decode FEED_POST payload from $fromPeer")
                     return
                 }
-                val service = feedService ?: return
+                val service = feedService
+                if (service == null) {
+                    enqueuePendingFeedPacket(fromPeer, routed.packet)
+                    return
+                }
                 serviceScope.launch {
                     service.handleIncomingPost(payload, fromPeer, context)
                 }
@@ -647,11 +698,16 @@ class BluetoothMeshService(private val context: Context) {
 
             override fun handleFeedReaction(routed: RoutedPacket) {
                 val fromPeer = routed.peerID ?: return
+                rememberPublicPacket(routed.packet)
                 val payload = FeedReactionPayload.decode(routed.packet.payload) ?: run {
                     Log.w(TAG, "Failed to decode FEED_REACTION payload from $fromPeer")
                     return
                 }
-                val service = feedService ?: return
+                val service = feedService
+                if (service == null) {
+                    enqueuePendingFeedPacket(fromPeer, routed.packet)
+                    return
+                }
                 serviceScope.launch {
                     service.handleIncomingReaction(payload, fromPeer)
                 }
@@ -659,13 +715,35 @@ class BluetoothMeshService(private val context: Context) {
 
             override fun handleFeedReply(routed: RoutedPacket) {
                 val fromPeer = routed.peerID ?: return
+                rememberPublicPacket(routed.packet)
                 val payload = FeedReplyPayload.decode(routed.packet.payload) ?: run {
                     Log.w(TAG, "Failed to decode FEED_REPLY payload from $fromPeer")
                     return
                 }
-                val service = feedService ?: return
+                val service = feedService
+                if (service == null) {
+                    enqueuePendingFeedPacket(fromPeer, routed.packet)
+                    return
+                }
                 serviceScope.launch {
                     service.handleIncomingReply(payload, fromPeer)
+                }
+            }
+
+            override fun handleFeedPin(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                rememberPublicPacket(routed.packet)
+                val payload = FeedPinPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode FEED_PIN payload from $fromPeer")
+                    return
+                }
+                val service = feedService
+                if (service == null) {
+                    enqueuePendingFeedPacket(fromPeer, routed.packet)
+                    return
+                }
+                serviceScope.launch {
+                    service.handleIncomingPin(payload, fromPeer)
                 }
             }
 
@@ -676,6 +754,15 @@ class BluetoothMeshService(private val context: Context) {
                     return
                 }
                 onTokenGatePolicyReceived?.invoke(fromPeer, payload)
+            }
+
+            override fun handleChannelRolePolicy(routed: RoutedPacket) {
+                val fromPeer = routed.peerID ?: return
+                val payload = ChannelRolePolicyPayload.decode(routed.packet.payload) ?: run {
+                    Log.w(TAG, "Failed to decode CHANNEL_ROLE_POLICY payload from $fromPeer")
+                    return
+                }
+                onChannelRolePolicyReceived?.invoke(fromPeer, payload)
             }
         }
 
@@ -808,7 +895,12 @@ class BluetoothMeshService(private val context: Context) {
 
             // Sign the packet before broadcasting
             val signedPacket = signPacketBeforeBroadcast(packet)
+            rememberPublicPacket(signedPacket)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            // Direct fanout to currently connected peers for deterministic delivery.
+            peerManager.getActivePeerIDs().forEach { peerID ->
+                runCatching { connectionManager.sendPacketToPeer(peerID, signedPacket) }
+            }
             // Track our own broadcast message for sync
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
@@ -838,6 +930,7 @@ class BluetoothMeshService(private val context: Context) {
                 ttl = MAX_TTL
             )
             val signed = signPacketBeforeBroadcast(packet)
+            rememberPublicPacket(signed)
             // Use a stable transferId based on the file TLV payload for progress tracking
             val transferId = sha256Hex(payload)
             connectionManager.broadcastPacket(RoutedPacket(signed, transferId = transferId))
@@ -1559,16 +1652,55 @@ class BluetoothMeshService(private val context: Context) {
 
     fun broadcastFeedPost(payload: FeedPostPayload) {
         serviceScope.launch {
-            val packet = BitchatPacket(
-                type = MessageType.FEED_POST.value,
-                ttl = MAX_TTL,
-                senderID = myPeerID,
-                payload = payload.encode()
-            )
-            val signedPacket = signPacketBeforeBroadcast(packet)
-            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
-            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
-            Log.d(TAG, "Broadcast FEED_POST ${payload.postId.take(8)}...")
+            runCatching {
+                val audioBytes = payload.audioData
+                val postPayload = if (audioBytes != null) payload.copy(audioData = null) else payload
+                val encodedPayload = postPayload.encode()
+                val packetVersion: UByte = if (encodedPayload.size > 0xFFFF) 2u else 1u
+                val packet = if (packetVersion >= 2u) {
+                    BitchatPacket(
+                        version = packetVersion,
+                        type = MessageType.FEED_POST.value,
+                        senderID = hexStringToByteArray(myPeerID),
+                        recipientID = null,
+                        timestamp = System.currentTimeMillis().toULong(),
+                        payload = encodedPayload,
+                        signature = null,
+                        ttl = MAX_TTL
+                    )
+                } else {
+                    BitchatPacket(
+                        type = MessageType.FEED_POST.value,
+                        ttl = MAX_TTL,
+                        senderID = myPeerID,
+                        payload = encodedPayload
+                    )
+                }
+                val signedPacket = signPacketBeforeBroadcast(packet)
+                rememberPublicPacket(signedPacket)
+                connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+                // Direct fanout as delivery fallback for active peers.
+                peerManager.getActivePeerIDs().forEach { peerID ->
+                    runCatching { sendFeedPacketToPeer(peerID, MessageType.FEED_POST, encodedPayload) }
+                }
+
+                if (audioBytes != null) {
+                    val audioFile = com.bitchat.android.model.BitchatFilePacket(
+                        fileName = FeedService.encodeFeedAudioFileName(postPayload.postId),
+                        fileSize = audioBytes.size.toLong(),
+                        mimeType = "audio/mp4",
+                        content = audioBytes
+                    )
+                    sendFileBroadcast(audioFile)
+                }
+                try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+                Log.d(
+                    TAG,
+                    "Broadcast FEED_POST ${postPayload.postId.take(8)}... bytes=${encodedPayload.size} v=$packetVersion hasAudio=${audioBytes != null}"
+                )
+            }.onFailure { error ->
+                Log.e(TAG, "Failed to broadcast FEED_POST ${payload.postId.take(8)}: ${error.message}", error)
+            }
         }
     }
 
@@ -1581,6 +1713,7 @@ class BluetoothMeshService(private val context: Context) {
                 payload = payload.encode()
             )
             val signedPacket = signPacketBeforeBroadcast(packet)
+            rememberPublicPacket(signedPacket)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
@@ -1595,9 +1728,175 @@ class BluetoothMeshService(private val context: Context) {
                 payload = payload.encode()
             )
             val signedPacket = signPacketBeforeBroadcast(packet)
+            rememberPublicPacket(signedPacket)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
+    }
+
+    fun broadcastFeedPin(payload: FeedPinPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.FEED_PIN.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            rememberPublicPacket(signedPacket)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        }
+    }
+
+    private suspend fun sendFeedHistoryToPeer(peerID: String) {
+        val service = feedService ?: return
+        runCatching {
+            val snapshot = service.getSyncSnapshot()
+            var sentCount = 0
+
+            snapshot.posts.sortedBy { it.timestamp }.forEach { payload ->
+                sendFeedPacketToPeer(peerID, MessageType.FEED_POST, payload.encode())
+                sentCount += 1
+            }
+            snapshot.replies.sortedBy { it.timestamp }.forEach { payload ->
+                sendFeedPacketToPeer(peerID, MessageType.FEED_REPLY, payload.encode())
+                sentCount += 1
+            }
+            snapshot.reactions.sortedBy { it.timestamp }.forEach { payload ->
+                sendFeedPacketToPeer(peerID, MessageType.FEED_REACTION, payload.encode())
+                sentCount += 1
+            }
+            snapshot.pins.sortedBy { it.pinVersion }.forEach { payload ->
+                sendFeedPacketToPeer(peerID, MessageType.FEED_PIN, payload.encode())
+                sentCount += 1
+            }
+
+            if (sentCount > 0) {
+                Log.d(TAG, "Sent $sentCount feed history packets to $peerID")
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "Failed sending feed history to $peerID: ${error.message}")
+        }
+    }
+
+    private fun sendFeedPacketToPeer(peerID: String, type: MessageType, payload: ByteArray) {
+        val packetVersion: UByte = if (payload.size > 0xFFFF) 2u else 1u
+        val packet = BitchatPacket(
+            version = packetVersion,
+            type = type.value,
+            senderID = hexStringToByteArray(myPeerID),
+            recipientID = hexStringToByteArray(peerID),
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = payload,
+            signature = null,
+            ttl = com.bitchat.android.util.AppConstants.SYNC_TTL_HOPS
+        )
+        val signedPacket = signPacketBeforeBroadcast(packet)
+        connectionManager.sendPacketToPeer(peerID, signedPacket)
+    }
+
+    private fun enqueuePendingFeedPacket(fromPeer: String, packet: BitchatPacket) {
+        synchronized(pendingFeedPackets) {
+            pendingFeedPackets.add(fromPeer to packet)
+            if (pendingFeedPackets.size > MAX_PENDING_FEED_PACKETS) {
+                val overflow = pendingFeedPackets.size - MAX_PENDING_FEED_PACKETS
+                repeat(overflow) { if (pendingFeedPackets.isNotEmpty()) pendingFeedPackets.removeAt(0) }
+            }
+        }
+        Log.d(TAG, "Queued pending feed packet type=${packet.type} from=$fromPeer (feed service not ready)")
+    }
+
+    fun flushPendingFeedPackets() {
+        val service = feedService ?: return
+        val pending = synchronized(pendingFeedPackets) {
+            pendingFeedPackets.toList().also { pendingFeedPackets.clear() }
+        }
+        serviceScope.launch {
+            pending.forEach { (fromPeer, packet) ->
+                when (MessageType.fromValue(packet.type)) {
+                    MessageType.FEED_POST -> {
+                        val payload = FeedPostPayload.decode(packet.payload) ?: return@forEach
+                        service.handleIncomingPost(payload, fromPeer, context)
+                    }
+                    MessageType.FEED_REACTION -> {
+                        val payload = FeedReactionPayload.decode(packet.payload) ?: return@forEach
+                        service.handleIncomingReaction(payload, fromPeer)
+                    }
+                    MessageType.FEED_REPLY -> {
+                        val payload = FeedReplyPayload.decode(packet.payload) ?: return@forEach
+                        service.handleIncomingReply(payload, fromPeer)
+                    }
+                    MessageType.FEED_PIN -> {
+                        val payload = FeedPinPayload.decode(packet.payload) ?: return@forEach
+                        service.handleIncomingPin(payload, fromPeer)
+                    }
+                    else -> Unit
+                }
+            }
+            flushPendingFeedAudioAttachments(service)
+            if (pending.isNotEmpty()) {
+                Log.d(TAG, "Flushed ${pending.size} pending feed packets")
+            }
+        }
+    }
+
+    private fun enqueuePendingFeedAudioAttachment(fromPeer: String, postId: String, audioBytes: ByteArray) {
+        synchronized(pendingFeedAudioAttachments) {
+            pendingFeedAudioAttachments.add(Triple(fromPeer, postId, audioBytes))
+            if (pendingFeedAudioAttachments.size > MAX_PENDING_FEED_AUDIO_ATTACHMENTS) {
+                val overflow = pendingFeedAudioAttachments.size - MAX_PENDING_FEED_AUDIO_ATTACHMENTS
+                repeat(overflow) {
+                    if (pendingFeedAudioAttachments.isNotEmpty()) pendingFeedAudioAttachments.removeAt(0)
+                }
+            }
+        }
+        Log.d(TAG, "Queued pending feed audio attachment post=${postId.take(8)} from=$fromPeer")
+    }
+
+    private suspend fun flushPendingFeedAudioAttachments(service: FeedService) {
+        val pending = synchronized(pendingFeedAudioAttachments) {
+            if (pendingFeedAudioAttachments.isEmpty()) return
+            pendingFeedAudioAttachments.toList().also { pendingFeedAudioAttachments.clear() }
+        }
+        pending.forEach { (fromPeer, postId, audioBytes) ->
+            service.handleIncomingPostAudioAttachment(postId, fromPeer, audioBytes, context)
+        }
+        Log.d(TAG, "Flushed ${pending.size} pending feed audio attachments")
+    }
+
+    private fun rememberPublicPacket(packet: BitchatPacket) {
+        if (packet.recipientID != null && !packet.recipientID.contentEquals(SpecialRecipients.BROADCAST)) return
+        val type = MessageType.fromValue(packet.type) ?: return
+        val shouldKeep = when (type) {
+            MessageType.MESSAGE,
+            MessageType.FILE_TRANSFER,
+            MessageType.FEED_POST,
+            MessageType.FEED_REACTION,
+            MessageType.FEED_REPLY,
+            MessageType.FEED_PIN -> true
+            else -> false
+        }
+        if (!shouldKeep) return
+
+        synchronized(recentPublicHistory) {
+            recentPublicHistory.add(packet)
+            val cutoff = System.currentTimeMillis() - PUBLIC_HISTORY_MAX_AGE_MS
+            recentPublicHistory.removeAll { it.timestamp.toLong() < cutoff }
+            if (recentPublicHistory.size > PUBLIC_HISTORY_MAX_PACKETS) {
+                val overflow = recentPublicHistory.size - PUBLIC_HISTORY_MAX_PACKETS
+                repeat(overflow) { if (recentPublicHistory.isNotEmpty()) recentPublicHistory.removeAt(0) }
+            }
+        }
+    }
+
+    private fun sendRecentPublicHistoryToPeer(peerID: String) {
+        val snapshot = synchronized(recentPublicHistory) { recentPublicHistory.toList() }
+        if (snapshot.isEmpty()) return
+        snapshot.sortedBy { it.timestamp.toLong() }.forEach { packet ->
+            connectionManager.sendPacketToPeer(peerID, packet)
+        }
+        Log.d(TAG, "Sent ${snapshot.size} recent public packets to $peerID")
     }
 
     fun broadcastTokenGatePolicy(payload: TokenGatePolicyPayload) {
@@ -1612,6 +1911,24 @@ class BluetoothMeshService(private val context: Context) {
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
             Log.d(TAG, "Broadcast TOKEN_GATE_POLICY action=${payload.action} channel=${payload.channelKey}")
+        }
+    }
+
+    fun broadcastChannelRolePolicy(payload: ChannelRolePolicyPayload) {
+        serviceScope.launch {
+            val packet = BitchatPacket(
+                type = MessageType.CHANNEL_ROLE_POLICY.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = payload.encode()
+            )
+            val signedPacket = signPacketBeforeBroadcast(packet)
+            connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+            Log.d(
+                TAG,
+                "Broadcast CHANNEL_ROLE_POLICY channel=${payload.channelKey} v=${payload.roleVersion} owner=${payload.ownerPeerId.take(8)}"
+            )
         }
     }
 

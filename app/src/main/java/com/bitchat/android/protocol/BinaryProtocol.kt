@@ -26,10 +26,12 @@ enum class MessageType(val value: UByte) {
     SOLANA_TX_ACK(0x35u),             // Delivery acknowledgement for relay control plane
     SOLANA_BALANCE_INTENT(0x36u),     // Balance request intent (offline user → online peer)
     SOLANA_BALANCE_RESPONSE(0x37u),   // Balance response (online peer → offline user)
-    FEED_POST(0x40u),       // Social feed post (text + optional image)
+    FEED_POST(0x40u),       // Social feed post (text + optional image/audio)
     FEED_REACTION(0x41u),   // Emoji reaction on a feed post
     FEED_REPLY(0x42u),      // Threaded reply under a feed post
-    TOKEN_GATE_POLICY(0x43u); // Token-gate policy sync (upsert/remove)
+    FEED_PIN(0x45u),        // Pin or unpin a feed post
+    TOKEN_GATE_POLICY(0x43u), // Token-gate policy sync (upsert/remove)
+    CHANNEL_ROLE_POLICY(0x44u); // Channel role sync snapshot (owner/admin set + version)
 
     companion object {
         fun fromValue(value: UByte): MessageType? {
@@ -208,7 +210,9 @@ object BinaryProtocol {
             var originalPayloadSize: UShort? = null
             var isCompressed = false
             
-            if (CompressionUtil.shouldCompress(payload)) {
+            // Compressed payload header stores original size in 2 bytes.
+            // Guard to avoid truncation for payloads above UInt16 max.
+            if (payload.size <= 0xFFFF && CompressionUtil.shouldCompress(payload)) {
                 CompressionUtil.compress(payload)?.let { compressedPayload ->
                     originalPayloadSize = payload.size.toUShort()
                     payload = compressedPayload
@@ -366,7 +370,7 @@ object BinaryProtocol {
             val payload = if (isCompressed) {
                 // First 2 bytes are original size
                 if (payloadLength.toInt() < 2) return null
-                val originalSize = buffer.getShort().toInt()
+                val originalSize = buffer.getShort().toInt() and 0xFFFF
                 
                 // Compressed payload
                 val compressedPayload = ByteArray(payloadLength.toInt() - 2)

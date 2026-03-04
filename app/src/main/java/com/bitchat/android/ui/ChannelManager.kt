@@ -279,6 +279,32 @@ class ChannelManager(
             dataManager.addChannelMember(channel, peerID)
         }
     }
+
+    /**
+     * Ensure a discovered channel is visible in local channel lists without forcing a context switch.
+     * This is used for passive channel discovery from incoming mesh traffic.
+     */
+    fun ensureDiscoveredChannel(channel: String, senderPeerID: String?) {
+        val updatedChannels = state.getJoinedChannelsValue().toMutableSet()
+        val added = updatedChannels.add(channel)
+        if (added) {
+            state.setJoinedChannels(updatedChannels)
+        }
+
+        if (!state.getChannelMessagesValue().containsKey(channel)) {
+            val updatedChannelMessages = state.getChannelMessagesValue().toMutableMap()
+            updatedChannelMessages[channel] = emptyList()
+            state.setChannelMessages(updatedChannelMessages)
+        }
+
+        senderPeerID?.let { peerID ->
+            dataManager.addChannelMember(channel, peerID)
+        }
+
+        if (added) {
+            saveChannelData()
+        }
+    }
     
     fun removeChannelMember(channel: String, peerID: String) {
         dataManager.removeChannelMember(channel, peerID)

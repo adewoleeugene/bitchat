@@ -84,25 +84,30 @@ class MeshDelegateHandler(
 
                 if (channelName != null) {
                     // This is a channel message
-                    val key = ChannelKeys.create(com.bitchat.android.geohash.ChannelID.Mesh, channelName)
-
-                    // Only add to channel if user has joined it
-                    if (state.getJoinedChannelsValue().contains(key)) {
-                        val senderPeerID = message.senderPeerID
-                        val allowed = shouldAcceptTokenGatedChannelMessage(
-                            channelKey = key,
-                            senderPeerID = senderPeerID
-                        )
-                        if (!allowed) {
-                            Log.d(
-                                "MeshDelegateHandler",
-                                "Dropped gated channel message for $key from ${senderPeerID ?: "unknown"}"
-                            )
-                            return@launch
-                        }
-                        val displayContent = channelInfo?.second ?: message.content
-                        channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
+                    val key = when {
+                        ChannelKeys.isMesh(channelName) || ChannelKeys.isGeo(channelName) ->
+                            ChannelKeys.normalize(channelName)
+                        else -> ChannelKeys.create(com.bitchat.android.geohash.ChannelID.Mesh, channelName)
                     }
+                    val senderPeerID = message.senderPeerID
+
+                    val allowed = shouldAcceptTokenGatedChannelMessage(
+                        channelKey = key,
+                        senderPeerID = senderPeerID
+                    )
+                    if (!allowed) {
+                        Log.d(
+                            "MeshDelegateHandler",
+                            "Dropped gated channel message for $key from ${senderPeerID ?: "unknown"}"
+                        )
+                        return@launch
+                    }
+
+                    // Passive channel discovery: show channel when we first see traffic for it.
+                    channelManager.ensureDiscoveredChannel(key, senderPeerID)
+
+                    val displayContent = channelInfo?.second ?: message.content
+                    channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
                 } else {
                     // Public mesh message - always store to preserve message history
                     messageManager.addMessage(message)

@@ -27,6 +27,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -79,8 +80,10 @@ fun WalletScreen(
 
     // Transaction history screen (full screen overlay)
     if (showTxHistory) {
+        val activeAddress = (walletState as? WalletUiState.Ready)?.address
         TransactionHistoryScreen(
             transactions = transactions,
+            activeWalletAddress = activeAddress,
             onBack = { viewModel.dismissTransactionHistory() }
         )
         return
@@ -132,7 +135,7 @@ fun WalletScreen(
             when (walletState) {
                 is WalletUiState.Loading -> {
                     Spacer(modifier = Modifier.height(64.dp))
-                    CircularProgressIndicator(color = BitchatColors.SolanaAccent)
+                    CircularProgressIndicator(color = BitchatColors.ButtonPrimaryBg)
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "Loading wallet...",
@@ -524,7 +527,7 @@ private fun NoWalletContent(
         onClick = onCreateWallet,
         modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(
-            containerColor = BitchatColors.SolanaAccent,
+            containerColor = BitchatColors.ButtonPrimaryBg,
             contentColor = Color.White
         ),
         shape = BitchatShapes.Button
@@ -581,180 +584,225 @@ private fun WalletReadyContent(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showCreateMnemonicConfirm by remember { mutableStateOf(false) }
     var showSwitchWalletDialog by remember { mutableStateOf(false) }
-    var autoPaymentsEnabled by remember { mutableStateOf(true) }
     val canCreateMnemonicWallet = state.label.equals("Identity-Derived Wallet", ignoreCase = true)
 
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(18.dp))
 
-    // Balance card — minimal bordered style matching screenshot
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 8.dp),
         shape = BitchatShapes.Card,
-        color = BitchatColors.Background,
-        border = BorderStroke(1.dp, BitchatColors.Border)
+        color = BitchatColors.BackgroundElevated,
+        border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.9f))
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 28.dp, horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            BitchatColors.BackgroundElevated,
+                            BitchatColors.SurfaceVariant.copy(alpha = 0.55f)
+                        )
+                    )
+                )
+                .padding(horizontal = 16.dp, vertical = 18.dp)
         ) {
-            Text(
-                text = state.balanceUsd ?: "$0",
-                fontFamily = SatoshiFamily,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Bold,
-                color = BitchatColors.TextPrimary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "~ ${state.balanceSol}sol",
-                fontFamily = SatoshiFamily,
-                fontSize = 14.sp,
-                color = BitchatColors.TextSecondary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = formatBalanceFreshnessLabel(
-                    lastUpdated = state.lastUpdated,
-                    viaMesh = state.lastRefreshViaMesh
-                ),
-                fontFamily = SatoshiFamily,
-                fontSize = 12.sp,
-                color = BitchatColors.TextSecondary
-            )
-            if (state.usdEstimateFromLastKnownPrice) {
-                Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = BitchatColors.ButtonGhostBg
+                ) {
+                    Text(
+                        text = state.sourceLabel ?: state.label,
+                        fontFamily = SatoshiFamily,
+                        fontSize = 10.sp,
+                        color = BitchatColors.TextSecondary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
                 Text(
-                    text = "USD estimate (last known price)",
+                    text = formatBalanceFreshnessLabel(
+                        lastUpdated = state.lastUpdated,
+                        viaMesh = state.lastRefreshViaMesh
+                    ),
                     fontFamily = SatoshiFamily,
                     fontSize = 11.sp,
                     color = BitchatColors.TextTertiary
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Creating or importing a wallet sets a new active wallet",
+                text = state.balanceUsd ?: "$0",
                 fontFamily = SatoshiFamily,
-                fontSize = 10.sp,
-                color = BitchatColors.TextTertiary
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = state.sourceLabel ?: state.label,
-                fontFamily = SatoshiFamily,
-                fontSize = 11.sp,
-                color = BitchatColors.TextSecondary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Public Address",
-                fontFamily = SatoshiFamily,
-                fontSize = 11.sp,
-                color = BitchatColors.TextTertiary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = state.shortAddress,
-                fontFamily = SatoshiFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = 13.sp,
+                fontSize = 42.sp,
+                fontWeight = FontWeight.Bold,
                 color = BitchatColors.TextPrimary
             )
             Text(
-                text = state.address,
+                text = "${state.balanceSol} SOL",
                 fontFamily = SatoshiFamily,
-                fontSize = 10.sp,
-                color = BitchatColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                fontSize = 14.sp,
+                color = BitchatColors.TextSecondary
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", state.address))
-                    Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
-                },
-                border = BorderStroke(1.dp, BitchatColors.Border),
-                shape = BitchatShapes.Button,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = BitchatColors.TextPrimary
-                )
-            ) {
-                Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Copy Address", fontFamily = SatoshiFamily, fontSize = 12.sp)
-            }
-            if (!state.lifecycleWarning.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = state.lifecycleWarning,
-                    fontFamily = SatoshiFamily,
-                    fontSize = 10.sp,
-                    color = BitchatColors.StatusError,
-                    textAlign = TextAlign.Center
-                )
-            }
-            if (!state.exportAuditSummary.isNullOrBlank()) {
+            if (state.usdEstimateFromLastKnownPrice) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = state.exportAuditSummary,
+                    text = "Using last known USD price",
                     fontFamily = SatoshiFamily,
-                    fontSize = 10.sp,
-                    color = BitchatColors.TextTertiary,
-                    textAlign = TextAlign.Center
+                    fontSize = 11.sp,
+                    color = BitchatColors.TextTertiary
                 )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = BitchatColors.ButtonGhostBg,
+                border = BorderStroke(1.dp, BitchatColors.Border)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Wallet Address",
+                            fontFamily = SatoshiFamily,
+                            fontSize = 10.sp,
+                            color = BitchatColors.TextTertiary
+                        )
+                        Text(
+                            text = state.shortAddress,
+                            fontFamily = SatoshiFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = BitchatColors.TextPrimary
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", state.address))
+                            Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
+                        },
+                        border = BorderStroke(1.dp, BitchatColors.Border),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BitchatColors.TextPrimary)
+                    ) {
+                        Icon(
+                            painter = rememberAppIconPainter(AppIcons.Copy),
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("Copy", fontFamily = SatoshiFamily, fontSize = 11.sp)
+                    }
+                }
             }
         }
     }
 
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
-    // Receive / Send buttons row
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        OutlinedButton(
-            onClick = { showQr = !showQr },
+        Button(
+            onClick = { showQr = true },
             modifier = Modifier.weight(1f),
-            border = BorderStroke(1.dp, BitchatColors.Border),
-            shape = BitchatShapes.Button,
-            colors = ButtonDefaults.outlinedButtonColors(
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BitchatColors.SurfaceVariant,
                 contentColor = BitchatColors.TextPrimary
             )
         ) {
-            Text("Receive", fontFamily = SatoshiFamily)
+            Icon(painter = rememberAppIconPainter(AppIcons.Download), contentDescription = null, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                "Receive",
+                fontFamily = SatoshiFamily,
+                fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
-        OutlinedButton(
+        Button(
             onClick = onSend,
             modifier = Modifier.weight(1f),
-            border = BorderStroke(1.dp, BitchatColors.Border),
-            shape = BitchatShapes.Button,
-            colors = ButtonDefaults.outlinedButtonColors(
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BitchatColors.SurfaceVariant,
                 contentColor = BitchatColors.TextPrimary
             )
         ) {
-            Text("Send", fontFamily = SatoshiFamily)
+            Icon(painter = rememberAppIconPainter(AppIcons.Send), contentDescription = null, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                "Send",
+                fontFamily = SatoshiFamily,
+                fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Button(
+            onClick = { showSwitchWalletDialog = true },
+            enabled = wallets.size > 1,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BitchatColors.SurfaceVariant,
+                contentColor = BitchatColors.TextPrimary,
+                disabledContainerColor = BitchatColors.BackgroundElevated,
+                disabledContentColor = BitchatColors.TextDisabled
+            )
+        ) {
+            Icon(painter = rememberAppIconPainter(AppIcons.Wallet), contentDescription = null, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                "Switch",
+                fontFamily = SatoshiFamily,
+                fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
-    // Refresh Balance button
-    OutlinedButton(
+    Button(
         onClick = onRefresh,
         enabled = !isRefreshing,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        border = BorderStroke(1.dp, BitchatColors.Border),
-        shape = BitchatShapes.Button,
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = BitchatColors.TextPrimary,
+            .padding(horizontal = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = BitchatColors.ButtonPrimaryBg,
+            contentColor = BitchatColors.ButtonPrimaryFg,
+            disabledContainerColor = BitchatColors.ButtonDisabledBg,
             disabledContentColor = BitchatColors.TextDisabled
         )
     ) {
@@ -762,36 +810,36 @@ private fun WalletReadyContent(
             CircularProgressIndicator(
                 modifier = Modifier.size(14.dp),
                 strokeWidth = 2.dp,
-                color = BitchatColors.TextSecondary
+                color = BitchatColors.ButtonPrimaryFg
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+        } else {
+            Icon(
+                painter = rememberAppIconPainter(AppIcons.Sync),
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
         }
         Text(
-            if (isRefreshing) "Refreshing..." else "Refresh Balance",
+            if (isRefreshing) "Refreshing Balance..." else "Refresh Balance",
             fontFamily = SatoshiFamily
         )
     }
 
-    // QR Code inline (shown when Receive tapped)
+    // QR modal (shown when Receive tapped)
     if (showQr) {
-        Spacer(modifier = Modifier.height(16.dp))
-        QrCodeCard(address = state.address)
+        ReceiveQrDialog(
+            address = state.address,
+            onDismiss = { showQr = false }
+        )
     }
 
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(12.dp))
 
-    // Divider
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        color = BitchatColors.Border.copy(alpha = 0.3f)
-    )
-
-    Spacer(modifier = Modifier.height(8.dp))
-
-    // Menu items — settings-style list
     WalletMenuItem(
         title = "Transaction History",
-        subtitle = "view your transaction history",
+        subtitle = "View all wallet transactions",
         onClick = onTransactionHistory,
         trailing = {
             Icon(
@@ -803,35 +851,18 @@ private fun WalletReadyContent(
         }
     )
 
-    WalletMenuItem(
-        title = "Enable automatic payments",
-        subtitle = "Auto-broadcast when internet available",
-        onClick = { autoPaymentsEnabled = !autoPaymentsEnabled },
-        trailing = {
-            Icon(
-                painter = rememberAppIconPainter(if (autoPaymentsEnabled) AppIcons.CheckboxOn else AppIcons.CheckboxOff),
-                contentDescription = null,
-                tint = BitchatColors.TextDisabled,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    )
+    Spacer(modifier = Modifier.height(12.dp))
 
-    if (wallets.size > 1) {
-        WalletMenuItem(
-            title = "Switch Wallet",
-            subtitle = "Use a different saved wallet",
-            onClick = { showSwitchWalletDialog = true },
-            trailing = {
-                Icon(
-                    painter = rememberAppIconPainter(AppIcons.ArrowRight),
-                    contentDescription = null,
-                    tint = BitchatColors.TextDisabled,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        )
-    }
+    Text(
+        text = "Wallet Tools",
+        fontFamily = SatoshiFamily,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = BitchatColors.TextTertiary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    )
 
     if (canCreateMnemonicWallet) {
         WalletMenuItem(
@@ -979,27 +1010,63 @@ private fun WalletReadyContent(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Current active wallet is highlighted below.",
+                        fontFamily = SatoshiFamily,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BitchatColors.TextSecondary
+                    )
                     wallets.forEach { wallet ->
+                        val isActive = wallet.publicKey == state.address
+                        val short = if (wallet.publicKey.length > 12) {
+                            "${wallet.publicKey.take(6)}...${wallet.publicKey.takeLast(4)}"
+                        } else {
+                            wallet.publicKey
+                        }
                         OutlinedButton(
                             onClick = {
                                 showSwitchWalletDialog = false
                                 onSwitchWallet(wallet.publicKey)
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = wallet.publicKey != state.address,
+                            enabled = !isActive,
                             shape = BitchatShapes.Button,
-                            border = BorderStroke(1.dp, BitchatColors.Border),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BitchatColors.TextPrimary)
-                        ) {
-                            val short = if (wallet.publicKey.length > 12) {
-                                "${wallet.publicKey.take(6)}...${wallet.publicKey.takeLast(4)}"
-                            } else {
-                                wallet.publicKey
-                            }
-                            Text(
-                                text = if (wallet.publicKey == state.address) "$short (Active)" else short,
-                                fontFamily = SatoshiFamily
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isActive) BitchatColors.AccentGreen.copy(alpha = 0.7f) else BitchatColors.Border
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (isActive) BitchatColors.AccentGreen.copy(alpha = 0.12f) else Color.Transparent,
+                                contentColor = if (isActive) BitchatColors.AccentGreen else BitchatColors.TextPrimary,
+                                disabledContainerColor = if (isActive) BitchatColors.AccentGreen.copy(alpha = 0.12f) else Color.Transparent,
+                                disabledContentColor = if (isActive) BitchatColors.AccentGreen else BitchatColors.TextDisabled
                             )
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = short, fontFamily = SatoshiFamily)
+                                if (isActive) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            painter = rememberAppIconPainter(AppIcons.Check),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = "ACTIVE",
+                                            fontFamily = SatoshiFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1048,49 +1115,82 @@ private fun WalletMenuItem(
 }
 
 @Composable
-private fun QrCodeCard(address: String) {
+private fun ReceiveQrDialog(
+    address: String,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        val bitmap = remember(address) { generateQrCode(address) }
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Wallet QR Code",
-                modifier = Modifier
-                    .size(200.dp)
-                    .background(Color.White, RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = address,
-            fontFamily = SatoshiFamily,
-            fontSize = 11.sp,
-            color = BitchatColors.TextSecondary,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", address))
-                Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
-            },
-            border = BorderStroke(1.dp, BitchatColors.Border),
-            shape = BitchatShapes.Button,
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = BitchatColors.TextPrimary
-            )
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = BitchatShapes.Card,
+            colors = CardDefaults.cardColors(containerColor = BitchatColors.BackgroundElevated),
+            border = BorderStroke(1.dp, BitchatColors.Border)
         ) {
-            Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Copy Address", fontFamily = SatoshiFamily)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Receive SOL",
+                    fontFamily = SatoshiFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    color = BitchatColors.TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val bitmap = remember(address) { generateQrCode(address) }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Wallet QR Code",
+                        modifier = Modifier
+                            .size(220.dp)
+                            .background(Color.White, RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = address,
+                        fontFamily = SatoshiFamily,
+                        fontSize = 11.sp,
+                        color = BitchatColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Solana Address", address))
+                            Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Icon(
+                            painter = rememberAppIconPainter(AppIcons.Copy),
+                            contentDescription = "Copy address",
+                            tint = BitchatColors.TextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TextButton(onClick = onDismiss) {
+                    Text("Close", fontFamily = SatoshiFamily)
+                }
+            }
         }
     }
 }
@@ -1186,7 +1286,7 @@ private fun PrivateKeyExportDialog(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = BitchatColors.SolanaAccent,
+                        containerColor = BitchatColors.ButtonPrimaryBg,
                         contentColor = Color.White
                     ),
                     shape = BitchatShapes.Button
@@ -1208,90 +1308,116 @@ private fun MnemonicBackupDialog(
 
     Dialog(onDismissRequest = {}) {
         Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .widthIn(min = 320.dp, max = 460.dp),
             shape = BitchatShapes.Card,
             colors = CardDefaults.cardColors(
                 containerColor = BitchatColors.BackgroundElevated
             ),
-            border = BorderStroke(1.dp, BitchatColors.SolanaAccent.copy(alpha = 0.3f))
+            border = BorderStroke(1.dp, BitchatColors.ButtonPrimaryBg.copy(alpha = 0.3f))
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .padding(horizontal = 18.dp, vertical = 18.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "Backup Recovery Phrase",
-                    fontFamily = SatoshiFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = BitchatColors.TextPrimary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        painter = rememberAppIconPainter(AppIcons.Warning),
+                        contentDescription = null,
+                        tint = BitchatColors.StatusWarning,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Backup Recovery Phrase",
+                        fontFamily = SatoshiFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = BitchatColors.TextPrimary
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Text(
-                    text = "Write down these 24 words in order. This is the ONLY way to recover your wallet.",
-                    fontFamily = SatoshiFamily,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = BitchatColors.StatusError
-                )
+                Surface(
+                    shape = BitchatShapes.Button,
+                    color = BitchatColors.StatusError.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, BitchatColors.StatusError.copy(alpha = 0.28f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Write down these 24 words in order. This is the only way to recover your wallet.",
+                        fontFamily = SatoshiFamily,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = BitchatColors.StatusError,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 if (revealed) {
                     val words = mnemonic.split(" ")
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                BitchatColors.SurfaceVariant,
-                                BitchatShapes.Large
-                            )
-                            .padding(12.dp)
+                    Surface(
+                        shape = BitchatShapes.Large,
+                        color = BitchatColors.SurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        words.chunked(3).forEachIndexed { rowIndex, row ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                row.forEachIndexed { colIndex, word ->
-                                    val index = rowIndex * 3 + colIndex + 1
-                                    Text(
-                                        text = "$index. $word",
-                                        fontFamily = SatoshiFamily,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = BitchatColors.TextPrimary,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            words.chunked(2).forEachIndexed { rowIndex, row ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    row.forEachIndexed { colIndex, word ->
+                                        val index = rowIndex * 2 + colIndex + 1
+                                        Text(
+                                            text = "$index. $word",
+                                            fontFamily = SatoshiFamily,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = BitchatColors.TextPrimary,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    repeat(2 - row.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
-                                repeat(3 - row.size) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                            if (rowIndex < words.chunked(3).size - 1) {
-                                Spacer(modifier = Modifier.height(4.dp))
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("Recovery Phrase", mnemonic))
                             Toast.makeText(context, "Phrase copied - clear clipboard soon!", Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BitchatColors.ButtonGhostBg,
-                            contentColor = BitchatColors.TextPrimary
-                        ),
-                        shape = BitchatShapes.Button
+                        border = BorderStroke(1.dp, BitchatColors.Border),
+                        shape = BitchatShapes.Button,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BitchatColors.TextPrimary)
                     ) {
-                        Icon(painter = rememberAppIconPainter(AppIcons.Copy), contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy to Clipboard", fontFamily = SatoshiFamily)
+                        Icon(
+                            painter = rememberAppIconPainter(AppIcons.Copy),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy phrase", fontFamily = SatoshiFamily)
                     }
                 } else {
                     Button(
@@ -1303,27 +1429,51 @@ private fun MnemonicBackupDialog(
                         ),
                         shape = BitchatShapes.Button
                     ) {
-                        Icon(painter = rememberAppIconPainter(AppIcons.Visibility), contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reveal Recovery Phrase", fontFamily = SatoshiFamily)
+                        Icon(
+                            painter = rememberAppIconPainter(AppIcons.Visibility),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "Reveal Recovery Phrase",
+                            fontFamily = SatoshiFamily,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "Never share this phrase with anyone. Store it offline.",
+                    fontFamily = SatoshiFamily,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = BitchatColors.TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Button(
                     onClick = onDismiss,
+                    enabled = revealed,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = BitchatColors.SolanaAccent,
-                        contentColor = Color.White
+                        containerColor = BitchatColors.ButtonPrimaryBg,
+                        contentColor = Color.White,
+                        disabledContainerColor = BitchatColors.ButtonDisabledBg,
+                        disabledContentColor = BitchatColors.TextDisabled
                     ),
                     shape = BitchatShapes.Button
                 ) {
                     Text(
-                        "I've Saved My Recovery Phrase",
+                        "I Saved My Phrase",
                         fontFamily = SatoshiFamily,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1488,6 +1638,7 @@ private fun formatBalanceFreshnessLabel(lastUpdated: Long, viaMesh: Boolean): St
 @Composable
 private fun TransactionHistoryScreen(
     transactions: List<QueuedTransactionEntity>,
+    activeWalletAddress: String?,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1550,6 +1701,7 @@ private fun TransactionHistoryScreen(
                 items(transactions, key = { it.id }) { tx ->
                     TransactionRow(
                         tx = tx,
+                        activeWalletAddress = activeWalletAddress,
                         dateFormat = dateFormat,
                         onCopySignature = { sig ->
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -1566,6 +1718,7 @@ private fun TransactionHistoryScreen(
 @Composable
 private fun TransactionRow(
     tx: QueuedTransactionEntity,
+    activeWalletAddress: String?,
     dateFormat: SimpleDateFormat,
     onCopySignature: (String) -> Unit
 ) {
@@ -1573,9 +1726,9 @@ private fun TransactionRow(
     val statusColor = when (status) {
         TransactionStatus.CONFIRMED -> BitchatColors.StatusSuccess
         TransactionStatus.FAILED -> BitchatColors.StatusError
-        TransactionStatus.BROADCASTING -> BitchatColors.SolanaAccent
+        TransactionStatus.BROADCASTING -> BitchatColors.ButtonPrimaryBg
         TransactionStatus.QUEUED -> BitchatColors.TextSecondary
-        TransactionStatus.AWAITING_BLOCKHASH -> BitchatColors.SolanaAccent
+        TransactionStatus.AWAITING_BLOCKHASH -> BitchatColors.ButtonPrimaryBg
     }
     val statusLabel = when (status) {
         TransactionStatus.CONFIRMED -> "Confirmed"
@@ -1585,9 +1738,19 @@ private fun TransactionRow(
         TransactionStatus.AWAITING_BLOCKHASH -> "Awaiting Blockhash"
     }
     val solAmount = tx.amountLamports.toDouble() / 1_000_000_000.0
-    val shortRecipient = if (tx.recipientPublicKey.length > 12) {
-        "${tx.recipientPublicKey.take(6)}...${tx.recipientPublicKey.takeLast(4)}"
-    } else tx.recipientPublicKey
+    val direction = when {
+        activeWalletAddress.isNullOrBlank() -> TxDirection.OUTGOING
+        tx.recipientPublicKey == activeWalletAddress -> TxDirection.INCOMING
+        tx.senderPublicKey == activeWalletAddress -> TxDirection.OUTGOING
+        else -> TxDirection.OUTGOING
+    }
+    val amountPrefix = if (direction == TxDirection.INCOMING) "+" else "-"
+    val amountColor = if (direction == TxDirection.INCOMING) BitchatColors.StatusSuccess else BitchatColors.SelfMessage
+    val counterpartyLabel = if (direction == TxDirection.INCOMING) "From" else "To"
+    val counterpartyKey = if (direction == TxDirection.INCOMING) tx.senderPublicKey else tx.recipientPublicKey
+    val shortCounterparty = if (counterpartyKey.length > 12) {
+        "${counterpartyKey.take(6)}...${counterpartyKey.takeLast(4)}"
+    } else counterpartyKey
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1607,11 +1770,11 @@ private fun TransactionRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "-${"%.4f".format(solAmount)} SOL",
+                    text = "$amountPrefix${"%.4f".format(solAmount)} SOL",
                     fontFamily = SatoshiFamily,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = BitchatColors.TextPrimary
+                    color = amountColor
                 )
                 Text(
                     text = statusLabel,
@@ -1626,7 +1789,7 @@ private fun TransactionRow(
 
             // Recipient
             Text(
-                text = "To: $shortRecipient",
+                text = "$counterpartyLabel: $shortCounterparty",
                 fontFamily = SatoshiFamily,
                 fontSize = 13.sp,
                 color = BitchatColors.TextSecondary
@@ -1655,7 +1818,7 @@ private fun TransactionRow(
                         text = "Sig: ${tx.txSignature!!.take(16)}...",
                         fontFamily = SatoshiFamily,
                         fontSize = 11.sp,
-                        color = BitchatColors.SolanaAccent,
+                        color = BitchatColors.ButtonPrimaryBg,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -1664,7 +1827,7 @@ private fun TransactionRow(
                     Icon(
                         painter = rememberAppIconPainter(AppIcons.Copy),
                         contentDescription = "Copy signature",
-                        tint = BitchatColors.SolanaAccent,
+                        tint = BitchatColors.ButtonPrimaryBg,
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -1684,6 +1847,11 @@ private fun TransactionRow(
             }
         }
     }
+}
+
+private enum class TxDirection {
+    INCOMING,
+    OUTGOING
 }
 
 /**
@@ -1807,9 +1975,9 @@ private fun SendScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = BitchatColors.SolanaAccent,
+                        focusedBorderColor = BitchatColors.ButtonPrimaryBg,
                         unfocusedBorderColor = BitchatColors.Border,
-                        cursorColor = BitchatColors.SolanaAccent,
+                        cursorColor = BitchatColors.ButtonPrimaryBg,
                         focusedTextColor = BitchatColors.TextPrimary,
                         unfocusedTextColor = BitchatColors.TextPrimary
                     )
@@ -1828,7 +1996,7 @@ private fun SendScreen(
                     enabled = canSend,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = BitchatColors.SolanaAccent,
+                        containerColor = BitchatColors.ButtonPrimaryBg,
                         contentColor = Color.White,
                         disabledContainerColor = BitchatColors.ButtonDisabledBg,
                         disabledContentColor = BitchatColors.ButtonDisabledFg
@@ -1940,9 +2108,9 @@ private fun SendScreen(
                             }
                         },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = BitchatColors.SolanaAccent,
+                            focusedBorderColor = BitchatColors.ButtonPrimaryBg,
                             unfocusedBorderColor = BitchatColors.Border,
-                            cursorColor = BitchatColors.SolanaAccent,
+                            cursorColor = BitchatColors.ButtonPrimaryBg,
                             focusedTextColor = BitchatColors.TextPrimary,
                             unfocusedTextColor = BitchatColors.TextPrimary
                         )
@@ -1959,7 +2127,7 @@ private fun SendScreen(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = BitchatColors.SolanaAccent,
+                                containerColor = BitchatColors.ButtonPrimaryBg,
                                 contentColor = Color.White
                             ),
                             shape = BitchatShapes.Button

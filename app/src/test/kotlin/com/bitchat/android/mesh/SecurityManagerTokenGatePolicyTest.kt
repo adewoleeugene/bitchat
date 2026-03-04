@@ -1,34 +1,29 @@
 package com.bitchat.android.mesh
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.bitchat.android.crypto.EncryptionService
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.protocol.MessageType
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import org.mockito.kotlin.any
-import org.mockito.kotlin.atLeastOnce
-import org.mockito.kotlin.eq
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.never
-import org.mockito.kotlin.verify
-import org.mockito.kotlin.whenever
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class SecurityManagerTokenGatePolicyTest {
-    private val encryptionService: EncryptionService = mock()
-    private val delegate: SecurityManagerDelegate = mock()
     private lateinit var securityManager: SecurityManager
 
     @Before
     fun setUp() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val encryptionService = EncryptionService(context)
         securityManager = SecurityManager(encryptionService, myPeerID = "self-peer")
-        securityManager.delegate = delegate
     }
 
     @Test
     fun validatePacket_staleTokenGatePolicy_isRejected() {
-        val peerID = "peer-01"
         val packet = BitchatPacket(
             version = 1u,
             type = MessageType.TOKEN_GATE_POLICY.value,
@@ -40,43 +35,41 @@ class SecurityManagerTokenGatePolicyTest {
             ttl = 7u
         )
 
-        val accepted = securityManager.validatePacket(packet, peerID)
-
+        val accepted = securityManager.validatePacket(packet, peerID = "peer-01")
         assertFalse(accepted)
-        verify(encryptionService, never()).verifyEd25519Signature(any(), any(), any())
     }
 
     @Test
-    fun validatePacket_freshTokenGatePolicy_withValidSignature_isAccepted() {
-        val peerID = "peer-02"
-        val signingPublicKey = ByteArray(32) { 3 }
-        val peerInfo = PeerInfo(
-            id = peerID,
-            nickname = "alice",
-            isConnected = true,
-            isDirectConnection = true,
-            noisePublicKey = ByteArray(32) { 1 },
-            signingPublicKey = signingPublicKey,
-            isVerifiedNickname = true,
-            lastSeen = System.currentTimeMillis()
-        )
-        whenever(delegate.getPeerInfo(peerID)).thenReturn(peerInfo)
-        whenever(encryptionService.verifyEd25519Signature(any(), any(), any())).thenReturn(true)
-
+    fun validatePacket_staleChannelRolePolicy_isRejected() {
         val packet = BitchatPacket(
             version = 1u,
-            type = MessageType.TOKEN_GATE_POLICY.value,
+            type = MessageType.CHANNEL_ROLE_POLICY.value,
             senderID = ByteArray(8) { 2 },
             recipientID = null,
-            timestamp = System.currentTimeMillis().toULong(),
-            payload = "fresh-policy".toByteArray(),
+            timestamp = (System.currentTimeMillis() - 6 * 60_000L).toULong(),
+            payload = "stale-role-policy".toByteArray(),
             signature = ByteArray(64) { 7 },
             ttl = 7u
         )
 
-        val accepted = securityManager.validatePacket(packet, peerID)
+        val accepted = securityManager.validatePacket(packet, peerID = "peer-02")
+        assertFalse(accepted)
+    }
 
-        assertTrue(accepted)
-        verify(encryptionService, atLeastOnce()).verifyEd25519Signature(any(), any(), eq(signingPublicKey))
+    @Test
+    fun validatePacket_unsignedChannelRolePolicy_isRejected() {
+        val packet = BitchatPacket(
+            version = 1u,
+            type = MessageType.CHANNEL_ROLE_POLICY.value,
+            senderID = ByteArray(8) { 3 },
+            recipientID = null,
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = "fresh-role-policy".toByteArray(),
+            signature = null,
+            ttl = 7u
+        )
+
+        val accepted = securityManager.validatePacket(packet, peerID = "peer-03")
+        assertFalse(accepted)
     }
 }

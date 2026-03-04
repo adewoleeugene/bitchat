@@ -167,6 +167,7 @@ fun MessageInput(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
+    onOpenCommandSheet: () -> Unit,
     onSendVoiceNote: (String?, String?, String) -> Unit,
     onSendImageNote: (String?, String?, String) -> Unit,
     onSendFileNote: (String?, String?, String) -> Unit,
@@ -272,8 +273,27 @@ fun MessageInput(
 
             // Image button (image picker) - hide during recording
             if (!isRecording) {
-                // Revert to original separate buttons: round File button (left) and the old Image plus button (right)
+                // Keep quick actions compact: Command, Camera
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenCommandSheet,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(BitchatColors.BackgroundElevated, CircleShape)
+                                .border(1.dp, BitchatColors.InputFieldBorder, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            LucideIcon(
+                                imageVector = LucideIconSet.Terminal,
+                                contentDescription = "Commands",
+                                modifier = Modifier.size(18.dp),
+                                tint = colorScheme.primary
+                            )
+                        }
+                    }
                     // DISABLE FILE PICKER
                     //FilePickerButton(
                     //    onFileReady = { path ->

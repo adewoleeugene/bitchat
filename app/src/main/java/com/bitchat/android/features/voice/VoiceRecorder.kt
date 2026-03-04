@@ -34,14 +34,13 @@ class VoiceRecorder(private val context: Context) {
             val name = "voice_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".m4a"
             val file = File(dir, name)
             val rec = MediaRecorder()
-            rec.setAudioSource(MediaRecorder.AudioSource.MIC)
+            rec.setAudioSource(MediaRecorder.AudioSource.DEFAULT)
             rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             rec.setAudioChannels(1)
-            // Target: 16 kHz AAC @ 20 kbps ≈ 2.5 KB/sec
-            // Lower sample rate and bitrate for compact, speech-optimized recordings
-            rec.setAudioSamplingRate(16000)
-            rec.setAudioEncodingBitRate(20_000)
+            // Keep clips compact while preserving speech clarity.
+            rec.setAudioSamplingRate(32000)
+            rec.setAudioEncodingBitRate(48_000)
             rec.setOutputFile(file.absolutePath)
             rec.prepare()
             rec.start() 

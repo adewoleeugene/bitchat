@@ -67,14 +67,16 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
 //        }
 
         val messageType = MessageType.fromValue(packet.type)
-        if (messageType == MessageType.TOKEN_GATE_POLICY && timeDiff > MESSAGE_TIMEOUT) {
-            Log.w(TAG, "Dropping stale TOKEN_GATE_POLICY from $peerID (age=${timeDiff / 1000}s)")
+        if ((messageType == MessageType.TOKEN_GATE_POLICY || messageType == MessageType.CHANNEL_ROLE_POLICY) &&
+            timeDiff > MESSAGE_TIMEOUT
+        ) {
+            Log.w(TAG, "Dropping stale $messageType from $peerID (age=${timeDiff / 1000}s)")
             return false
         }
-        if (messageType == MessageType.TOKEN_GATE_POLICY &&
-            !isAuthenticatedTokenGatePolicyPacket(packet, peerID)
+        if ((messageType == MessageType.TOKEN_GATE_POLICY || messageType == MessageType.CHANNEL_ROLE_POLICY) &&
+            !isAuthenticatedPolicyPacket(packet, peerID)
         ) {
-            Log.w(TAG, "Dropping unauthenticated TOKEN_GATE_POLICY from $peerID")
+            Log.w(TAG, "Dropping unauthenticated $messageType from $peerID")
             return false
         }
 
@@ -100,7 +102,7 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
      * Token gate policy updates are security-critical and must be signed by
      * a verified peer identity that we already trust from ANNOUNCE processing.
      */
-    private fun isAuthenticatedTokenGatePolicyPacket(packet: BitchatPacket, peerID: String): Boolean {
+    private fun isAuthenticatedPolicyPacket(packet: BitchatPacket, peerID: String): Boolean {
         val signature = packet.signature ?: return false
         val peerInfo = delegate?.getPeerInfo(peerID) ?: return false
         if (!peerInfo.isVerifiedNickname) return false

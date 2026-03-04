@@ -38,6 +38,7 @@ import com.composables.icons.lucide.Minus
 import com.composables.icons.lucide.Monitor
 import com.composables.icons.lucide.Network
 import com.composables.icons.lucide.Paperclip
+import com.composables.icons.lucide.Pin
 import com.composables.icons.lucide.Pause
 import com.composables.icons.lucide.Play
 import com.composables.icons.lucide.Plus
@@ -49,6 +50,7 @@ import com.composables.icons.lucide.Send
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Shield
 import com.composables.icons.lucide.Square
+import com.composables.icons.lucide.Terminal
 import com.composables.icons.lucide.Star
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.Users
@@ -82,6 +84,7 @@ object LucideIconSet {
     val Camera: ImageVector = Lucide.Camera
     val File: ImageVector = Lucide.File
     val Attachment: ImageVector = Lucide.Paperclip
+    val Pin: ImageVector = Lucide.Pin
     val Link: ImageVector = Lucide.Link
     val Play: ImageVector = Lucide.Play
     val Pause: ImageVector = Lucide.Pause
@@ -105,6 +108,7 @@ object LucideIconSet {
     val RefreshCw: ImageVector = Lucide.RefreshCw
     val Lock: ImageVector = Lucide.Lock
     val AlertTriangle: ImageVector = Lucide.TriangleAlert
+    val Terminal: ImageVector = Lucide.Terminal
 }
 
 @Composable

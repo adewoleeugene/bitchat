@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.bitchat.android.MainActivity
 import com.bitchat.android.R
 import com.bitchat.android.util.NotificationIntervalManager
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -35,10 +36,13 @@ class NotificationManager(
         private const val TAG = "NotificationManager"
         private const val CHANNEL_ID = "bitchat_dm_notifications"
         private const val GEOHASH_CHANNEL_ID = "bitchat_geohash_notifications"
+        private const val FEED_CHANNEL_ID = "bitchat_feed_notifications"
         private const val GROUP_KEY_DM = "bitchat_dm_group"
         private const val GROUP_KEY_GEOHASH = "bitchat_geohash_group"
+        private const val GROUP_KEY_FEED = "bitchat_feed_group"
         private const val NOTIFICATION_REQUEST_CODE = 1000
         private const val GEOHASH_NOTIFICATION_REQUEST_CODE = 2000
+        private const val FEED_NOTIFICATION_REQUEST_CODE = 3000
         private const val SUMMARY_NOTIFICATION_ID = 999
       private const val GEOHASH_SUMMARY_NOTIFICATION_ID = 998
         private const val ACTIVE_PEERS_NOTIFICATION_ID = 997
@@ -47,6 +51,7 @@ class NotificationManager(
         // Intent extras for notification handling
         const val EXTRA_OPEN_PRIVATE_CHAT = "open_private_chat"
         const val EXTRA_OPEN_GEOHASH_CHAT = "open_geohash_chat"
+        const val EXTRA_OPEN_FEED = "open_feed"
         const val EXTRA_PEER_ID = "peer_id"
         const val EXTRA_SENDER_NICKNAME = "sender_nickname"
         const val EXTRA_GEOHASH = "geohash"
@@ -57,6 +62,7 @@ class NotificationManager(
     // Track pending notifications per sender to enable grouping
     private val pendingNotifications = ConcurrentHashMap<String, MutableList<PendingNotification>>()
     private val pendingGeohashNotifications = ConcurrentHashMap<String, MutableList<GeohashNotification>>()
+    private val pendingFeedReplyNotifications = ConcurrentHashMap<String, MutableList<FeedReplyNotification>>()
 
     // Track app background state
     @Volatile
@@ -68,6 +74,9 @@ class NotificationManager(
 
     @Volatile
     private var currentGeohash: String? = null
+
+    @Volatile
+    private var currentTab: String = "chat"
 
     data class PendingNotification(
         val senderPeerID: String,
@@ -85,6 +94,27 @@ class NotificationManager(
         val isFirstMessage: Boolean,
         val locationName: String? = null
     )
+
+    data class FeedReplyNotification(
+        val postId: String,
+        val senderNickname: String,
+        val messageContent: String,
+        val reason: String,
+        val timestamp: Long
+    )
+
+    data class InAppNotificationItem(
+        val id: String,
+        val type: String,
+        val title: String,
+        val body: String,
+        val timestamp: Long,
+        val targetId: String? = null,
+        val targetChannelKey: String? = null
+    )
+
+    var onNotificationStateChanged: (() -> Unit)? = null
+    private val inAppNotifications = Collections.synchronizedList(mutableListOf<InAppNotificationItem>())
 
     init {
         createNotificationChannel()
@@ -113,6 +143,15 @@ class NotificationManager(
                 setShowBadge(true)
             }
             systemNotificationManager.createNotificationChannel(geohashChannel)
+
+            val feedName = "Feed Replies"
+            val feedDescription = "Notifications for replies on your posts and followed threads"
+            val feedChannel = NotificationChannel(FEED_CHANNEL_ID, feedName, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = feedDescription
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            systemNotificationManager.createNotificationChannel(feedChannel)
         }
     }
 
@@ -140,6 +179,76 @@ class NotificationManager(
         Log.d(TAG, "Current geohash changed: $geohash")
     }
 
+    fun setCurrentTab(tab: String) {
+        currentTab = tab
+        Log.d(TAG, "Current tab changed: $tab")
+    }
+
+    fun showFeedReplyNotification(
+        postId: String,
+        senderNickname: String,
+        messageContent: String,
+        reason: String,
+        channelKey: String
+    ) {
+        val shouldNotify = isAppInBackground || (!isAppInBackground && currentTab != "feed")
+        if (!shouldNotify) {
+            Log.d(TAG, "Skipping feed reply notification - user is actively viewing feed")
+            return
+        }
+
+        val notification = FeedReplyNotification(
+            postId = postId,
+            senderNickname = senderNickname,
+            messageContent = messageContent,
+            reason = reason,
+            timestamp = System.currentTimeMillis()
+        )
+        pendingFeedReplyNotifications.computeIfAbsent(postId) { mutableListOf() }.add(notification)
+        appendInAppNotification(
+            type = "feed",
+            title = reason,
+            body = "${notification.senderNickname}: ${notification.messageContent}",
+            timestamp = notification.timestamp,
+            id = "feed:${notification.timestamp}:$postId",
+            targetId = postId,
+            targetChannelKey = channelKey
+        )
+        showFeedNotificationForPost(notification)
+    }
+
+    private fun showFeedNotificationForPost(notification: FeedReplyNotification) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_FEED, true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            FEED_NOTIFICATION_REQUEST_CODE + notification.postId.hashCode(),
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = NotificationCompat.Builder(context, FEED_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(notification.reason)
+            .setContentText("${notification.senderNickname}: ${notification.messageContent}")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setGroup(GROUP_KEY_FEED)
+            .setShowWhen(true)
+            .setWhen(notification.timestamp)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("${notification.senderNickname}: ${notification.messageContent}")
+            )
+
+        val notificationId = 5000 + notification.postId.hashCode()
+        notificationManager.notify(notificationId, builder.build())
+    }
+
     /**
      * Show a notification for a private message with proper grouping and state awareness
      */
@@ -163,6 +272,14 @@ class NotificationManager(
 
         // Add to pending notifications for this sender
         pendingNotifications.computeIfAbsent(senderPeerID) { mutableListOf() }.add(notification)
+        appendInAppNotification(
+            type = "dm",
+            title = senderNickname,
+            body = messageContent,
+            timestamp = notification.timestamp,
+            id = "dm:${notification.timestamp}:$senderPeerID",
+            targetId = senderPeerID
+        )
 
         // Create or update notification for this sender
         showNotificationForSender(senderPeerID)
@@ -391,6 +508,7 @@ class NotificationManager(
         }
         
         Log.d(TAG, "Cleared notifications for sender: $senderPeerID")
+        onNotificationStateChanged?.invoke()
     }
 
     /**
@@ -426,6 +544,14 @@ class NotificationManager(
 
         // Add to pending notifications for this geohash
         pendingGeohashNotifications.computeIfAbsent(geohash) { mutableListOf() }.add(notification)
+        appendInAppNotification(
+            type = "geohash",
+            title = "#$geohash",
+            body = "${notification.senderNickname}: ${notification.messageContent}",
+            timestamp = notification.timestamp,
+            id = "geo:${notification.timestamp}:$geohash",
+            targetId = geohash
+        )
 
         // Create or update notification for this geohash
         showNotificationForGeohash(geohash)
@@ -615,6 +741,20 @@ class NotificationManager(
         }
 
         Log.d(TAG, "Cleared notifications for geohash: $geohash")
+        onNotificationStateChanged?.invoke()
+    }
+
+    /**
+     * Clear feed reply notifications for a specific post (e.g., when user opens that thread)
+     */
+    fun clearNotificationsForFeedPost(postId: String) {
+        pendingFeedReplyNotifications.remove(postId)
+
+        val notificationId = 5000 + postId.hashCode()
+        notificationManager.cancel(notificationId)
+
+        Log.d(TAG, "Cleared feed notifications for post: $postId")
+        onNotificationStateChanged?.invoke()
     }
 
     /**
@@ -648,6 +788,14 @@ class NotificationManager(
 
         // Add to pending notifications for mesh mentions
         pendingNotifications.computeIfAbsent(meshMentionKey) { mutableListOf() }.add(notification)
+        appendInAppNotification(
+            type = "mention",
+            title = "Mesh mention",
+            body = "${notification.senderNickname}: ${notification.messageContent}",
+            timestamp = notification.timestamp,
+            id = "mention:${notification.timestamp}:${notification.senderPeerID}",
+            targetId = notification.senderPeerID
+        )
 
         // Create or update notification for mesh mentions
         showNotificationForMeshMentions()
@@ -756,6 +904,7 @@ class NotificationManager(
         }
 
         Log.d(TAG, "Cleared mesh mention notifications")
+        onNotificationStateChanged?.invoke()
     }
 
     /**
@@ -765,7 +914,10 @@ class NotificationManager(
         pendingNotifications.clear()
         notificationManager.cancelAll()
         pendingGeohashNotifications.clear()
+        pendingFeedReplyNotifications.clear()
+        synchronized(inAppNotifications) { inAppNotifications.clear() }
         Log.d(TAG, "Cleared all notifications")
+        onNotificationStateChanged?.invoke()
     }
 
     /**
@@ -773,7 +925,16 @@ class NotificationManager(
      */
     fun getPendingNotificationCount(): Int {
         return pendingNotifications.values.sumOf { it.size } +
-               pendingGeohashNotifications.values.sumOf { it.size }
+               pendingGeohashNotifications.values.sumOf { it.size } +
+               pendingFeedReplyNotifications.values.sumOf { it.size }
+    }
+
+    fun getRecentInAppNotifications(limit: Int = 50): List<InAppNotificationItem> {
+        return synchronized(inAppNotifications) {
+            inAppNotifications
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
     }
 
     /**
@@ -809,6 +970,36 @@ class NotificationManager(
                 val firstMessages = notifications.count { it.isFirstMessage }
                 appendLine("  #$geohash: ${notifications.size} messages ($mentions mentions, $firstMessages first messages)")
             }
+            appendLine("Pending feed reply notifications: ${pendingFeedReplyNotifications.size} threads")
         }
+    }
+
+    private fun appendInAppNotification(
+        type: String,
+        title: String,
+        body: String,
+        timestamp: Long,
+        id: String,
+        targetId: String? = null,
+        targetChannelKey: String? = null
+    ) {
+        synchronized(inAppNotifications) {
+            inAppNotifications.add(
+                InAppNotificationItem(
+                    id = id,
+                    type = type,
+                    title = title,
+                    body = body,
+                    timestamp = timestamp,
+                    targetId = targetId,
+                    targetChannelKey = targetChannelKey
+                )
+            )
+            val extra = inAppNotifications.size - 100
+            if (extra > 0) {
+                repeat(extra) { inAppNotifications.removeAt(0) }
+            }
+        }
+        onNotificationStateChanged?.invoke()
     }
 }

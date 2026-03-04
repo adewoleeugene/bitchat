@@ -3,6 +3,7 @@ package com.bitchat.android.di
 import com.bitchat.android.solana.MessageNotarizationService
 import com.bitchat.android.solana.NftAvatarService
 import com.bitchat.android.solana.SolanaPaymentManager
+import com.bitchat.android.solana.SolanaRpcService
 import com.bitchat.android.solana.SolanaRelayHandler
 import com.bitchat.android.solana.SolanaWalletService
 import com.bitchat.android.solana.TokenGateService
@@ -19,6 +20,7 @@ import dagger.hilt.components.SingletonComponent
 interface SolanaEntryPoint {
     fun solanaWalletService(): SolanaWalletService
     fun solanaPaymentManager(): SolanaPaymentManager
+    fun solanaRpcService(): SolanaRpcService
     fun tokenGateService(): TokenGateService
     fun solanaRelayHandler(): SolanaRelayHandler
     fun messageNotarizationService(): MessageNotarizationService

@@ -99,6 +99,30 @@ class PermissionManager(private val context: Context) {
         return getRequiredPermissions().all { isPermissionGranted(it) }
     }
 
+    fun isNearbyDevicesPermissionGranted(): Boolean {
+        val bluetoothPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN
+            )
+        } else {
+            listOf(
+                Manifest.permission.BLUETOOTH,
+                Manifest.permission.BLUETOOTH_ADMIN
+            )
+        }
+        return bluetoothPermissions.all { isPermissionGranted(it) }
+    }
+
+    fun isLocationPermissionGranted(): Boolean {
+        val locationPermissions = listOf(
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
+        return locationPermissions.all { isPermissionGranted(it) }
+    }
+
     /**
      * Check if battery optimization is disabled for this app
      */

@@ -667,7 +667,15 @@ class CommandProcessor(
                 return Pair(ChannelKeys.parseChannelName(key), key)
             }
             val channelTag = if (channelArg.startsWith("#")) channelArg else "#$channelArg"
-            return Pair(channelTag, ChannelKeys.create(timeline, channelTag))
+            val preferredKey = ChannelKeys.create(timeline, channelTag)
+            val joinedChannels = state.getJoinedChannelsValue()
+            if (joinedChannels.contains(preferredKey)) {
+                return Pair(channelTag, preferredKey)
+            }
+            val matchedKey = joinedChannels.firstOrNull { joinedKey ->
+                ChannelKeys.parseChannelName(joinedKey).equals(channelTag, ignoreCase = true)
+            }
+            return Pair(channelTag, matchedKey ?: preferredKey)
         }
 
         val current = state.getCurrentChannelValue()
@@ -933,17 +941,13 @@ class CommandProcessor(
             Pair(peerList, "online users")
         }
         
-        val systemMessage = BitchatMessage(
-            sender = "system",
-            content = if (peerList.isEmpty()) {
+        addSystemMessage(
+            if (peerList.isEmpty()) {
                 "no one else is around right now."
             } else {
                 "$contextDescription: $peerList"
-            },
-            timestamp = Date(),
-            isRelay = false
+            }
         )
-        messageManager.addMessage(systemMessage)
     }
     
     private fun handleClearCommand() {
@@ -1195,7 +1199,12 @@ class CommandProcessor(
             timestamp = Date(),
             isRelay = false
         )
-        messageManager.addMessage(systemMessage)
+        val currentChannel = state.getCurrentChannelValue()
+        if (!currentChannel.isNullOrBlank()) {
+            channelManager.addChannelMessage(currentChannel, systemMessage, null)
+        } else {
+            messageManager.addMessage(systemMessage)
+        }
     }
 
     private fun handleChannelsCommand() {
@@ -1212,13 +1221,7 @@ class CommandProcessor(
             "joined channels: $channelNames"
         }
 
-        val systemMessage = BitchatMessage(
-            sender = "system",
-            content = channelList,
-            timestamp = Date(),
-            isRelay = false
-        )
-        messageManager.addMessage(systemMessage)
+        addSystemMessage(channelList)
     }
     
     private fun handleUnknownCommand(cmd: String) {
@@ -1247,6 +1250,10 @@ class CommandProcessor(
             state.setShowCommandSuggestions(false)
             state.setCommandSuggestions(emptyList())
         }
+    }
+
+    fun getAllSlashCommands(myPeerID: String): List<CommandSuggestion> {
+        return filterCommands(getAllAvailableCommands(myPeerID), "/")
     }
     
     private fun getAllAvailableCommands(myPeerID: String): List<CommandSuggestion> {
@@ -1341,7 +1348,7 @@ class CommandProcessor(
             "/kick" -> CommandResult(prefillText = "/kick @", hintText = "who should be removed from the channel?")
             "/transfer" -> CommandResult(prefillText = "/transfer @", hintText = "who should become channel owner?")
             "/j", "/join" -> CommandResult(prefillText = "/join #", hintText = "type a channel name")
-            "/tip" -> CommandResult(prefillText = "/tip @", hintText = "who do you want to tip?")
+            "/tip" -> CommandResult(prefillText = "/tip @nickname amount", hintText = "replace nickname and amount")
             "/m", "/msg" -> CommandResult(prefillText = "/m @", hintText = "who do you want to message?")
             "/block" -> CommandResult(prefillText = "/block @", hintText = "who do you want to block?")
             "/unblock" -> CommandResult(prefillText = "/unblock @", hintText = "who do you want to unblock?")

@@ -159,7 +159,9 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.FEED_POST -> handleFeedPost(routed)
             MessageType.FEED_REACTION -> handleFeedReaction(routed)
             MessageType.FEED_REPLY -> handleFeedReply(routed)
+            MessageType.FEED_PIN -> handleFeedPin(routed)
             MessageType.TOKEN_GATE_POLICY -> handleTokenGatePolicy(routed)
+            MessageType.CHANNEL_ROLE_POLICY -> handleChannelRolePolicy(routed)
             else -> {
                 // Handle private packet types (address check required)
                 if (packetRelayManager.isPacketAddressedToMe(packet)) {
@@ -357,12 +359,30 @@ class PacketProcessor(private val myPeerID: String) {
     }
 
     /**
+     * Handle feed pin state change (0x45)
+     */
+    private suspend fun handleFeedPin(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing FEED_PIN from ${formatPeerForLog(peerID)}")
+        delegate?.handleFeedPin(routed)
+    }
+
+    /**
      * Handle token-gate policy sync packet (0x43)
      */
     private suspend fun handleTokenGatePolicy(routed: RoutedPacket) {
         val peerID = routed.peerID ?: "unknown"
         Log.d(TAG, "Processing TOKEN_GATE_POLICY from ${formatPeerForLog(peerID)}")
         delegate?.handleTokenGatePolicy(routed)
+    }
+
+    /**
+     * Handle channel-role policy sync packet (0x44)
+     */
+    private suspend fun handleChannelRolePolicy(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing CHANNEL_ROLE_POLICY from ${formatPeerForLog(peerID)}")
+        delegate?.handleChannelRolePolicy(routed)
     }
     
     /**
@@ -449,7 +469,9 @@ interface PacketProcessorDelegate {
     fun handleFeedPost(routed: RoutedPacket)
     fun handleFeedReaction(routed: RoutedPacket)
     fun handleFeedReply(routed: RoutedPacket)
+    fun handleFeedPin(routed: RoutedPacket)
     fun handleTokenGatePolicy(routed: RoutedPacket)
+    fun handleChannelRolePolicy(routed: RoutedPacket)
 
     // Communication
     fun sendAnnouncementToPeer(peerID: String)

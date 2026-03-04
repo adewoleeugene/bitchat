@@ -222,7 +222,14 @@ class MediaSendingManager(
         filePath: String,
         messageType: BitchatMessageType
     ) {
-        val payload = filePacket.encode()
+        val packetToSend = filePacket.copy(
+            fileName = com.bitchat.android.features.file.FileUtils.encodeChannelInFileName(
+                fileName = filePacket.fileName,
+                channelKey = channelOrNull
+            )
+        )
+
+        val payload = packetToSend.encode()
         if (payload == null) {
             Log.e(TAG, "❌ Failed to encode file packet for broadcast send")
             return
@@ -230,9 +237,9 @@ class MediaSendingManager(
         Log.d(TAG, "🔓 Encoded broadcast packet: ${payload.size} bytes")
         
         val transferId = sha256Hex(payload)
-        val contentHash = sha256Hex(filePacket.content)
+        val contentHash = sha256Hex(packetToSend.content)
         
-        Log.d(TAG, "📤 FILE_TRANSFER send (broadcast): name='${filePacket.fileName}', size=${filePacket.fileSize}, mime='${filePacket.mimeType}', sha256=$contentHash, transferId=${transferId.take(16)}…")
+        Log.d(TAG, "📤 FILE_TRANSFER send (broadcast): name='${packetToSend.fileName}', size=${packetToSend.fileSize}, mime='${packetToSend.mimeType}', sha256=$contentHash, transferId=${transferId.take(16)}…")
 
         val message = BitchatMessage(
             id = java.util.UUID.randomUUID().toString().uppercase(), // Generate unique ID for each message
@@ -263,7 +270,7 @@ class MediaSendingManager(
         )
         
         Log.d(TAG, "📤 Calling meshService.sendFileBroadcast")
-        meshService.sendFileBroadcast(filePacket)
+        meshService.sendFileBroadcast(packetToSend)
         Log.d(TAG, "✅ File broadcast completed successfully")
     }
 

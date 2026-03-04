@@ -15,6 +15,7 @@ class MessageManager(private val state: ChatState) {
     private val recentSystemEvents = Collections.synchronizedMap(mutableMapOf<String, Long>())
     private val MESSAGE_DEDUP_TIMEOUT = com.bitchat.android.util.AppConstants.UI.MESSAGE_DEDUP_TIMEOUT_MS // 30 seconds
     private val SYSTEM_EVENT_DEDUP_TIMEOUT = com.bitchat.android.util.AppConstants.UI.SYSTEM_EVENT_DEDUP_TIMEOUT_MS // 5 seconds
+    private val CHANNEL_MESSAGE_RETENTION_MS = 72L * 60L * 60L * 1000L // 72 hours
     
     // MARK: - Public Message Management
     
@@ -43,13 +44,18 @@ class MessageManager(private val state: ChatState) {
     // MARK: - Channel Message Management
     
     fun addChannelMessage(channel: String, message: BitchatMessage) {
+        val cutoff = System.currentTimeMillis() - CHANNEL_MESSAGE_RETENTION_MS
         val currentChannelMessages = state.getChannelMessagesValue().toMutableMap()
         if (!currentChannelMessages.containsKey(channel)) {
             currentChannelMessages[channel] = mutableListOf()
         }
         
-        val channelMessageList = currentChannelMessages[channel]?.toMutableList() ?: mutableListOf()
-        channelMessageList.add(message)
+        val channelMessageList = (currentChannelMessages[channel]?.toMutableList() ?: mutableListOf())
+            .filter { it.timestamp.time >= cutoff }
+            .toMutableList()
+        if (message.timestamp.time >= cutoff) {
+            channelMessageList.add(message)
+        }
         currentChannelMessages[channel] = channelMessageList
         state.setChannelMessages(currentChannelMessages)
         

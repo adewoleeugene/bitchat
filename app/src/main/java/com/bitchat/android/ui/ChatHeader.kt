@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,8 +29,10 @@ import com.bitchat.android.core.ui.utils.singleOrTripleClickable
 import com.bitchat.android.geohash.LocationChannelManager.PermissionState
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
+import com.bitchat.android.ui.theme.AppIcons
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.SatoshiFamily
+import com.bitchat.android.ui.theme.rememberAppIconPainter
 import com.bitchat.android.ui.icons.LucideIcon
 import com.bitchat.android.ui.icons.LucideIconSet
 
@@ -172,63 +175,60 @@ fun NicknameEditor(
 @Composable
 fun PeerCounter(
     connectedPeers: List<String>,
-    joinedChannels: Set<String>,
-    hasUnreadChannels: Map<String, Int>,
+    joinedChannelCount: Int,
     isConnected: Boolean,
     selectedLocationChannel: com.bitchat.android.geohash.ChannelID?,
     geohashPeople: List<GeoPerson>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    
-    // Compute channel-aware people count and color (matches iOS logic exactly)
-    val (peopleCount, countColor) = when (selectedLocationChannel) {
+    // Compute channel-aware people count and apply header icon tint rules
+    val peopleCount = when (selectedLocationChannel) {
         is com.bitchat.android.geohash.ChannelID.Location -> {
-            // Geohash channel: show geohash participants
-            val count = geohashPeople.size
-            val green = BitchatColors.StatusSuccess // Standard green
-            Pair(count, if (count > 0) green else BitchatColors.TextSecondary)
+            geohashPeople.size
         }
         is com.bitchat.android.geohash.ChannelID.Mesh,
         null -> {
-            // Mesh channel: show Bluetooth-connected peers (excluding self)
-            val count = connectedPeers.size
-            val meshBlue = BitchatColors.MeshChannel // iOS-style blue for mesh
-            Pair(count, if (isConnected && count > 0) meshBlue else BitchatColors.TextSecondary)
+            connectedPeers.size
         }
     }
+    val hasPeople = when (selectedLocationChannel) {
+        is com.bitchat.android.geohash.ChannelID.Location -> peopleCount > 0
+        is com.bitchat.android.geohash.ChannelID.Mesh,
+        null -> isConnected && peopleCount > 0
+    }
+    val countColor = if (hasPeople) BitchatColors.StatusInfo else BitchatColors.TextSecondary
     
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.clickable { onClick() }.padding(end = 8.dp) // Added right margin to match "bitchat" logo spacing
     ) {
-        LucideIcon(
-            imageVector = LucideIconSet.Users,
-            contentDescription = when (selectedLocationChannel) {
-                is com.bitchat.android.geohash.ChannelID.Location -> stringResource(R.string.cd_geohash_participants)
+        Box {
+            LucideIcon(
+                imageVector = LucideIconSet.Users,
+                contentDescription = when (selectedLocationChannel) {
+                    is com.bitchat.android.geohash.ChannelID.Location -> stringResource(R.string.cd_geohash_participants)
                 else -> stringResource(R.string.cd_connected_peers)
-            },
-            modifier = Modifier.size(22.dp),
-            tint = countColor
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-
-        Text(
-            text = "$peopleCount",
-            style = MaterialTheme.typography.bodyMedium,
-            color = countColor,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium
-        )
-        
-        if (joinedChannels.isNotEmpty()) {
+                } + ". You have $joinedChannelCount joined " + if (joinedChannelCount == 1) "channel" else "channels",
+                modifier = Modifier.size(22.dp),
+                tint = countColor
+            )
+        }
+        Spacer(modifier = Modifier.width(3.dp))
+        Box(
+            modifier = Modifier
+                .height(14.dp)
+                .background(BitchatColors.BackgroundElevated, RoundedCornerShape(4.dp))
+                .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
-                text = stringResource(R.string.channel_count_prefix) + "${joinedChannels.size}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) BitchatColors.StatusSuccess else BitchatColors.StatusError,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+                text = "$peopleCount",
+                style = MaterialTheme.typography.labelSmall,
+                color = countColor,
+                fontFamily = SatoshiFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 9.sp
             )
         }
     }
@@ -246,7 +246,8 @@ fun ChatHeaderContent(
     onShowAppInfo: () -> Unit,
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
-    onShowWallet: () -> Unit = {}
+    onShowWallet: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {}
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -304,6 +305,7 @@ fun ChatHeaderContent(
                 onLocationChannelsClick = onLocationChannelsClick,
                 onLocationNotesClick = onLocationNotesClick,
                 onShowWallet = onShowWallet,
+                onNotificationsClick = onNotificationsClick,
                 viewModel = viewModel
             )
         }
@@ -322,7 +324,6 @@ private fun PrivateChatHeader(
     onToggleFavorite: () -> Unit,
     viewModel: ChatViewModel
 ) {
-    val colorScheme = MaterialTheme.colorScheme
     val isNostrDM = peerID.startsWith("nostr_") || peerID.startsWith("nostr:")
     // Determine mutual favorite state for this peer (supports mesh ephemeral 16-hex via favorites lookup)
     val isMutualFavorite = remember(peerID, peerNicknames) {
@@ -373,27 +374,18 @@ private fun PrivateChatHeader(
     }
     
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Back button - proper IconButton with adequate tap target
+        // Back button matches wallet header style (arrow-only)
         IconButton(
             onClick = onBackClick,
-            modifier = Modifier.align(Alignment.CenterStart)
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(40.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                LucideIcon(
-                    imageVector = LucideIconSet.ArrowLeft,
-                    contentDescription = stringResource(R.string.back),
-                    modifier = Modifier.size(22.dp),
-                    tint = colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = stringResource(R.string.chat_back),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.primary
-                )
-            }
+            Icon(
+                painter = rememberAppIconPainter(AppIcons.ArrowBack),
+                contentDescription = stringResource(R.string.back),
+                tint = BitchatColors.TextPrimary
+            )
         }
 
         // Title - perfectly centered regardless of other elements
@@ -453,31 +445,21 @@ private fun ChannelHeader(
     onLeaveChannel: () -> Unit,
     onSidebarClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
     val displayName = ChannelKeys.displayName(channel)
     
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Back button - proper IconButton with adequate tap target
+        // Back button matches wallet header style (arrow-only)
         IconButton(
             onClick = onBackClick,
-            modifier = Modifier.align(Alignment.CenterStart)
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(40.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                LucideIcon(
-                    imageVector = LucideIconSet.ArrowLeft,
-                    contentDescription = stringResource(R.string.back),
-                    modifier = Modifier.size(22.dp),
-                    tint = colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = stringResource(R.string.chat_back),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.primary
-                )
-            }
+            Icon(
+                painter = rememberAppIconPainter(AppIcons.ArrowBack),
+                contentDescription = stringResource(R.string.back),
+                tint = BitchatColors.TextPrimary
+            )
         }
 
         // Title - perfectly centered regardless of other elements
@@ -514,16 +496,17 @@ private fun MainHeader(
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
     onShowWallet: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
     viewModel: ChatViewModel
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val connectedPeers by viewModel.connectedPeers.observeAsState(emptyList())
     val joinedChannels by viewModel.joinedChannels.observeAsState(emptySet())
-    val hasUnreadChannels by viewModel.unreadChannelMessages.observeAsState(emptyMap())
     val hasUnreadPrivateMessages by viewModel.unreadPrivateMessages.observeAsState(emptySet())
     val isConnected by viewModel.isConnected.observeAsState(false)
     val selectedLocationChannel by viewModel.selectedLocationChannel.observeAsState()
     val geohashPeople by viewModel.geohashPeople.observeAsState(emptyList())
+    val inAppNotificationCount by viewModel.inAppNotificationCount.observeAsState(0)
 
     // Bookmarks store for current geohash toggle (iOS parity)
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -531,13 +514,18 @@ private fun MainHeader(
     val bookmarks by bookmarksStore.bookmarks.observeAsState(emptyList())
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 0.dp),
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            modifier = Modifier.fillMaxHeight(),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start
         ) {
             Text(
                 text = stringResource(R.string.app_brand),
@@ -560,7 +548,7 @@ private fun MainHeader(
         // Right section with location channels button and peer counter
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
 
             // Unread private messages badge (click to open most recent DM)
@@ -598,12 +586,6 @@ private fun MainHeader(
                 }
             }
 
-            // Location Notes button (extracted to separate component)
-            LocationNotesButton(
-                viewModel = viewModel,
-                onClick = onLocationNotesClick
-            )
-
             // Wallet button
             IconButton(
                 onClick = onShowWallet,
@@ -613,27 +595,46 @@ private fun MainHeader(
                     imageVector = LucideIconSet.Wallet,
                     contentDescription = "Wallet",
                     modifier = Modifier.size(22.dp),
-                    tint = BitchatColors.SolanaAccent
+                    tint = BitchatColors.TextSecondary
                 )
             }
 
-            // Tor status dot when Tor is enabled
-            TorStatusDot(
-                modifier = Modifier
-                    .size(10.dp)
-                    .padding(start = 0.dp, end = 2.dp)
-            )
-            
-            // PoW status indicator
-            PoWStatusIndicator(
-                modifier = Modifier,
-                style = PoWIndicatorStyle.COMPACT
-            )
-            Spacer(modifier = Modifier.width(2.dp))
+            Box {
+                IconButton(
+                    onClick = onNotificationsClick,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    LucideIcon(
+                        imageVector = LucideIconSet.Bell,
+                        contentDescription = "Notifications",
+                        modifier = Modifier.size(22.dp),
+                        tint = if (inAppNotificationCount > 0) BitchatColors.StatusInfo else BitchatColors.TextSecondary
+                    )
+                }
+                if (inAppNotificationCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 5.dp)
+                            .size(16.dp)
+                            .background(BitchatColors.StatusError, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (inAppNotificationCount > 99) "99+" else "$inAppNotificationCount",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontFamily = SatoshiFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+
             PeerCounter(
                 connectedPeers = connectedPeers.filter { it != viewModel.meshService.myPeerID },
-                joinedChannels = joinedChannels,
-                hasUnreadChannels = hasUnreadChannels,
+                joinedChannelCount = joinedChannels.size,
                 isConnected = isConnected,
                 selectedLocationChannel = selectedLocationChannel,
                 geohashPeople = geohashPeople,

@@ -1,6 +1,8 @@
 package com.bitchat.android.ui.media
 
+import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,6 +27,7 @@ fun VoiceNotePlayer(
     progressOverride: Float? = null,
     progressColor: Color? = null
 ) {
+    val tag = "VoiceNotePlayer"
     var isPlaying by remember { mutableStateOf(false) }
     var isPrepared by remember { mutableStateOf(false) }
     var isError by remember { mutableStateOf(false) }
@@ -51,6 +54,13 @@ fun VoiceNotePlayer(
         isPlaying = false
         try {
             player.reset()
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            player.setVolume(1f, 1f)
             player.setOnPreparedListener {
                 isPrepared = true
                 durationMs = try { player.duration } catch (_: Exception) { 0 }
@@ -59,15 +69,17 @@ fun VoiceNotePlayer(
                 isPlaying = false
                 progress = 1f
             }
-            player.setOnErrorListener { _, _, _ ->
+            player.setOnErrorListener { _, what, extra ->
                 isError = true
                 isPlaying = false
+                Log.w(tag, "MediaPlayer error what=$what extra=$extra path=$path")
                 true
             }
             player.setDataSource(path)
             player.prepareAsync()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             isError = true
+            Log.w(tag, "Failed to prepare voice note path=$path: ${e.message}")
         }
     }
 
@@ -91,7 +103,14 @@ fun VoiceNotePlayer(
     ) {
         // Disable play/pause while showing send progress override (optional UX choice)
         val controlsEnabled = isPrepared && !isError && progressOverride == null
-        FilledTonalIconButton(onClick = { if (controlsEnabled) isPlaying = !isPlaying }, enabled = controlsEnabled, modifier = Modifier.size(28.dp)) {
+        FilledTonalIconButton(onClick = {
+            if (controlsEnabled) {
+                if (!isPlaying && progress >= 0.999f && durationMs > 0) {
+                    seekTo(0f)
+                }
+                isPlaying = !isPlaying
+            }
+        }, enabled = controlsEnabled, modifier = Modifier.size(28.dp)) {
             Icon(
                 painter = rememberAppIconPainter(if (isPlaying) AppIcons.Pause else AppIcons.Play),
                 contentDescription = if (isPlaying) "Pause" else "Play"
@@ -112,4 +131,3 @@ fun VoiceNotePlayer(
         Text(text = durText, fontFamily = SatoshiFamily, fontSize = 12.sp)
     }
 }
-

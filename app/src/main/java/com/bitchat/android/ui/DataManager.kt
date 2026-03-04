@@ -3,7 +3,11 @@ package com.bitchat.android.ui
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.bitchat.android.model.BitchatMessage
+import com.bitchat.android.model.BitchatMessageType
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import java.util.Date
 import kotlin.random.Random
 
 /**
@@ -13,10 +17,27 @@ class DataManager(private val context: Context) {
     
     companion object {
         private const val TAG = "DataManager"
+        private const val CHANNEL_MESSAGE_RETENTION_MS = 72L * 60L * 60L * 1000L // 72 hours
     }
     
     private val prefs: SharedPreferences = context.getSharedPreferences("bitchat_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
+
+    private data class PersistedChannelMessage(
+        val id: String,
+        val sender: String,
+        val content: String,
+        val type: String,
+        val timestamp: Long,
+        val isRelay: Boolean,
+        val originalSender: String?,
+        val isPrivate: Boolean,
+        val recipientNickname: String?,
+        val senderPeerID: String?,
+        val mentions: List<String>?,
+        val channel: String?,
+        val isEncrypted: Boolean
+    )
     
     // Channel-related maps that need to persist state
     private val _channelCreators = mutableMapOf<String, String>()
@@ -170,6 +191,91 @@ class DataManager(private val context: Context) {
             putString("channel_roles", gson.toJson(_channelRoles))
             putString("channel_role_versions", gson.toJson(_channelRoleVersions))
             apply()
+        }
+    }
+
+    fun saveChannelMessages(channelMessages: Map<String, List<BitchatMessage>>) {
+        try {
+            val cutoff = System.currentTimeMillis() - CHANNEL_MESSAGE_RETENTION_MS
+            // Normalize keys before persistence for backward compatibility consistency.
+            val normalized = channelMessages.entries.associate { (key, value) ->
+                ChannelKeys.normalize(key) to value
+                    .filter { it.timestamp.time >= cutoff }
+                    .map { message ->
+                    PersistedChannelMessage(
+                        id = message.id,
+                        sender = message.sender,
+                        content = message.content,
+                        type = message.type.name,
+                        timestamp = message.timestamp.time,
+                        isRelay = message.isRelay,
+                        originalSender = message.originalSender,
+                        isPrivate = message.isPrivate,
+                        recipientNickname = message.recipientNickname,
+                        senderPeerID = message.senderPeerID,
+                        mentions = message.mentions,
+                        channel = message.channel,
+                        isEncrypted = message.isEncrypted
+                    )
+                }
+            }
+            prefs.edit().putString("channel_messages", gson.toJson(normalized)).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist channel messages: ${e.message}")
+        }
+    }
+
+    fun loadChannelMessages(): Map<String, List<BitchatMessage>> {
+        val json = prefs.getString("channel_messages", null) ?: return emptyMap()
+        val cutoff = System.currentTimeMillis() - CHANNEL_MESSAGE_RETENTION_MS
+
+        // Preferred format (stable DTO to avoid sealed-class deserialization failures).
+        try {
+            val type = object : TypeToken<Map<String, List<PersistedChannelMessage>>>() {}.type
+            val parsed: Map<String, List<PersistedChannelMessage>> = gson.fromJson(json, type) ?: emptyMap()
+            return parsed.entries.associate { (key, value) ->
+                ChannelKeys.normalize(key) to value
+                    .filter { it.timestamp >= cutoff }
+                    .map { persisted ->
+                    BitchatMessage(
+                        id = persisted.id,
+                        sender = persisted.sender,
+                        content = persisted.content,
+                        type = runCatching { BitchatMessageType.valueOf(persisted.type) }
+                            .getOrDefault(BitchatMessageType.Message),
+                        timestamp = Date(persisted.timestamp),
+                        isRelay = persisted.isRelay,
+                        originalSender = persisted.originalSender,
+                        isPrivate = persisted.isPrivate,
+                        recipientNickname = persisted.recipientNickname,
+                        senderPeerID = persisted.senderPeerID,
+                        mentions = persisted.mentions,
+                        channel = persisted.channel,
+                        isEncrypted = persisted.isEncrypted,
+                        deliveryStatus = null,
+                        encryptedContent = null,
+                        powDifficulty = null
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            // Fall through to legacy format parse.
+        }
+
+        // Legacy format fallback (raw BitchatMessage map).
+        return try {
+            val legacyType = object : TypeToken<Map<String, List<BitchatMessage>>>() {}.type
+            val parsed: Map<String, List<BitchatMessage>> = gson.fromJson(json, legacyType) ?: emptyMap()
+            parsed.entries.associate { (key, value) ->
+                ChannelKeys.normalize(key) to value
+                    .filter { it.timestamp.time >= cutoff }
+                    .map { message ->
+                    message.copy(deliveryStatus = null, encryptedContent = null, powDifficulty = null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load channel messages: ${e.message}")
+            emptyMap()
         }
     }
     

@@ -14,6 +14,8 @@ import java.util.*
 object FileUtils {
 
     private const val TAG = "FileUtils"
+    private const val CHANNEL_FILENAME_PREFIX = "__bitchat_ch__"
+    private const val CHANNEL_FILENAME_SEPARATOR = "__"
 
     /**
      * Save a file from URI to app's file directory with unique filename
@@ -205,6 +207,9 @@ object FileUtils {
             "image/jpeg", "image/jpg" -> ".jpg"
             "image/png" -> ".png"
             "image/webp" -> ".webp"
+            "audio/mp4" -> ".m4a"
+            "audio/mpeg" -> ".mp3"
+            "audio/wav", "audio/x-wav" -> ".wav"
             "application/pdf" -> ".pdf"
             "text/plain" -> ".txt"
             else -> if (isImage) ".jpg" else ".bin"
@@ -270,5 +275,33 @@ object FileUtils {
             lower.startsWith("audio/") -> com.bitchat.android.model.BitchatMessageType.Audio
             else -> com.bitchat.android.model.BitchatMessageType.File
         }
+    }
+
+    /**
+     * Embed a channel key into transmitted filename so file transfers can render in channels
+     * without changing the packet schema.
+     */
+    fun encodeChannelInFileName(fileName: String, channelKey: String?): String {
+        if (channelKey.isNullOrBlank()) return fileName
+        val encodedChannel = Uri.encode(channelKey)
+        return "$CHANNEL_FILENAME_PREFIX$encodedChannel$CHANNEL_FILENAME_SEPARATOR$fileName"
+    }
+
+    /**
+     * Extract embedded channel key from transmitted filename.
+     *
+     * @return Pair(cleanFileName, channelKeyOrNull)
+     */
+    fun decodeChannelFromFileName(fileName: String): Pair<String, String?> {
+        if (!fileName.startsWith(CHANNEL_FILENAME_PREFIX)) return fileName to null
+        val encodedAndName = fileName.removePrefix(CHANNEL_FILENAME_PREFIX)
+        val sepIndex = encodedAndName.indexOf(CHANNEL_FILENAME_SEPARATOR)
+        if (sepIndex <= 0 || sepIndex >= encodedAndName.length - CHANNEL_FILENAME_SEPARATOR.length) {
+            return fileName to null
+        }
+        val encodedChannel = encodedAndName.substring(0, sepIndex)
+        val cleanName = encodedAndName.substring(sepIndex + CHANNEL_FILENAME_SEPARATOR.length)
+        val channelKey = try { Uri.decode(encodedChannel) } catch (_: Exception) { null }
+        return cleanName to channelKey
     }
 }

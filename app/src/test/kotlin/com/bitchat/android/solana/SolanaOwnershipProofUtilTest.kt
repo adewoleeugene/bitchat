@@ -173,6 +173,84 @@ class SolanaOwnershipProofUtilTest {
         assertFalse(verified)
     }
 
+    @Test
+    fun verifyProof_rejectsObservedBalanceBelowMinimum() {
+        val nickname = "alice"
+        val signingPublicKey = ByteArray(32) { (it + 5).toByte() }
+        val walletPrivateKey = ByteArray(32) { (it + 24).toByte() }
+        val solanaAddress = SolanaKeyDerivation.encodeBase58(SolanaKeyDerivation.derivePublicKey(walletPrivateKey))
+        val now = 1_735_000_000_000L
+
+        val unsignedProof = SolanaOwnershipProof(
+            claimType = SolanaOwnershipProof.ClaimType.SPL_TOKEN,
+            targetAddress = "So11111111111111111111111111111111111111112",
+            minRequired = 500,
+            observedBalance = 499,
+            validatedAtMs = now,
+            expiresAtMs = now + 120_000L,
+            signature = ByteArray(64)
+        )
+        val signature = sign(
+            privateKey = walletPrivateKey,
+            data = SolanaOwnershipProofUtil.buildProofMessage(
+                nickname = nickname,
+                solanaAddress = solanaAddress,
+                signingPublicKey = signingPublicKey,
+                proof = unsignedProof
+            )
+        )
+        val signedProof = unsignedProof.copy(signature = signature)
+
+        val verified = SolanaOwnershipProofUtil.verifyProof(
+            nickname = nickname,
+            solanaAddress = solanaAddress,
+            signingPublicKey = signingPublicKey,
+            proof = signedProof,
+            nowMs = now + 1_000L
+        )
+
+        assertFalse(verified)
+    }
+
+    @Test
+    fun verifyProof_rejectsProofWindowTooLong() {
+        val nickname = "alice"
+        val signingPublicKey = ByteArray(32) { (it + 6).toByte() }
+        val walletPrivateKey = ByteArray(32) { (it + 25).toByte() }
+        val solanaAddress = SolanaKeyDerivation.encodeBase58(SolanaKeyDerivation.derivePublicKey(walletPrivateKey))
+        val now = 1_735_000_000_000L
+
+        val unsignedProof = SolanaOwnershipProof(
+            claimType = SolanaOwnershipProof.ClaimType.NFT_COLLECTION,
+            targetAddress = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+            minRequired = 1,
+            observedBalance = 1,
+            validatedAtMs = now,
+            expiresAtMs = now + (25 * 60 * 60 * 1000L),
+            signature = ByteArray(64)
+        )
+        val signature = sign(
+            privateKey = walletPrivateKey,
+            data = SolanaOwnershipProofUtil.buildProofMessage(
+                nickname = nickname,
+                solanaAddress = solanaAddress,
+                signingPublicKey = signingPublicKey,
+                proof = unsignedProof
+            )
+        )
+        val signedProof = unsignedProof.copy(signature = signature)
+
+        val verified = SolanaOwnershipProofUtil.verifyProof(
+            nickname = nickname,
+            solanaAddress = solanaAddress,
+            signingPublicKey = signingPublicKey,
+            proof = signedProof,
+            nowMs = now + 1_000L
+        )
+
+        assertFalse(verified)
+    }
+
     private fun sign(privateKey: ByteArray, data: ByteArray): ByteArray {
         val spec = EdDSANamedCurveTable.getByName(EdDSANamedCurveTable.ED_25519)
         val key = EdDSAPrivateKey(EdDSAPrivateKeySpec(privateKey, spec))

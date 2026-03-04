@@ -77,7 +77,7 @@ fun SidebarOverlay(
                     .background(BitchatColors.BackgroundLayer0.copy(alpha = 0.98f))
                     .windowInsetsPadding(WindowInsets.statusBars) // Add status bar padding
             ) {
-                SidebarHeader()
+                SidebarHeader(joinedChannelCount = joinedChannels.size)
 
                 HorizontalDivider()
                 
@@ -148,7 +148,7 @@ fun SidebarOverlay(
 }
 
 @Composable
-private fun SidebarHeader() {
+private fun SidebarHeader(joinedChannelCount: Int) {
     val colorScheme = MaterialTheme.colorScheme
     
     Row(
@@ -168,6 +168,14 @@ private fun SidebarHeader() {
             color = colorScheme.onSurface
         )
         Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text = "${stringResource(id = R.string.channels)} ($joinedChannelCount)",
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontFamily = SatoshiFamily,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = colorScheme.onSurface.copy(alpha = 0.7f)
+        )
     }
 }
 
