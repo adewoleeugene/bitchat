@@ -9,6 +9,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import com.bitchat.android.di.SolanaEntryPoint
+import com.bitchat.android.lending.LendingTelemetryStore
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
@@ -75,6 +76,7 @@ class ChatViewModel(
 
     // MARK: - State management
     private val state = ChatState()
+    private val lendingTelemetryStore = LendingTelemetryStore(application.applicationContext)
 
     // Transfer progress tracking
     private val transferMessageMap = mutableMapOf<String, String>()
@@ -82,7 +84,7 @@ class ChatViewModel(
 
     // Specialized managers
     private val dataManager = DataManager(application.applicationContext)
-    private val messageManager = MessageManager(state)
+    private val messageManager = MessageManager(state, lendingTelemetryStore)
     private val channelManager = ChannelManager(state, messageManager, dataManager, viewModelScope)
 
     // Create Noise session delegate for clean dependency injection

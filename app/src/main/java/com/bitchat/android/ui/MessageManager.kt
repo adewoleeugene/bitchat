@@ -2,13 +2,17 @@ package com.bitchat.android.ui
 
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.DeliveryStatus
+import com.bitchat.android.lending.LendingTelemetryStore
 import java.util.*
 import java.util.Collections
 
 /**
  * Handles all message-related operations including deduplication and organization
  */
-class MessageManager(private val state: ChatState) {
+class MessageManager(
+    private val state: ChatState,
+    private val lendingTelemetryStore: LendingTelemetryStore? = null
+) {
     
     // Message deduplication - FIXED: Prevent duplicate messages from dual connection paths
     private val processedUIMessages = Collections.synchronizedSet(mutableSetOf<String>())
@@ -58,6 +62,7 @@ class MessageManager(private val state: ChatState) {
         }
         currentChannelMessages[channel] = channelMessageList
         state.setChannelMessages(currentChannelMessages)
+        recordTelemetryForChannelMessage(message)
         
         // Update unread count if not currently viewing this channel
         // Consider both classic channels (state.currentChannel) and geohash location channel selection
@@ -111,6 +116,7 @@ class MessageManager(private val state: ChatState) {
         chatMessages.add(message)
         currentPrivateChats[peerID] = chatMessages
         state.setPrivateChats(currentPrivateChats)
+        recordTelemetryForPrivateMessage(message)
         
         // Mark as unread if not currently viewing this chat
         if (state.getSelectedPrivateChatPeerValue() != peerID && message.sender != state.getNicknameValue()) {
@@ -130,6 +136,7 @@ class MessageManager(private val state: ChatState) {
         chatMessages.add(message)
         currentPrivateChats[peerID] = chatMessages
         state.setPrivateChats(currentPrivateChats)
+        recordTelemetryForPrivateMessage(message)
     }
     
     fun clearPrivateMessages(peerID: String) {
@@ -314,6 +321,18 @@ class MessageManager(private val state: ChatState) {
             .map { it.groupValues[0] } // Include the #
             .distinct()
             .toList()
+    }
+
+    private fun recordTelemetryForChannelMessage(message: BitchatMessage) {
+        val senderPeerId = message.senderPeerID?.trim().orEmpty()
+        if (senderPeerId.isBlank() || message.sender == "system") return
+        lendingTelemetryStore?.recordChannelMessage(senderPeerId, message.timestamp.time)
+    }
+
+    private fun recordTelemetryForPrivateMessage(message: BitchatMessage) {
+        val senderPeerId = message.senderPeerID?.trim().orEmpty()
+        if (senderPeerId.isBlank() || message.sender == "system") return
+        lendingTelemetryStore?.recordPrivateMessage(senderPeerId, message.timestamp.time)
     }
 
     /**
