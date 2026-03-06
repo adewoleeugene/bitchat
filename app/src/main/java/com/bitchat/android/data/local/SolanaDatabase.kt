@@ -9,6 +9,8 @@ import com.bitchat.android.data.local.entities.FeedReactionEntity
 import com.bitchat.android.data.local.entities.FeedReplyEntity
 import com.bitchat.android.data.local.entities.CredibilityProfileEntity
 import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
+import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
 import com.bitchat.android.data.local.entities.LoanRepaymentEntity
@@ -33,6 +35,8 @@ import com.bitchat.android.data.local.entities.WalletEntity
         FeedReactionEntity::class,
         FeedReplyEntity::class,
         LendingChannelEntity::class,
+        LendingEscrowAccountEntity::class,
+        LendingEscrowProposalEntity::class,
         LendingMembershipEntity::class,
         LendingPoolSnapshotEntity::class,
         LoanRequestEntity::class,
@@ -40,7 +44,7 @@ import com.bitchat.android.data.local.entities.WalletEntity
         LoanRepaymentEntity::class,
         CredibilityProfileEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -552,6 +556,70 @@ abstract class SolanaDatabase : RoomDatabase() {
                     """
                     ALTER TABLE `queued_transactions`
                     ADD COLUMN `assetDecimals` INTEGER NOT NULL DEFAULT 9
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_escrow_accounts` (
+                        `lendingId` TEXT NOT NULL,
+                        `multisigAddress` TEXT NOT NULL,
+                        `vaultAddress` TEXT NOT NULL,
+                        `provider` TEXT NOT NULL,
+                        `custodyState` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_escrow_proposals` (
+                        `proposalId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `requestId` TEXT,
+                        `memberPeerId` TEXT,
+                        `proposalType` TEXT NOT NULL,
+                        `appApprovalStatus` TEXT NOT NULL,
+                        `custodyExecutionStatus` TEXT NOT NULL,
+                        `targetWalletAddress` TEXT NOT NULL,
+                        `mintAddress` TEXT NOT NULL,
+                        `amountAtomic` INTEGER NOT NULL,
+                        `txSignature` TEXT,
+                        `errorMessage` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`proposalId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_lendingId`
+                    ON `lending_escrow_proposals` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_requestId`
+                    ON `lending_escrow_proposals` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_proposalType`
+                    ON `lending_escrow_proposals` (`proposalType`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_custodyExecutionStatus`
+                    ON `lending_escrow_proposals` (`custodyExecutionStatus`)
                     """.trimIndent()
                 )
             }

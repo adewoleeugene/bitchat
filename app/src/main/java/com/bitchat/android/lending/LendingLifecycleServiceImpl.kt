@@ -2,6 +2,7 @@ package com.bitchat.android.lending
 
 import com.bitchat.android.data.local.LendingDao
 import com.bitchat.android.data.local.entities.BorrowerType
+import com.bitchat.android.data.local.entities.CustodyExecutionStatus
 import com.bitchat.android.data.local.entities.EscrowTransferStatus
 import com.bitchat.android.data.local.entities.LendingMemberStatus
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
@@ -22,7 +23,8 @@ import kotlin.math.max
 class LendingLifecycleServiceImpl @Inject constructor(
     private val lendingDao: LendingDao,
     private val lendingChannelService: LendingChannelService,
-    private val transferGateway: LendingTransferGateway
+    private val transferGateway: LendingTransferGateway,
+    private val escrowService: LendingEscrowService
 ) : LendingLoanService, LendingEscrowService {
 
     override suspend fun getMemberships(lendingId: String): List<LendingMembershipEntity> {
@@ -34,30 +36,32 @@ class LendingLifecycleServiceImpl @Inject constructor(
     }
 
     override suspend fun activateMembership(lendingId: String, memberPeerId: String): LendingMembershipEntity {
-        val existing = lendingDao.getMembership(lendingId, memberPeerId)
-            ?: throw IllegalArgumentException("membership_not_found")
-        val updated = existing.copy(
-            depositStatus = EscrowTransferStatus.CONFIRMED,
-            joinStatus = LendingMemberStatus.ACTIVE,
-            updatedAt = System.currentTimeMillis()
-        )
-        lendingDao.upsertMembership(updated)
+        val updated = escrowService.activateMembership(lendingId, memberPeerId)
         refreshPoolSnapshot(lendingId)
         return updated
     }
 
     override suspend fun releaseMembershipStake(lendingId: String, memberPeerId: String): LendingMembershipEntity {
-        val existing = lendingDao.getMembership(lendingId, memberPeerId)
-            ?: throw IllegalArgumentException("membership_not_found")
-        val updated = existing.copy(
-            depositStatus = EscrowTransferStatus.RELEASED,
-            joinStatus = LendingMemberStatus.EXITED,
-            updatedAt = System.currentTimeMillis()
-        )
-        lendingDao.upsertMembership(updated)
+        val updated = escrowService.releaseMembershipStake(lendingId, memberPeerId)
         refreshPoolSnapshot(lendingId)
         return updated
     }
+
+    override suspend fun provisionChannelEscrow(lendingId: String) = escrowService.provisionChannelEscrow(lendingId)
+
+    override suspend fun getEscrowAccount(lendingId: String) = escrowService.getEscrowAccount(lendingId)
+
+    override suspend fun getEscrowProposalsForRequest(requestId: String) =
+        escrowService.getEscrowProposalsForRequest(requestId)
+
+    override suspend fun createLoanDisbursementProposal(requestId: String) =
+        escrowService.createLoanDisbursementProposal(requestId)
+
+    override suspend fun createStakeReleaseProposal(lendingId: String, memberPeerId: String) =
+        escrowService.createStakeReleaseProposal(lendingId, memberPeerId)
+
+    override suspend fun reconcilePendingEscrowOperations() =
+        escrowService.reconcilePendingEscrowOperations()
 
     override suspend fun getLoanRequests(lendingId: String): List<LoanRequestEntity> {
         return lendingDao.getLoanRequestsForLendingChannel(lendingId)
@@ -155,9 +159,8 @@ class LendingLifecycleServiceImpl @Inject constructor(
 
         val updatedRequest = when {
             approved -> loan.copy(
-                status = LoanRequestStatus.DISBURSED,
-                approvedAt = System.currentTimeMillis(),
-                disbursedAt = System.currentTimeMillis()
+                status = LoanRequestStatus.APPROVED,
+                approvedAt = System.currentTimeMillis()
             )
             rejected -> loan.copy(status = LoanRequestStatus.REJECTED)
             else -> loan
@@ -166,10 +169,25 @@ class LendingLifecycleServiceImpl @Inject constructor(
         if (updatedRequest != loan) {
             lendingDao.upsertLoanRequest(updatedRequest)
         }
+        val finalizedRequest = if (approved) {
+            val proposal = escrowService.createLoanDisbursementProposal(updatedRequest.requestId)
+            if (proposal.custodyExecutionStatus == CustodyExecutionStatus.EXECUTED) {
+                val disbursed = updatedRequest.copy(
+                    status = LoanRequestStatus.DISBURSED,
+                    disbursedAt = System.currentTimeMillis()
+                )
+                lendingDao.upsertLoanRequest(disbursed)
+                disbursed
+            } else {
+                updatedRequest
+            }
+        } else {
+            updatedRequest
+        }
         refreshPoolSnapshot(loan.lendingId)
 
         return LoanVoteResult(
-            request = updatedRequest,
+            request = finalizedRequest,
             votes = votes,
             quorumReached = quorumReached,
             approved = approved,
@@ -249,21 +267,18 @@ class LendingLifecycleServiceImpl @Inject constructor(
             throw IllegalStateException("active_loan_blocks_exit")
         }
 
-        val queuedTransferId = if (channel.escrowMultisigAddress.isNotBlank()) {
-            transferGateway.queueSplTransfer(
-                recipientPublicKey = membership.walletAddress,
-                mintAddress = channel.stakeTokenMint,
-                amountAtomic = membership.stakeAmount,
-                decimals = channel.stakeTokenDecimals,
-                symbol = channel.stakeTokenSymbol.ifBlank { "TOKEN" },
-                memo = "stake release ${channel.lendingId}"
-            ).getOrNull()
-        } else {
-            null
+        val proposal = escrowService.createStakeReleaseProposal(channel.lendingId, request.memberPeerId)
+        if (proposal.custodyExecutionStatus != CustodyExecutionStatus.EXECUTED) {
+            throw IllegalStateException("stake_release_pending_execution")
         }
 
         val updated = releaseMembershipStake(channel.lendingId, request.memberPeerId)
-        return LendingLeaveResult(updated, queuedTransferId)
+        return LendingLeaveResult(
+            membership = updated,
+            queuedTransferId = proposal.txSignature,
+            escrowProposalId = proposal.proposalId,
+            escrowExecutionStatus = proposal.custodyExecutionStatus
+        )
     }
 
     private suspend fun requireActiveMembership(

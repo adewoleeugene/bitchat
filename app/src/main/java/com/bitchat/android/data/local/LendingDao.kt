@@ -6,6 +6,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.bitchat.android.data.local.entities.CredibilityProfileEntity
 import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
+import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
 import com.bitchat.android.data.local.entities.LoanRepaymentEntity
@@ -18,6 +20,33 @@ interface LendingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLendingChannel(channel: LendingChannelEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertEscrowAccount(account: LendingEscrowAccountEntity)
+
+    @Query("SELECT * FROM lending_escrow_accounts WHERE lendingId = :lendingId LIMIT 1")
+    suspend fun getEscrowAccount(lendingId: String): LendingEscrowAccountEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertEscrowProposal(proposal: LendingEscrowProposalEntity)
+
+    @Query("SELECT * FROM lending_escrow_proposals WHERE proposalId = :proposalId LIMIT 1")
+    suspend fun getEscrowProposal(proposalId: String): LendingEscrowProposalEntity?
+
+    @Query("SELECT * FROM lending_escrow_proposals WHERE requestId = :requestId ORDER BY createdAt DESC")
+    suspend fun getEscrowProposalsForRequest(requestId: String): List<LendingEscrowProposalEntity>
+
+    @Query("SELECT * FROM lending_escrow_proposals WHERE lendingId = :lendingId ORDER BY createdAt DESC")
+    suspend fun getEscrowProposalsForLendingChannel(lendingId: String): List<LendingEscrowProposalEntity>
+
+    @Query(
+        """
+        SELECT * FROM lending_escrow_proposals
+        WHERE custodyExecutionStatus IN ('CREATED')
+        ORDER BY createdAt ASC
+        """
+    )
+    suspend fun getPendingEscrowProposals(): List<LendingEscrowProposalEntity>
 
     @Query("SELECT * FROM lending_channels WHERE lendingId = :lendingId LIMIT 1")
     suspend fun getLendingChannelById(lendingId: String): LendingChannelEntity?

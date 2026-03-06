@@ -38,7 +38,8 @@ class SolanaDatabaseLendingIntegrationTest {
                 SolanaDatabase.MIGRATION_8_9,
                 SolanaDatabase.MIGRATION_9_10,
                 SolanaDatabase.MIGRATION_10_11,
-                SolanaDatabase.MIGRATION_11_12
+                SolanaDatabase.MIGRATION_11_12,
+                SolanaDatabase.MIGRATION_12_13
             )
             .build()
         database.openHelper.writableDatabase
@@ -68,6 +69,8 @@ class SolanaDatabaseLendingIntegrationTest {
         assertTrue("loan_votes" in tables)
         assertTrue("loan_repayments" in tables)
         assertTrue("credibility_profiles" in tables)
+        assertTrue("lending_escrow_accounts" in tables)
+        assertTrue("lending_escrow_proposals" in tables)
 
         var hasChannelKeyUniqueIndex = false
         sqliteDb.query("PRAGMA index_list(`lending_channels`)").use { cursor ->

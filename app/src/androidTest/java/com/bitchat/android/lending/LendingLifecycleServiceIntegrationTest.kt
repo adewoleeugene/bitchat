@@ -24,6 +24,7 @@ class LendingLifecycleServiceIntegrationTest {
     private lateinit var dbName: String
     private lateinit var database: SolanaDatabase
     private lateinit var channelService: LendingChannelServiceImpl
+    private lateinit var escrowService: SquadsLendingEscrowServiceImpl
     private lateinit var lifecycleService: LendingLifecycleServiceImpl
 
     @Before
@@ -42,7 +43,8 @@ class LendingLifecycleServiceIntegrationTest {
                 SolanaDatabase.MIGRATION_8_9,
                 SolanaDatabase.MIGRATION_9_10,
                 SolanaDatabase.MIGRATION_10_11,
-                SolanaDatabase.MIGRATION_11_12
+                SolanaDatabase.MIGRATION_11_12,
+                SolanaDatabase.MIGRATION_12_13
             )
             .build()
         database.openHelper.writableDatabase
@@ -60,6 +62,19 @@ class LendingLifecycleServiceIntegrationTest {
                 }
             )
         )
+        escrowService = SquadsLendingEscrowServiceImpl(
+            lendingDao = database.lendingDao(),
+            transferGateway = object : LendingTransferGateway {
+                override suspend fun queueSplTransfer(
+                    recipientPublicKey: String,
+                    mintAddress: String,
+                    amountAtomic: Long,
+                    decimals: Int,
+                    symbol: String,
+                    memo: String?
+                ): Result<String> = Result.success("queued-$amountAtomic")
+            }
+        )
         lifecycleService = LendingLifecycleServiceImpl(
             lendingDao = database.lendingDao(),
             lendingChannelService = channelService,
@@ -72,7 +87,8 @@ class LendingLifecycleServiceIntegrationTest {
                     symbol: String,
                     memo: String?
                 ): Result<String> = Result.success("queued-$amountAtomic")
-            }
+            },
+            escrowService = escrowService
         )
     }
 
@@ -138,6 +154,7 @@ class LendingLifecycleServiceIntegrationTest {
         )
         assertTrue(secondVote.approved)
         assertEquals(LoanRequestStatus.DISBURSED, secondVote.request.status)
+        assertTrue(escrowService.getEscrowProposalsForRequest(opened.requestId).isNotEmpty())
 
         val snapshotAfterVote = lifecycleService.getPoolSnapshot(channel.lendingId)!!
         assertEquals(60_000_000L, snapshotAfterVote.availableLiquidityAmount)
@@ -171,5 +188,6 @@ class LendingLifecycleServiceIntegrationTest {
             )
         )
         assertEquals("EXITED", left.membership.joinStatus)
+        assertTrue(left.escrowProposalId?.startsWith("SQP-") == true)
     }
 }

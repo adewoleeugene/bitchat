@@ -924,6 +924,7 @@ class CommandProcessor(
                     append("lending status for ${status.channel.displayName} • id ${status.channel.lendingId}\n")
                     append("stake: ${status.channel.requiredStakeAmount} ${status.channel.stakeTokenSymbol.ifBlank { status.channel.stakeTokenMint.take(8) }}\n")
                     append("members: $activeMembers\n")
+                    append("escrow: ${status.channel.escrowMultisigAddress.ifBlank { "pending-provision" }}\n")
                     append("pool: total ${pool?.totalStakedAmount ?: 0}, available ${pool?.availableLiquidityAmount ?: 0}, reserved ${pool?.reservedAmount ?: 0}, disbursed ${pool?.disbursedAmount ?: 0}\n")
                     append("active loans: ${status.activeLoanCount}\n")
                     append("credibility threshold: $DEFAULT_CREDIBILITY_THRESHOLD/100")

@@ -8,6 +8,7 @@ import com.bitchat.android.lending.LendingEscrowService
 import com.bitchat.android.lending.LendingIdGenerator
 import com.bitchat.android.lending.LendingLifecycleServiceImpl
 import com.bitchat.android.lending.LendingLoanService
+import com.bitchat.android.lending.SquadsLendingEscrowServiceImpl
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -43,6 +44,6 @@ object LendingModule {
     @Provides
     @Singleton
     fun provideLendingEscrowService(
-        impl: LendingLifecycleServiceImpl
+        impl: SquadsLendingEscrowServiceImpl
     ): LendingEscrowService = impl
 }

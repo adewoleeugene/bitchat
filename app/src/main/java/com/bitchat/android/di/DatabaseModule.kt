@@ -38,7 +38,8 @@ object DatabaseModule {
             SolanaDatabase.MIGRATION_8_9,
             SolanaDatabase.MIGRATION_9_10,
             SolanaDatabase.MIGRATION_10_11,
-            SolanaDatabase.MIGRATION_11_12
+            SolanaDatabase.MIGRATION_11_12,
+            SolanaDatabase.MIGRATION_12_13
         )
         .build()
     }

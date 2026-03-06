@@ -2,6 +2,8 @@ package com.bitchat.android.lending
 
 import com.bitchat.android.data.local.entities.CredibilityProfileEntity
 import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
+import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
 import com.bitchat.android.data.local.entities.LoanRequestStatus
@@ -33,6 +35,12 @@ interface LendingEscrowService {
     suspend fun getPoolSnapshot(lendingId: String): LendingPoolSnapshotEntity?
     suspend fun activateMembership(lendingId: String, memberPeerId: String): LendingMembershipEntity
     suspend fun releaseMembershipStake(lendingId: String, memberPeerId: String): LendingMembershipEntity
+    suspend fun provisionChannelEscrow(lendingId: String): LendingEscrowAccountEntity
+    suspend fun getEscrowAccount(lendingId: String): LendingEscrowAccountEntity?
+    suspend fun getEscrowProposalsForRequest(requestId: String): List<LendingEscrowProposalEntity>
+    suspend fun createLoanDisbursementProposal(requestId: String): LendingEscrowProposalEntity
+    suspend fun createStakeReleaseProposal(lendingId: String, memberPeerId: String): LendingEscrowProposalEntity
+    suspend fun reconcilePendingEscrowOperations(): List<LendingEscrowProposalEntity>
 }
 
 interface LendingLoanService {
@@ -137,7 +145,9 @@ data class LeaveLendingChannelRequest(
 
 data class LendingLeaveResult(
     val membership: LendingMembershipEntity,
-    val queuedTransferId: String? = null
+    val queuedTransferId: String? = null,
+    val escrowProposalId: String? = null,
+    val escrowExecutionStatus: String? = null
 )
 
 const val DEFAULT_INTEREST_BPS = 500
