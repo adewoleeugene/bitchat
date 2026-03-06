@@ -3,6 +3,7 @@ package com.bitchat.android.di
 import android.content.Context
 import androidx.room.Room
 import com.bitchat.android.data.local.FeedDao
+import com.bitchat.android.data.local.LendingDao
 import com.bitchat.android.data.local.NotarizationDao
 import com.bitchat.android.data.local.SolanaDatabase
 import com.bitchat.android.data.local.TokenGateDao
@@ -35,7 +36,8 @@ object DatabaseModule {
             SolanaDatabase.MIGRATION_6_7,
             SolanaDatabase.MIGRATION_7_8,
             SolanaDatabase.MIGRATION_8_9,
-            SolanaDatabase.MIGRATION_9_10
+            SolanaDatabase.MIGRATION_9_10,
+            SolanaDatabase.MIGRATION_10_11
         )
         .build()
     }
@@ -63,5 +65,10 @@ object DatabaseModule {
     @Provides
     fun provideFeedDao(database: SolanaDatabase): FeedDao {
         return database.feedDao()
+    }
+
+    @Provides
+    fun provideLendingDao(database: SolanaDatabase): LendingDao {
+        return database.lendingDao()
     }
 }

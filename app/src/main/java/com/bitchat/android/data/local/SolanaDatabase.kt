@@ -7,6 +7,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bitchat.android.data.local.entities.FeedPostEntity
 import com.bitchat.android.data.local.entities.FeedReactionEntity
 import com.bitchat.android.data.local.entities.FeedReplyEntity
+import com.bitchat.android.data.local.entities.CredibilityProfileEntity
+import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingMembershipEntity
+import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
+import com.bitchat.android.data.local.entities.LoanRepaymentEntity
+import com.bitchat.android.data.local.entities.LoanRequestEntity
+import com.bitchat.android.data.local.entities.LoanVoteEntity
 import com.bitchat.android.data.local.entities.MessageNotarizationEntity
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
@@ -24,9 +31,16 @@ import com.bitchat.android.data.local.entities.WalletEntity
         MessageNotarizationEntity::class,
         FeedPostEntity::class,
         FeedReactionEntity::class,
-        FeedReplyEntity::class
+        FeedReplyEntity::class,
+        LendingChannelEntity::class,
+        LendingMembershipEntity::class,
+        LendingPoolSnapshotEntity::class,
+        LoanRequestEntity::class,
+        LoanVoteEntity::class,
+        LoanRepaymentEntity::class,
+        CredibilityProfileEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -35,6 +49,7 @@ abstract class SolanaDatabase : RoomDatabase() {
     abstract fun tokenGateDao(): TokenGateDao
     abstract fun notarizationDao(): NotarizationDao
     abstract fun feedDao(): FeedDao
+    abstract fun lendingDao(): LendingDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -311,6 +326,203 @@ abstract class SolanaDatabase : RoomDatabase() {
                     """
                     ALTER TABLE `feed_posts`
                     ADD COLUMN `audioPath` TEXT
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_channels` (
+                        `lendingId` TEXT NOT NULL,
+                        `channelKey` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        `creatorPeerId` TEXT NOT NULL,
+                        `creatorWalletAddress` TEXT NOT NULL,
+                        `requiredStakeAmount` INTEGER NOT NULL,
+                        `stakeTokenMint` TEXT NOT NULL,
+                        `stakeTokenSymbol` TEXT NOT NULL,
+                        `stakeTokenDecimals` INTEGER NOT NULL,
+                        `escrowMultisigAddress` TEXT NOT NULL,
+                        `quorumThresholdPercent` INTEGER NOT NULL,
+                        `approvalThresholdPercent` INTEGER NOT NULL,
+                        `votingWindowHours` INTEGER NOT NULL,
+                        `lifecycleState` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_lending_channels_channelKey`
+                    ON `lending_channels` (`channelKey`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_memberships` (
+                        `lendingId` TEXT NOT NULL,
+                        `memberPeerId` TEXT NOT NULL,
+                        `walletAddress` TEXT NOT NULL,
+                        `stakeAmount` INTEGER NOT NULL,
+                        `depositStatus` TEXT NOT NULL,
+                        `joinStatus` TEXT NOT NULL,
+                        `credibilityScore` INTEGER NOT NULL,
+                        `credibilitySnapshotJson` TEXT NOT NULL,
+                        `joinedAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`, `memberPeerId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_walletAddress`
+                    ON `lending_memberships` (`walletAddress`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_joinStatus`
+                    ON `lending_memberships` (`joinStatus`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_depositStatus`
+                    ON `lending_memberships` (`depositStatus`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_pool_snapshots` (
+                        `lendingId` TEXT NOT NULL,
+                        `totalStakedAmount` INTEGER NOT NULL,
+                        `reservedAmount` INTEGER NOT NULL,
+                        `disbursedAmount` INTEGER NOT NULL,
+                        `availableLiquidityAmount` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_requests` (
+                        `requestId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `borrowerType` TEXT NOT NULL,
+                        `borrowerPeerId` TEXT,
+                        `borrowerGroupKey` TEXT,
+                        `principalAmount` INTEGER NOT NULL,
+                        `interestBps` INTEGER NOT NULL,
+                        `durationDays` INTEGER NOT NULL,
+                        `purpose` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `requestedAt` INTEGER NOT NULL,
+                        `dueAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `disbursedAt` INTEGER,
+                        `defaultedAt` INTEGER,
+                        PRIMARY KEY(`requestId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_lendingId`
+                    ON `loan_requests` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_status`
+                    ON `loan_requests` (`status`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_borrowerPeerId`
+                    ON `loan_requests` (`borrowerPeerId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_votes` (
+                        `requestId` TEXT NOT NULL,
+                        `voterPeerId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `voteChoice` TEXT NOT NULL,
+                        `votedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`requestId`, `voterPeerId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_votes_lendingId`
+                    ON `loan_votes` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_votes_voteChoice`
+                    ON `loan_votes` (`voteChoice`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_repayments` (
+                        `repaymentId` TEXT NOT NULL,
+                        `requestId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `amount` INTEGER NOT NULL,
+                        `txSignature` TEXT,
+                        `txStatus` TEXT NOT NULL,
+                        `paidAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`repaymentId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_repayments_requestId`
+                    ON `loan_repayments` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_repayments_lendingId`
+                    ON `loan_repayments` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `credibility_profiles` (
+                        `profileId` TEXT NOT NULL,
+                        `subjectType` TEXT NOT NULL,
+                        `subjectKey` TEXT NOT NULL,
+                        `score` INTEGER NOT NULL,
+                        `usageAgePoints` INTEGER NOT NULL,
+                        `participationPoints` INTEGER NOT NULL,
+                        `recentActivityPoints` INTEGER NOT NULL,
+                        `walletStrengthPoints` INTEGER NOT NULL,
+                        `hardGateStatus` TEXT NOT NULL,
+                        `firstSeenAt` INTEGER NOT NULL,
+                        `lastComputedAt` INTEGER NOT NULL,
+                        `snapshotJson` TEXT NOT NULL,
+                        PRIMARY KEY(`profileId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_credibility_profiles_subjectType_subjectKey`
+                    ON `credibility_profiles` (`subjectType`, `subjectKey`)
                     """.trimIndent()
                 )
             }
