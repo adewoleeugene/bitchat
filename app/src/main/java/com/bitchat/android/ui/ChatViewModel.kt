@@ -1943,7 +1943,7 @@ class ChatViewModel(
                         val key = "${tx.id}:${tx.status}"
                         if (notifiedTransactionIds.contains(key)) continue
 
-                        val amountSol = paymentManager.lamportsToSolDisplay(tx.amountLamports)
+                        val amountLabel = paymentManager.formatDisplayAmount(tx)
                         val shortRecipient = if (tx.recipientPublicKey.length > 12) {
                             "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
                         } else tx.recipientPublicKey
@@ -1954,11 +1954,11 @@ class ChatViewModel(
                         val statusMessage = when (tx.status) {
                             com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment preparing: $amountSol SOL to $shortRecipient (awaiting blockhash)"
+                                "payment preparing: $amountLabel to $shortRecipient (awaiting blockhash)"
                             }
                             com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment broadcasting: $amountSol SOL to $shortRecipient"
+                                "payment broadcasting: $amountLabel to $shortRecipient"
                             }
                             com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
                                 notifiedTransactionIds.add(key)
@@ -1966,16 +1966,16 @@ class ChatViewModel(
                                     tx.recipientPublicKey == myWalletAddress &&
                                     tx.senderPublicKey != myWalletAddress
                                 if (isIncoming) {
-                                    "payment received: $amountSol SOL from $shortSender" +
+                                    "payment received: $amountLabel from $shortSender" +
                                         if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
                                 } else {
-                                    "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                    "payment confirmed: $amountLabel to $shortRecipient" +
                                         if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
                                 }
                             }
                             com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment failed: $amountSol SOL to $shortRecipient" +
+                                "payment failed: $amountLabel to $shortRecipient" +
                                     if (!tx.errorMessage.isNullOrEmpty()) " - ${tx.errorMessage}" else ""
                             }
                             else -> null

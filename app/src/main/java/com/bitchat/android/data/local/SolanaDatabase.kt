@@ -40,7 +40,7 @@ import com.bitchat.android.data.local.entities.WalletEntity
         LoanRepaymentEntity::class,
         CredibilityProfileEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -523,6 +523,35 @@ abstract class SolanaDatabase : RoomDatabase() {
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS `index_credibility_profiles_subjectType_subjectKey`
                     ON `credibility_profiles` (`subjectType`, `subjectKey`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetKind` TEXT NOT NULL DEFAULT 'NATIVE_SOL'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetMintAddress` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetSymbol` TEXT NOT NULL DEFAULT 'SOL'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetDecimals` INTEGER NOT NULL DEFAULT 9
                     """.trimIndent()
                 )
             }

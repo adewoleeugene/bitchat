@@ -211,6 +211,29 @@ class SolanaRpcService @Inject constructor(
     }
 
     /**
+     * Get the first token account owned by a wallet for a specific mint.
+     * Returns null when the owner has no account for that mint.
+     */
+    suspend fun getTokenAccountAddress(ownerPublicKey: String, mintAddress: String): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val response = rpcCall(
+                "getTokenAccountsByOwner",
+                """["$ownerPublicKey", {"mint": "$mintAddress"}, {"encoding": "jsonParsed"}]"""
+            )
+            val result = response.getAsJsonObject("result")
+            val accounts = result.getAsJsonArray("value")
+            if (accounts.size() == 0) {
+                return@withContext Result.success(null)
+            }
+
+            val pubkey = accounts.get(0)?.asJsonObject?.get("pubkey")?.asString
+            Result.success(pubkey)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Check if an owner holds any NFT from a specific collection mint.
      * Strategy:
      * 1) Fast path via DAS getAssetsByOwner.
