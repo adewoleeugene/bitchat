@@ -52,8 +52,27 @@ interface LendingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLoanRequest(request: LoanRequestEntity)
 
+    @Query("SELECT * FROM loan_requests WHERE requestId = :requestId LIMIT 1")
+    suspend fun getLoanRequestById(requestId: String): LoanRequestEntity?
+
     @Query("SELECT * FROM loan_requests WHERE lendingId = :lendingId ORDER BY requestedAt DESC")
     suspend fun getLoanRequestsForLendingChannel(lendingId: String): List<LoanRequestEntity>
+
+    @Query(
+        """
+        SELECT * FROM loan_requests
+        WHERE lendingId = :lendingId
+          AND borrowerType = 'INDIVIDUAL'
+          AND borrowerPeerId = :borrowerPeerId
+          AND status IN ('PENDING', 'APPROVED', 'DISBURSED')
+        ORDER BY requestedAt DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getActiveIndividualLoanForBorrower(
+        lendingId: String,
+        borrowerPeerId: String
+    ): LoanRequestEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLoanVote(vote: LoanVoteEntity)

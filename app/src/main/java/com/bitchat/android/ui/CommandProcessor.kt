@@ -1,12 +1,22 @@
 package com.bitchat.android.ui
 
 import com.bitchat.android.data.local.entities.LendingMemberStatus
+import com.bitchat.android.data.local.entities.BorrowerType
 import com.bitchat.android.data.local.entities.TokenGateType
+import com.bitchat.android.data.local.entities.VoteChoice
+import com.bitchat.android.lending.CastLoanVoteRequest
+import com.bitchat.android.lending.CreateLoanRequest
 import com.bitchat.android.lending.CreateLendingChannelRequest
+import com.bitchat.android.lending.DEFAULT_CREDIBILITY_THRESHOLD
+import com.bitchat.android.lending.DEFAULT_INTEREST_BPS
+import com.bitchat.android.lending.LeaveLendingChannelRequest
 import com.bitchat.android.lending.LendingChannelService
 import com.bitchat.android.lending.LendingCredibilityRequest
 import com.bitchat.android.lending.LendingCredibilityService
+import com.bitchat.android.lending.LendingEscrowService
+import com.bitchat.android.lending.LendingLoanService
 import com.bitchat.android.lending.RecordPendingMembershipRequest
+import com.bitchat.android.lending.RecordLoanRepaymentRequest
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.solana.GateDecision
@@ -34,6 +44,8 @@ class CommandProcessor(
     var tokenGateService: TokenGateService? = null
     var lendingChannelService: LendingChannelService? = null
     var lendingCredibilityService: LendingCredibilityService? = null
+    var lendingLoanService: LendingLoanService? = null
+    var lendingEscrowService: LendingEscrowService? = null
 
     private val commandScope = CoroutineScope(Dispatchers.Main)
 
@@ -728,7 +740,7 @@ class CommandProcessor(
         if (parts.size < 2) {
             return CommandResult(
                 prefillText = "/lending ",
-                hintText = "usage: /lending create|join|status ..."
+                hintText = "usage: /lending create|join|status|request|vote|repay|leave ..."
             )
         }
 
@@ -736,9 +748,13 @@ class CommandProcessor(
             "create" -> handleLendingCreate(parts, myPeerID, viewModel)
             "join" -> handleLendingJoin(parts, myPeerID, viewModel)
             "status" -> handleLendingStatus(parts, viewModel)
+            "request" -> handleLendingRequest(parts, myPeerID, viewModel)
+            "vote" -> handleLendingVote(parts, myPeerID)
+            "repay" -> handleLendingRepay(parts, myPeerID)
+            "leave" -> handleLendingLeave(parts, myPeerID, viewModel)
             else -> CommandResult(
                 prefillText = "/lending ",
-                hintText = "usage: /lending create|join|status ..."
+                hintText = "usage: /lending create|join|status|request|vote|repay|leave ..."
             )
         }
     }
@@ -756,8 +772,9 @@ class CommandProcessor(
         }
 
         val lendingService = lendingChannelService
+        val escrowService = lendingEscrowService
         val ws = walletService
-        if (lendingService == null || ws == null) {
+        if (lendingService == null || escrowService == null || ws == null) {
             addSystemMessage("lending is not available yet — try again in a moment.")
             return null
         }
@@ -796,6 +813,7 @@ class CommandProcessor(
                     stakeTokenSymbol = mint.take(8).uppercase()
                 )
             )
+            escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
             addSystemMessage(
                 "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }}"
             )
@@ -817,8 +835,9 @@ class CommandProcessor(
 
         val lendingService = lendingChannelService
         val credibilityService = lendingCredibilityService
+        val escrowService = lendingEscrowService
         val ws = walletService
-        if (lendingService == null || credibilityService == null || ws == null) {
+        if (lendingService == null || credibilityService == null || escrowService == null || ws == null) {
             addSystemMessage("lending is not available yet — try again in a moment.")
             return null
         }
@@ -854,7 +873,7 @@ class CommandProcessor(
                 return@launch
             }
 
-            val membership = lendingService.recordPendingMembership(
+            lendingService.recordPendingMembership(
                 RecordPendingMembershipRequest(
                     lendingId = lendingChannel.lendingId,
                     memberPeerId = myPeerID,
@@ -864,8 +883,9 @@ class CommandProcessor(
                     credibilitySnapshotJson = evaluation.profile.snapshotJson
                 )
             )
+            val activated = escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
             addSystemMessage(
-                "join pending for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: score ${evaluation.profile.score}/100, deposit ${membership.depositStatus.lowercase()}, status ${membership.joinStatus.lowercase()}"
+                "joined ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: score ${evaluation.profile.score}/100, deposit ${activated.depositStatus.lowercase()}, status ${activated.joinStatus.lowercase()}"
             )
         }
         return null
@@ -906,9 +926,196 @@ class CommandProcessor(
                     append("members: $activeMembers\n")
                     append("pool: total ${pool?.totalStakedAmount ?: 0}, available ${pool?.availableLiquidityAmount ?: 0}, reserved ${pool?.reservedAmount ?: 0}, disbursed ${pool?.disbursedAmount ?: 0}\n")
                     append("active loans: ${status.activeLoanCount}\n")
-                    append("credibility threshold: 60/100")
+                    append("credibility threshold: $DEFAULT_CREDIBILITY_THRESHOLD/100")
                 }
             )
+        }
+        return null
+    }
+
+    private fun handleLendingRequest(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val loanService = lendingLoanService
+        if (loanService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+
+        if (parts.size < 6) {
+            return CommandResult(
+                prefillText = "/lending request ",
+                hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose...>"
+            )
+        }
+
+        val isGroup = parts[2].equals("group", ignoreCase = true)
+        val identifierIndex = if (isGroup) 3 else 2
+        val amountIndex = if (isGroup) 4 else 3
+        val daysIndex = if (isGroup) 5 else 4
+        val purposeIndex = if (isGroup) 6 else 5
+        val identifier = parts.getOrNull(identifierIndex) ?: return null
+        val amount = parts.getOrNull(amountIndex)?.toLongOrNull()
+        val durationDays = parts.getOrNull(daysIndex)?.toIntOrNull()
+        val purpose = parts.drop(purposeIndex).joinToString(" ").trim()
+        if (amount == null || amount <= 0L || durationDays == null || durationDays <= 0 || purpose.isBlank()) {
+            return CommandResult(
+                prefillText = "/lending request ${if (isGroup) "group " else ""}",
+                hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose...>"
+            )
+        }
+
+        val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
+        commandScope.launch {
+            try {
+                val loan = loanService.createLoanRequest(
+                    CreateLoanRequest(
+                        identifier = identifier,
+                        preferredChannelKey = preferredChannelKey,
+                        requesterPeerId = myPeerID,
+                        borrowerType = if (isGroup) BorrowerType.GROUP else BorrowerType.INDIVIDUAL,
+                        principalAmount = amount,
+                        durationDays = durationDays,
+                        purpose = purpose,
+                        interestBps = DEFAULT_INTEREST_BPS
+                    )
+                )
+                addSystemMessage(
+                    "loan request ${loan.requestId} opened for ${loan.principalAmount} over ${loan.durationDays}d at ${loan.interestBps / 100.0}% interest"
+                )
+            } catch (error: Exception) {
+                addSystemMessage("couldn't create loan request: ${error.message}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingVote(parts: List<String>, myPeerID: String): CommandResult? {
+        val loanService = lendingLoanService
+        if (loanService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 4) {
+            return CommandResult(
+                prefillText = "/lending vote ",
+                hintText = "usage: /lending vote <request_id> yes|no"
+            )
+        }
+
+        val requestId = parts[2]
+        val choice = when (parts[3].lowercase()) {
+            "yes" -> VoteChoice.YES
+            "no" -> VoteChoice.NO
+            else -> return CommandResult(
+                prefillText = "/lending vote $requestId ",
+                hintText = "vote must be yes or no"
+            )
+        }
+
+        commandScope.launch {
+            try {
+                val result = loanService.castVote(
+                    CastLoanVoteRequest(
+                        requestId = requestId,
+                        voterPeerId = myPeerID,
+                        voteChoice = choice
+                    )
+                )
+                val yesVotes = result.votes.count { it.voteChoice == VoteChoice.YES }
+                val noVotes = result.votes.count { it.voteChoice == VoteChoice.NO }
+                val suffix = when {
+                    result.approved -> "loan approved and marked disbursed"
+                    result.rejected -> "loan rejected"
+                    result.quorumReached -> "quorum met, decision pending recount"
+                    else -> "vote recorded"
+                }
+                addSystemMessage("${result.request.requestId}: yes $yesVotes, no $noVotes • $suffix")
+            } catch (error: Exception) {
+                addSystemMessage("couldn't record vote: ${error.message}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingRepay(parts: List<String>, myPeerID: String): CommandResult? {
+        val loanService = lendingLoanService
+        if (loanService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 4) {
+            return CommandResult(
+                prefillText = "/lending repay ",
+                hintText = "usage: /lending repay <request_id> <amount>"
+            )
+        }
+
+        val requestId = parts[2]
+        val amount = parts[3].toLongOrNull()
+        if (amount == null || amount <= 0L) {
+            return CommandResult(
+                prefillText = "/lending repay $requestId ",
+                hintText = "repayment amount must be a positive integer"
+            )
+        }
+
+        commandScope.launch {
+            try {
+                val result = loanService.repayLoan(
+                    RecordLoanRepaymentRequest(
+                        requestId = requestId,
+                        payerPeerId = myPeerID,
+                        amount = amount
+                    )
+                )
+                addSystemMessage(
+                    "repayment recorded for ${result.updatedRequest.requestId}: paid ${result.repayment.amount}, remaining ${result.remainingBalance}, status ${result.updatedRequest.status.lowercase()}"
+                )
+            } catch (error: Exception) {
+                addSystemMessage("couldn't record repayment: ${error.message}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingLeave(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val loanService = lendingLoanService
+        if (loanService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+
+        val identifier = parts.getOrNull(2) ?: state.getCurrentChannelValue()?.let { ChannelKeys.parseChannelName(it) }
+        if (identifier.isNullOrBlank()) {
+            return CommandResult(
+                prefillText = "/lending leave ",
+                hintText = "usage: /lending leave [#channel|lendingId]"
+            )
+        }
+
+        val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
+        commandScope.launch {
+            try {
+                val result = loanService.leaveChannel(
+                    LeaveLendingChannelRequest(
+                        identifier = identifier,
+                        preferredChannelKey = preferredChannelKey,
+                        memberPeerId = myPeerID
+                    )
+                )
+                addSystemMessage(
+                    "left lending channel ${result.membership.lendingId}: stake ${result.membership.depositStatus.lowercase()}, membership ${result.membership.joinStatus.lowercase()}"
+                )
+            } catch (error: Exception) {
+                addSystemMessage("couldn't leave lending channel: ${error.message}")
+            }
         }
         return null
     }
@@ -1479,6 +1686,10 @@ class CommandProcessor(
             CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint>", "create lending channel"),
             CommandSuggestion("/lending join", emptyList(), "[#channel|lendingId]", "join lending channel"),
             CommandSuggestion("/lending status", emptyList(), "[#channel|lendingId]", "show lending status"),
+            CommandSuggestion("/lending request", emptyList(), "[group] [#channel|lendingId] <amount> <days> <purpose>", "request a loan"),
+            CommandSuggestion("/lending vote", emptyList(), "<request_id> yes|no", "vote on a loan request"),
+            CommandSuggestion("/lending repay", emptyList(), "<request_id> <amount>", "repay a loan"),
+            CommandSuggestion("/lending leave", emptyList(), "[#channel|lendingId]", "leave lending channel"),
             CommandSuggestion("/users", emptyList(), "[#channel]", "list tracked users in channel"),
             CommandSuggestion("/gm", emptyList(), "@user", "send a gm"),
             CommandSuggestion("/tip", emptyList(), "@user <amount>", "send SOL"),
@@ -1540,10 +1751,14 @@ class CommandProcessor(
         // Pre-fill with contextual hint based on what the command expects
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
-            "/lending" -> CommandResult(prefillText = "/lending ", hintText = "create | join | status")
+            "/lending" -> CommandResult(prefillText = "/lending ", hintText = "create | join | status | request | vote | repay | leave")
             "/lending create" -> CommandResult(prefillText = "/lending create #", hintText = "usage: /lending create #channel <stake_amount> <mint>")
             "/lending join" -> CommandResult(prefillText = "/lending join ", hintText = "use #channel or lendingId")
             "/lending status" -> CommandResult(prefillText = "/lending status ", hintText = "use #channel or lendingId")
+            "/lending request" -> CommandResult(prefillText = "/lending request ", hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose>")
+            "/lending vote" -> CommandResult(prefillText = "/lending vote ", hintText = "usage: /lending vote <request_id> yes|no")
+            "/lending repay" -> CommandResult(prefillText = "/lending repay ", hintText = "usage: /lending repay <request_id> <amount>")
+            "/lending leave" -> CommandResult(prefillText = "/lending leave ", hintText = "use #channel or lendingId")
             "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")

@@ -2,6 +2,8 @@ package com.bitchat.android.di
 
 import com.bitchat.android.lending.LendingChannelService
 import com.bitchat.android.lending.LendingCredibilityService
+import com.bitchat.android.lending.LendingEscrowService
+import com.bitchat.android.lending.LendingLoanService
 import com.bitchat.android.solana.MessageNotarizationService
 import com.bitchat.android.solana.NftAvatarService
 import com.bitchat.android.solana.SolanaPaymentManager
@@ -29,4 +31,6 @@ interface SolanaEntryPoint {
     fun nftAvatarService(): NftAvatarService
     fun lendingChannelService(): LendingChannelService
     fun lendingCredibilityService(): LendingCredibilityService
+    fun lendingLoanService(): LendingLoanService
+    fun lendingEscrowService(): LendingEscrowService
 }

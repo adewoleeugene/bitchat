@@ -59,4 +59,19 @@ class CommandProcessorLendingCommandTest {
 
         assertEquals("/lending create #", result.prefillText)
     }
+
+    @Test
+    fun selectCommandSuggestion_lendingRequestReturnsExpectedHint() {
+        val result = commandProcessor.selectCommandSuggestion(
+            CommandSuggestion(
+                "/lending request",
+                emptyList(),
+                "[group] [#channel|lendingId] <amount> <days> <purpose>",
+                "request a loan"
+            )
+        )
+
+        assertEquals("/lending request ", result.prefillText)
+        assertTrue(result.hintText.orEmpty().contains("group"))
+    }
 }

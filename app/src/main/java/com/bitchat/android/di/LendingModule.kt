@@ -4,7 +4,10 @@ import com.bitchat.android.lending.LendingChannelService
 import com.bitchat.android.lending.LendingChannelServiceImpl
 import com.bitchat.android.lending.LendingCredibilityService
 import com.bitchat.android.lending.LendingCredibilityServiceImpl
+import com.bitchat.android.lending.LendingEscrowService
 import com.bitchat.android.lending.LendingIdGenerator
+import com.bitchat.android.lending.LendingLifecycleServiceImpl
+import com.bitchat.android.lending.LendingLoanService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -30,4 +33,16 @@ object LendingModule {
     fun provideLendingCredibilityService(
         impl: LendingCredibilityServiceImpl
     ): LendingCredibilityService = impl
+
+    @Provides
+    @Singleton
+    fun provideLendingLoanService(
+        impl: LendingLifecycleServiceImpl
+    ): LendingLoanService = impl
+
+    @Provides
+    @Singleton
+    fun provideLendingEscrowService(
+        impl: LendingLifecycleServiceImpl
+    ): LendingEscrowService = impl
 }

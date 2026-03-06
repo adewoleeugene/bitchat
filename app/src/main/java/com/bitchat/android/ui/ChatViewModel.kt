@@ -286,6 +286,8 @@ class ChatViewModel(
             commandProcessor.tokenGateService = tokenGateService
             commandProcessor.lendingChannelService = solanaEntryPoint.lendingChannelService()
             commandProcessor.lendingCredibilityService = solanaEntryPoint.lendingCredibilityService()
+            commandProcessor.lendingLoanService = solanaEntryPoint.lendingLoanService()
+            commandProcessor.lendingEscrowService = solanaEntryPoint.lendingEscrowService()
 
             // Wire up token gate service to channel manager for join validation
             channelManager.tokenGateService = tokenGateService
