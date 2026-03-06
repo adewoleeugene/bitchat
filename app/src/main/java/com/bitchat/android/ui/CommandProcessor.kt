@@ -1,6 +1,12 @@
 package com.bitchat.android.ui
 
+import com.bitchat.android.data.local.entities.LendingMemberStatus
 import com.bitchat.android.data.local.entities.TokenGateType
+import com.bitchat.android.lending.CreateLendingChannelRequest
+import com.bitchat.android.lending.LendingChannelService
+import com.bitchat.android.lending.LendingCredibilityRequest
+import com.bitchat.android.lending.LendingCredibilityService
+import com.bitchat.android.lending.RecordPendingMembershipRequest
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.solana.GateDecision
@@ -26,6 +32,8 @@ class CommandProcessor(
     var walletService: SolanaWalletService? = null
     var paymentManager: SolanaPaymentManager? = null
     var tokenGateService: TokenGateService? = null
+    var lendingChannelService: LendingChannelService? = null
+    var lendingCredibilityService: LendingCredibilityService? = null
 
     private val commandScope = CoroutineScope(Dispatchers.Main)
 
@@ -38,6 +46,7 @@ class CommandProcessor(
         CommandSuggestion("/gm", emptyList(), "name", "send a gm"),
         CommandSuggestion("/hug", emptyList(), "name", "hug someone"),
         CommandSuggestion("/j", listOf("/join"), "channel", "join a channel"),
+        CommandSuggestion("/lending", emptyList(), "<action>", "community lending tools"),
         CommandSuggestion("/m", listOf("/msg"), "name", "private message"),
         CommandSuggestion("/tip", emptyList(), null, "send SOL"),
         CommandSuggestion("/unblock", emptyList(), "name", "unblock someone"),
@@ -54,6 +63,7 @@ class CommandProcessor(
         val cmd = parts.first().lowercase()
         return when (cmd) {
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
+            "/lending" -> handleLendingCommand(parts, myPeerID, viewModel, meshService)
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
             "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
@@ -709,6 +719,206 @@ class CommandProcessor(
         }
     }
 
+    private fun handleLendingCommand(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
+    ): CommandResult? {
+        if (parts.size < 2) {
+            return CommandResult(
+                prefillText = "/lending ",
+                hintText = "usage: /lending create|join|status ..."
+            )
+        }
+
+        return when (parts[1].lowercase()) {
+            "create" -> handleLendingCreate(parts, myPeerID, viewModel)
+            "join" -> handleLendingJoin(parts, myPeerID, viewModel)
+            "status" -> handleLendingStatus(parts, viewModel)
+            else -> CommandResult(
+                prefillText = "/lending ",
+                hintText = "usage: /lending create|join|status ..."
+            )
+        }
+    }
+
+    private fun handleLendingCreate(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        if (parts.size < 5) {
+            return CommandResult(
+                prefillText = "/lending create #",
+                hintText = "usage: /lending create #channel <stake_amount> <mint>"
+            )
+        }
+
+        val lendingService = lendingChannelService
+        val ws = walletService
+        if (lendingService == null || ws == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (!ws.hasWallet()) {
+            addSystemMessage("you need a wallet first — open settings to create one.")
+            return null
+        }
+
+        val channelName = parts[2]
+        val channel = if (channelName.startsWith("#")) channelName else "#$channelName"
+        val stakeAmount = parts[3].toLongOrNull()
+        val mint = parts[4]
+        if (stakeAmount == null || stakeAmount <= 0L) {
+            return CommandResult(
+                prefillText = "/lending create $channel ",
+                hintText = "stake amount must be a positive integer"
+            )
+        }
+
+        val timeline = viewModel?.selectedLocationChannel?.value
+        val success = channelManager.joinChannel(channel, null, myPeerID, timeline)
+        if (!success) return null
+        val channelKey = ChannelKeys.create(timeline, channel)
+        channelManager.assignChannelCreator(channelKey, myPeerID)
+        val walletAddress = ws.getPublicKeyBase58().orEmpty()
+
+        commandScope.launch {
+            val lendingChannel = lendingService.createLocalChannel(
+                CreateLendingChannelRequest(
+                    channelKey = channelKey,
+                    displayName = channel,
+                    creatorPeerId = myPeerID,
+                    creatorWalletAddress = walletAddress,
+                    requiredStakeAmount = stakeAmount,
+                    stakeTokenMint = mint,
+                    stakeTokenSymbol = mint.take(8).uppercase()
+                )
+            )
+            addSystemMessage(
+                "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }}"
+            )
+        }
+        return null
+    }
+
+    private fun handleLendingJoin(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        if (parts.size < 3) {
+            return CommandResult(
+                prefillText = "/lending join ",
+                hintText = "usage: /lending join [#channel|lendingId]"
+            )
+        }
+
+        val lendingService = lendingChannelService
+        val credibilityService = lendingCredibilityService
+        val ws = walletService
+        if (lendingService == null || credibilityService == null || ws == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (!ws.hasWallet()) {
+            addSystemMessage("you need a wallet first — open settings to create one.")
+            return null
+        }
+
+        val identifier = parts[2]
+        val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
+        commandScope.launch {
+            val lendingChannel = lendingService.getChannelByIdentifier(identifier, preferredChannelKey)
+            if (lendingChannel == null) {
+                addSystemMessage("couldn't find a lending channel for '$identifier'.")
+                return@launch
+            }
+
+            val balance = ws.getCachedBalanceLamports()
+            val evaluation = credibilityService.evaluateAndPersist(
+                LendingCredibilityRequest(
+                    peerId = myPeerID,
+                    stakeAmountRequired = lendingChannel.requiredStakeAmount,
+                    observedStakeBalance = balance,
+                    stakeBalanceSatisfied = balance >= lendingChannel.requiredStakeAmount
+                )
+            )
+
+            if (!evaluation.passedHardGates || !evaluation.passedThreshold) {
+                val reasons = evaluation.hardGateFailures.ifEmpty { listOf("credibility_below_threshold") }
+                addSystemMessage(
+                    "join denied for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: ${reasons.joinToString(", ")} (score ${evaluation.profile.score}/100)"
+                )
+                return@launch
+            }
+
+            val membership = lendingService.recordPendingMembership(
+                RecordPendingMembershipRequest(
+                    lendingId = lendingChannel.lendingId,
+                    memberPeerId = myPeerID,
+                    walletAddress = ws.getPublicKeyBase58().orEmpty(),
+                    stakeAmount = lendingChannel.requiredStakeAmount,
+                    credibilityScore = evaluation.profile.score,
+                    credibilitySnapshotJson = evaluation.profile.snapshotJson
+                )
+            )
+            addSystemMessage(
+                "join pending for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: score ${evaluation.profile.score}/100, deposit ${membership.depositStatus.lowercase()}, status ${membership.joinStatus.lowercase()}"
+            )
+        }
+        return null
+    }
+
+    private fun handleLendingStatus(
+        parts: List<String>,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val lendingService = lendingChannelService
+        if (lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+
+        val identifier = parts.getOrNull(2) ?: state.getCurrentChannelValue()?.let { ChannelKeys.parseChannelName(it) }
+        if (identifier.isNullOrBlank()) {
+            return CommandResult(
+                prefillText = "/lending status ",
+                hintText = "usage: /lending status [#channel|lendingId]"
+            )
+        }
+        val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
+        commandScope.launch {
+            val status = lendingService.getStatus(identifier, preferredChannelKey)
+            if (status == null) {
+                addSystemMessage("no lending channel found for '$identifier'.")
+                return@launch
+            }
+            val activeMembers = status.memberships.count {
+                it.joinStatus == LendingMemberStatus.ACTIVE || it.joinStatus == LendingMemberStatus.PENDING
+            }
+            val pool = status.poolSnapshot
+            addSystemMessage(
+                buildString {
+                    append("lending status for ${status.channel.displayName} • id ${status.channel.lendingId}\n")
+                    append("stake: ${status.channel.requiredStakeAmount} ${status.channel.stakeTokenSymbol.ifBlank { status.channel.stakeTokenMint.take(8) }}\n")
+                    append("members: $activeMembers\n")
+                    append("pool: total ${pool?.totalStakedAmount ?: 0}, available ${pool?.availableLiquidityAmount ?: 0}, reserved ${pool?.reservedAmount ?: 0}, disbursed ${pool?.disbursedAmount ?: 0}\n")
+                    append("active loans: ${status.activeLoanCount}\n")
+                    append("credibility threshold: 60/100")
+                }
+            )
+        }
+        return null
+    }
+
+    private fun resolvePreferredLendingChannelKey(identifier: String, viewModel: ChatViewModel?): String? {
+        if (!identifier.startsWith("#")) return null
+        val timeline = viewModel?.selectedLocationChannel?.value
+        return ChannelKeys.create(timeline, identifier)
+    }
+
     private fun handleCreateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?, meshService: BluetoothMeshService): CommandResult? {
         if (parts.size < 2) {
             return CommandResult(prefillText = "/create #", hintText = "type a channel name")
@@ -1266,6 +1476,9 @@ class CommandProcessor(
         // Channel context: do not show global commands.
         val commands = mutableListOf(
             CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
+            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint>", "create lending channel"),
+            CommandSuggestion("/lending join", emptyList(), "[#channel|lendingId]", "join lending channel"),
+            CommandSuggestion("/lending status", emptyList(), "[#channel|lendingId]", "show lending status"),
             CommandSuggestion("/users", emptyList(), "[#channel]", "list tracked users in channel"),
             CommandSuggestion("/gm", emptyList(), "@user", "send a gm"),
             CommandSuggestion("/tip", emptyList(), "@user <amount>", "send SOL"),
@@ -1327,6 +1540,10 @@ class CommandProcessor(
         // Pre-fill with contextual hint based on what the command expects
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
+            "/lending" -> CommandResult(prefillText = "/lending ", hintText = "create | join | status")
+            "/lending create" -> CommandResult(prefillText = "/lending create #", hintText = "usage: /lending create #channel <stake_amount> <mint>")
+            "/lending join" -> CommandResult(prefillText = "/lending join ", hintText = "use #channel or lendingId")
+            "/lending status" -> CommandResult(prefillText = "/lending status ", hintText = "use #channel or lendingId")
             "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")

@@ -31,6 +31,9 @@ interface LendingDao {
     @Query("SELECT * FROM lending_channels ORDER BY createdAt DESC")
     fun observeAllLendingChannels(): Flow<List<LendingChannelEntity>>
 
+    @Query("SELECT * FROM lending_channels ORDER BY createdAt DESC")
+    suspend fun getAllLendingChannels(): List<LendingChannelEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMembership(membership: LendingMembershipEntity)
 

@@ -1,0 +1,33 @@
+package com.bitchat.android.di
+
+import com.bitchat.android.lending.LendingChannelService
+import com.bitchat.android.lending.LendingChannelServiceImpl
+import com.bitchat.android.lending.LendingCredibilityService
+import com.bitchat.android.lending.LendingCredibilityServiceImpl
+import com.bitchat.android.lending.LendingIdGenerator
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+object LendingModule {
+
+    @Provides
+    @Singleton
+    fun provideLendingIdGenerator(): LendingIdGenerator = LendingIdGenerator()
+
+    @Provides
+    @Singleton
+    fun provideLendingChannelService(
+        impl: LendingChannelServiceImpl
+    ): LendingChannelService = impl
+
+    @Provides
+    @Singleton
+    fun provideLendingCredibilityService(
+        impl: LendingCredibilityServiceImpl
+    ): LendingCredibilityService = impl
+}

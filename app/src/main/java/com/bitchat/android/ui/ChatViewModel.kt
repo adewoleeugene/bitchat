@@ -284,6 +284,8 @@ class ChatViewModel(
             commandProcessor.paymentManager = solanaEntryPoint.solanaPaymentManager()
             val tokenGateService = solanaEntryPoint.tokenGateService()
             commandProcessor.tokenGateService = tokenGateService
+            commandProcessor.lendingChannelService = solanaEntryPoint.lendingChannelService()
+            commandProcessor.lendingCredibilityService = solanaEntryPoint.lendingCredibilityService()
 
             // Wire up token gate service to channel manager for join validation
             channelManager.tokenGateService = tokenGateService
