@@ -520,6 +520,13 @@ class SolanaWalletService @Inject constructor(
         return SolanaKeyDerivation.encodeBase58(privKeyBytes)
     }
 
+    fun getPrivateKeyBytes(): ByteArray? {
+        if (!isWalletStorageUsable()) return null
+        ensureWalletInitializedFromIdentity()
+        val privKeyBase64 = securePrefs.getString(KEY_PRIVATE_KEY, null) ?: return null
+        return android.util.Base64.decode(privKeyBase64, android.util.Base64.NO_WRAP)
+    }
+
     /**
      * Sign arbitrary data with the wallet's Ed25519 private key.
      */
@@ -527,10 +534,24 @@ class SolanaWalletService @Inject constructor(
         if (!isWalletStorageUsable()) return null
         ensureWalletInitializedFromIdentity()
         val privKey = getOrLoadPrivateKey() ?: return null
+        return signWithEd25519(data, privKey)
+    }
+
+    fun signWithPrivateKeyBytes(data: ByteArray, privateKeyBytes: ByteArray): ByteArray? {
         return try {
-            // Use EdDSAEngine directly to avoid JVM/provider registration flakiness in tests.
+            val privKeySpec = EdDSAPrivateKeySpec(privateKeyBytes, ed25519Spec)
+            val privKey = EdDSAPrivateKey(privKeySpec)
+            signWithEd25519(data, privKey)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sign with supplied private key: ${e.message}", e)
+            null
+        }
+    }
+
+    private fun signWithEd25519(data: ByteArray, privateKey: EdDSAPrivateKey): ByteArray? {
+        return try {
             val signer = EdDSAEngine()
-            signer.initSign(privKey)
+            signer.initSign(privateKey)
             signer.update(data)
             signer.sign()
         } catch (e: Exception) {

@@ -5,6 +5,15 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bitchat.android.data.local.SolanaDatabase
+import com.bitchat.android.lending.onchain.CastLoanVoteOnChainParams
+import com.bitchat.android.lending.onchain.CreateLoanRequestOnChainParams
+import com.bitchat.android.lending.onchain.FinalizeLoanRequestOnChainParams
+import com.bitchat.android.lending.onchain.InitializeLendingChannelOnChainParams
+import com.bitchat.android.lending.onchain.LendingOnChainService
+import com.bitchat.android.lending.onchain.OnChainLoanRequestState
+import com.bitchat.android.lending.onchain.OnChainSubmissionResult
+import com.bitchat.android.lending.onchain.OnChainVoteRecord
+import com.bitchat.android.lending.onchain.RecordLoanRepaymentOnChainParams
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -38,7 +47,10 @@ class LendingChannelServiceIntegrationTest {
                 SolanaDatabase.MIGRATION_9_10,
                 SolanaDatabase.MIGRATION_10_11,
                 SolanaDatabase.MIGRATION_11_12,
-                SolanaDatabase.MIGRATION_12_13
+                SolanaDatabase.MIGRATION_12_13,
+                SolanaDatabase.MIGRATION_13_14,
+                SolanaDatabase.MIGRATION_14_15,
+                SolanaDatabase.MIGRATION_15_16
             )
             .build()
         database.openHelper.writableDatabase
@@ -54,7 +66,39 @@ class LendingChannelServiceIntegrationTest {
                         return value % bound
                     }
                 }
-            )
+            ),
+            squadsService = object : SquadsService {
+                override fun config(): SquadsConfig = SquadsConfig()
+                override suspend fun resolveLendingSquad(lendingId: String): Result<SquadsVaultAccount> =
+                    Result.failure(IllegalStateException("squad_not_configured"))
+                override suspend fun fetchMultisigState(multisigAddress: String): Result<SquadsMultisigState> =
+                    Result.failure(IllegalStateException("squad_not_configured"))
+                override suspend fun createLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState> =
+                    Result.failure(IllegalStateException("squad_not_configured"))
+                override suspend fun approveLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState> =
+                    Result.failure(IllegalStateException("squad_not_configured"))
+                override suspend fun executeLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState> =
+                    Result.failure(IllegalStateException("squad_not_configured"))
+                override suspend fun fetchLoanProposalState(lendingId: String, requestId: String): Result<SquadsProposalState?> =
+                    Result.success(null)
+            },
+            lendingOnChainService = object : LendingOnChainService {
+                override fun isEnabled(): Boolean = false
+                override suspend fun initializeChannelOnChain(params: InitializeLendingChannelOnChainParams) =
+                    Result.success(OnChainSubmissionResult(channelPda = "", txSignature = ""))
+                override suspend fun createLoanRequestOnChain(params: CreateLoanRequestOnChainParams) =
+                    Result.failure<OnChainSubmissionResult>(IllegalStateException("disabled"))
+                override suspend fun castLoanVoteOnChain(params: CastLoanVoteOnChainParams) =
+                    Result.failure<OnChainSubmissionResult>(IllegalStateException("disabled"))
+                override suspend fun finalizeLoanRequestOnChain(params: FinalizeLoanRequestOnChainParams) =
+                    Result.failure<OnChainSubmissionResult>(IllegalStateException("disabled"))
+                override suspend fun recordLoanRepaymentOnChain(params: RecordLoanRepaymentOnChainParams) =
+                    Result.failure<OnChainSubmissionResult>(IllegalStateException("disabled"))
+                override suspend fun fetchLoanRequestState(lendingId: String, requestId: String) =
+                    Result.failure<OnChainLoanRequestState>(IllegalStateException("disabled"))
+                override suspend fun fetchVoteRecords(lendingId: String, requestId: String) =
+                    Result.success(emptyList<OnChainVoteRecord>())
+            }
         )
     }
 

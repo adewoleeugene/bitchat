@@ -357,6 +357,14 @@ class ChannelManager(
         return changed
     }
 
+    fun setChannelEndorser(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        val changed = dataManager.setChannelEndorser(channel, actorPeerID, targetPeerID)
+        if (changed) {
+            saveChannelData()
+        }
+        return changed
+    }
+
     fun hasChannelCreator(channel: String): Boolean {
         return dataManager.hasChannelCreator(channel)
     }
@@ -375,6 +383,10 @@ class ChannelManager(
 
     fun getChannelAdmins(channel: String): Set<String> {
         return dataManager.getChannelAdmins(channel)
+    }
+
+    fun getChannelEndorsers(channel: String): Set<String> {
+        return dataManager.getChannelEndorsers(channel)
     }
 
     fun getChannelRoleVersion(channel: String): Long {
@@ -396,6 +408,7 @@ class ChannelManager(
             channel = payload.channelKey,
             ownerPeerID = payload.ownerPeerId,
             adminPeerIDs = payload.adminPeerIds,
+            endorserPeerIDs = payload.endorserPeerIds,
             roleVersion = payload.roleVersion
         )
         if (applied) {
@@ -411,6 +424,7 @@ class ChannelManager(
             channelKey = channel,
             ownerPeerId = owner,
             adminPeerIds = dataManager.getChannelAdmins(channel).toList().sorted(),
+            endorserPeerIds = dataManager.getChannelEndorsers(channel).toList().sorted(),
             roleVersion = normalizedVersion,
             updatedAt = System.currentTimeMillis()
         )

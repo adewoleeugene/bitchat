@@ -9,18 +9,23 @@ data class LendingEscrowAccountEntity(
     val lendingId: String,
     val multisigAddress: String,
     val vaultAddress: String,
-    val provider: String = EscrowProvider.SQUADS,
+    val vaultTokenAccountAddress: String = "",
+    val provider: String = EscrowProvider.APP_TREASURY,
     val custodyState: String = EscrowCustodyState.PROVISIONED,
+    val treasuryContactsJson: String = "[]",
+    val pendingMigrationMultisigAddress: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
 
 object EscrowProvider {
+    const val APP_TREASURY = "APP_TREASURY"
     const val SQUADS = "SQUADS"
 }
 
 object EscrowCustodyState {
     const val PROVISIONED = "PROVISIONED"
     const val ACTIVE = "ACTIVE"
+    const val PENDING_MULTISIG = "PENDING_MULTISIG"
     const val FAILED = "FAILED"
 }

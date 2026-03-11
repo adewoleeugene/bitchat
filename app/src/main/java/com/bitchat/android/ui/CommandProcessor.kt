@@ -5,18 +5,34 @@ import com.bitchat.android.data.local.entities.BorrowerType
 import com.bitchat.android.data.local.entities.TokenGateType
 import com.bitchat.android.data.local.entities.VoteChoice
 import com.bitchat.android.lending.CastLoanVoteRequest
+import com.bitchat.android.lending.CancelLoanRequest
+import com.bitchat.android.lending.ConfigureLendingSquadRequest
 import com.bitchat.android.lending.CreateLoanRequest
 import com.bitchat.android.lending.CreateLendingChannelRequest
 import com.bitchat.android.lending.DEFAULT_CREDIBILITY_THRESHOLD
 import com.bitchat.android.lending.DEFAULT_INTEREST_BPS
+import com.bitchat.android.lending.ForwardLoanRequest
 import com.bitchat.android.lending.LeaveLendingChannelRequest
+import com.bitchat.android.lending.LendingChannelAnnouncement
+import com.bitchat.android.lending.LendingChannelAnnouncementCodec
 import com.bitchat.android.lending.LendingChannelService
 import com.bitchat.android.lending.LendingCredibilityRequest
 import com.bitchat.android.lending.LendingCredibilityService
 import com.bitchat.android.lending.LendingEscrowService
+import com.bitchat.android.lending.LendingLoanRequestMessage
+import com.bitchat.android.lending.LendingLoanRequestMessageCodec
+import com.bitchat.android.lending.LendingLoanRepaymentMessage
+import com.bitchat.android.lending.LendingLoanRepaymentMessageCodec
+import com.bitchat.android.lending.LendingLoanVoteMessage
+import com.bitchat.android.lending.LendingLoanVoteMessageCodec
 import com.bitchat.android.lending.LendingLoanService
+import com.bitchat.android.lending.REQUIRED_LOAN_APPROVAL_COUNT
 import com.bitchat.android.lending.RecordPendingMembershipRequest
 import com.bitchat.android.lending.RecordLoanRepaymentRequest
+import com.bitchat.android.lending.NATIVE_SOL_ASSET
+import com.bitchat.android.lending.countLoanApprovals
+import com.bitchat.android.lending.isNativeSolStakeAsset
+import com.bitchat.android.lending.requiredJoinDebitAmount
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.solana.GateDecision
@@ -27,6 +43,9 @@ import com.bitchat.android.solana.ValidationMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.Date
 
 /**
@@ -65,6 +84,17 @@ class CommandProcessor(
         CommandSuggestion("/w", emptyList(), null, "who's online"),
         CommandSuggestion("/wallet", emptyList(), null, "your wallet")
     )
+
+    private val lendingChannelOnlyCommands = listOf(
+        CommandSuggestion("/lending status", emptyList(), "[#channel|lendingId]", "show lending status"),
+        CommandSuggestion("/lending request", emptyList(), "[#channel|lendingId] <amount> [asset] <days> <purpose>", "request a loan in the current lending channel"),
+        CommandSuggestion("/lending cancel", emptyList(), "<request_id>", "borrower or admin cancels an open loan request"),
+        CommandSuggestion("/lending forward", emptyList(), "<request_id> <#channel|lendingId>", "forward a loan request to another lending channel"),
+        CommandSuggestion("/lending vote", emptyList(), "<request_id> approve", "approve a loan request"),
+        CommandSuggestion("/lending disburse", emptyList(), "<request_id>", "admin disburses an approved loan"),
+        CommandSuggestion("/lending repay", emptyList(), "<request_id> <amount> [asset]", "repay a loan"),
+        CommandSuggestion("/lending leave", emptyList(), "[#channel|lendingId]", "leave lending channel")
+    )
     
     // MARK: - Command Processing
     
@@ -75,7 +105,7 @@ class CommandProcessor(
         val cmd = parts.first().lowercase()
         return when (cmd) {
             "/j", "/join" -> handleJoinCommand(parts, myPeerID, viewModel)
-            "/lending" -> handleLendingCommand(parts, myPeerID, viewModel, meshService)
+            "/lending" -> handleLendingCommand(parts, myPeerID, viewModel, meshService, onSendMessage)
             "/create" -> handleCreateCommand(parts, myPeerID, viewModel, meshService)
             "/channel" -> handleChannelCommand(parts, myPeerID, meshService, viewModel)
             "/gate" -> handleGateCommand(parts, myPeerID, viewModel, meshService)
@@ -293,12 +323,14 @@ class CommandProcessor(
                         addSystemMessage("removed @${getPeerNickname(targetPeerID, meshService, viewModel)} from $channelTag.")
                         null
                     }
-                    "admin", "member" -> {
+                    "admin", "member", "endorser" -> {
                         val subject = parts.getOrNull(3)
                         if (subject.isNullOrBlank()) {
                             val prefill = "/channel member ${parts[2].lowercase()} @"
                             val hint = if (parts[2].lowercase() == "admin") {
                                 "who should become admin?"
+                            } else if (parts[2].lowercase() == "endorser") {
+                                "who should become endorser?"
                             } else {
                                 "who should be demoted to member?"
                             }
@@ -331,15 +363,17 @@ class CommandProcessor(
                             return null
                         }
 
-                        val isPromote = parts[2].lowercase() == "admin"
-                        val changed = if (isPromote) {
+                        val roleAction = parts[2].lowercase()
+                        val changed = if (roleAction == "admin") {
                             channelManager.setChannelAdmin(channelKey, myPeerID, targetPeerID)
+                        } else if (roleAction == "endorser") {
+                            channelManager.setChannelEndorser(channelKey, myPeerID, targetPeerID)
                         } else {
                             channelManager.setChannelMember(channelKey, myPeerID, targetPeerID)
                         }
 
                         if (!changed) {
-                            val action = if (isPromote) "promote" else "demote"
+                            val action = if (roleAction == "member") "demote" else "promote"
                             addSystemMessage("couldn't $action @${getPeerNickname(targetPeerID, meshService, viewModel)} in $channelTag.")
                             return null
                         }
@@ -349,8 +383,10 @@ class CommandProcessor(
                             meshService.broadcastChannelRolePolicy(payload)
                         }
 
-                        if (isPromote) {
+                        if (roleAction == "admin") {
                             addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is now admin in $channelTag.")
+                        } else if (roleAction == "endorser") {
+                            addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is now endorser in $channelTag.")
                         } else {
                             addSystemMessage("@${getPeerNickname(targetPeerID, meshService, viewModel)} is now member in $channelTag.")
                         }
@@ -358,7 +394,7 @@ class CommandProcessor(
                     }
                     else -> CommandResult(
                         prefillText = "/channel member ",
-                        hintText = "usage: /channel member <remove|admin|member> @nickname"
+                        hintText = "usage: /channel member <remove|admin|endorser|member> @nickname"
                     )
                 }
             }
@@ -735,34 +771,53 @@ class CommandProcessor(
         parts: List<String>,
         myPeerID: String,
         viewModel: ChatViewModel?,
-        meshService: BluetoothMeshService
+        meshService: BluetoothMeshService,
+        onSendMessage: (String, List<String>, String?) -> Unit
     ): CommandResult? {
         if (parts.size < 2) {
             return CommandResult(
                 prefillText = "/lending ",
-                hintText = "usage: /lending create|join|status|request|vote|repay|leave ..."
+                hintText = lendingHint()
             )
         }
 
         return when (parts[1].lowercase()) {
-            "create" -> handleLendingCreate(parts, myPeerID, viewModel)
-            "join" -> handleLendingJoin(parts, myPeerID, viewModel)
-            "status" -> handleLendingStatus(parts, viewModel)
-            "request" -> handleLendingRequest(parts, myPeerID, viewModel)
-            "vote" -> handleLendingVote(parts, myPeerID)
-            "repay" -> handleLendingRepay(parts, myPeerID)
-            "leave" -> handleLendingLeave(parts, myPeerID, viewModel)
+            "create" -> handleLendingCreate(parts, myPeerID, viewModel, meshService)
+            "join" -> handleLendingJoin(parts, myPeerID, viewModel, meshService)
+            "status" -> withLendingChannelContext("status") { handleLendingStatus(parts, viewModel) }
+            "squad" -> withLendingChannelContext("squad configuration") { handleLendingSquad(parts, viewModel, meshService) }
+            "request" -> withLendingChannelContext("request") { handleLendingRequest(parts, myPeerID, viewModel, meshService, onSendMessage) }
+            "cancel" -> withLendingChannelContext("cancel") { handleLendingCancel(parts, myPeerID, viewModel, onSendMessage) }
+            "forward" -> withLendingChannelContext("forward") { handleLendingForward(parts, myPeerID, viewModel, onSendMessage) }
+            "vote" -> withLendingChannelContext("vote") { handleLendingVote(parts, myPeerID, viewModel, onSendMessage) }
+            "disburse" -> withLendingChannelContext("disburse") { handleLendingDisburse(parts, myPeerID, viewModel, onSendMessage) }
+            "repay" -> withLendingChannelContext("repay") { handleLendingRepay(parts, myPeerID, onSendMessage) }
+            "leave" -> withLendingChannelContext("leave") { handleLendingLeave(parts, myPeerID, viewModel, meshService) }
             else -> CommandResult(
                 prefillText = "/lending ",
-                hintText = "usage: /lending create|join|status|request|vote|repay|leave ..."
+                hintText = lendingHint()
             )
         }
+    }
+
+    private fun withLendingChannelContext(
+        action: String,
+        block: () -> CommandResult?
+    ): CommandResult? {
+        if (!state.getCurrentChannelIsLendingValue()) {
+            return CommandResult(
+                prefillText = "/lending ",
+                hintText = "switch into a lending channel before using $action"
+            )
+        }
+        return block()
     }
 
     private fun handleLendingCreate(
         parts: List<String>,
         myPeerID: String,
-        viewModel: ChatViewModel?
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
     ): CommandResult? {
         if (parts.size < 5) {
             return CommandResult(
@@ -785,9 +840,9 @@ class CommandProcessor(
 
         val channelName = parts[2]
         val channel = if (channelName.startsWith("#")) channelName else "#$channelName"
-        val stakeAmount = parts[3].toLongOrNull()
         val mint = parts[4]
-        if (stakeAmount == null || stakeAmount <= 0L) {
+        val parsedStake = parseLendingStakeAmount(parts[3], mint)
+        if (parsedStake == null || parsedStake.amountAtomic <= 0L) {
             return CommandResult(
                 prefillText = "/lending create $channel ",
                 hintText = "stake amount must be a positive integer"
@@ -808,15 +863,32 @@ class CommandProcessor(
                     displayName = channel,
                     creatorPeerId = myPeerID,
                     creatorWalletAddress = walletAddress,
-                    requiredStakeAmount = stakeAmount,
-                    stakeTokenMint = mint,
-                    stakeTokenSymbol = mint.take(8).uppercase()
+                    requiredStakeAmount = parsedStake.amountAtomic,
+                    stakeTokenMint = parsedStake.mint,
+                    stakeTokenSymbol = parsedStake.symbol,
+                    stakeTokenDecimals = parsedStake.decimals
                 )
             )
-            escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
-            addSystemMessage(
-                "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }}"
-            )
+            broadcastLendingChannelAnnouncement(lendingService, lendingChannel.lendingId, meshService)
+            if (isNativeSolStakeAsset(lendingChannel.stakeTokenMint, lendingChannel.stakeTokenSymbol) && viewModel != null) {
+                viewModel.requestLendingStakeApproval(lendingChannel.lendingId, myPeerID)
+                addSystemMessage(
+                    "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • review and sign the SOL stake in the drawer"
+                )
+            } else {
+                try {
+                    val membership = escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
+                    broadcastLendingChannelAnnouncement(lendingService, lendingChannel.lendingId, meshService, membership)
+                    viewModel?.switchToChannelWithTimelineContext(lendingChannel.channelKey)
+                    addSystemMessage(
+                        "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }} • creator deposit ${membership.depositStatus.lowercase()}"
+                    )
+                } catch (t: Throwable) {
+                    addSystemMessage(
+                        "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId}, but creator stake failed: ${t.message ?: "stake_transfer_failed"}"
+                    )
+                }
+            }
         }
         return null
     }
@@ -824,7 +896,8 @@ class CommandProcessor(
     private fun handleLendingJoin(
         parts: List<String>,
         myPeerID: String,
-        viewModel: ChatViewModel?
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
     ): CommandResult? {
         if (parts.size < 3) {
             return CommandResult(
@@ -855,18 +928,45 @@ class CommandProcessor(
                 return@launch
             }
 
-            val balance = ws.getCachedBalanceLamports()
+            runCatching { escrowService.repairMembershipState(lendingChannel.lendingId, myPeerID) }
+            val existingMembership = lendingService.getMemberships(lendingChannel.lendingId)
+                .firstOrNull { it.memberPeerId == myPeerID }
+            if (existingMembership?.joinStatus == LendingMemberStatus.ACTIVE &&
+                existingMembership.depositStatus == com.bitchat.android.data.local.entities.EscrowTransferStatus.CONFIRMED
+            ) {
+                addSystemMessage(
+                    "already joined ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: deposit confirmed, status active"
+                )
+                return@launch
+            }
+            if (existingMembership?.depositStatus == com.bitchat.android.data.local.entities.EscrowTransferStatus.PENDING) {
+                addSystemMessage(
+                    "stake pending for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: wait for confirmation before retrying"
+                )
+                return@launch
+            }
+
+            val requiredDebitAmount = requiredJoinDebitAmount(lendingChannel)
+            val balance = ws.refreshBalance().getOrElse {
+                ws.getCachedBalanceLamports()
+            }
+            if (balance < requiredDebitAmount) {
+                addSystemMessage(
+                    "join denied for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: stake_balance_required (balance $balance, required $requiredDebitAmount)"
+                )
+                return@launch
+            }
             val evaluation = credibilityService.evaluateAndPersist(
                 LendingCredibilityRequest(
                     peerId = myPeerID,
-                    stakeAmountRequired = lendingChannel.requiredStakeAmount,
+                    stakeAmountRequired = requiredDebitAmount,
                     observedStakeBalance = balance,
-                    stakeBalanceSatisfied = balance >= lendingChannel.requiredStakeAmount
+                    stakeBalanceSatisfied = balance >= requiredDebitAmount
                 )
             )
 
-            if (!evaluation.passedHardGates || !evaluation.passedThreshold) {
-                val reasons = evaluation.hardGateFailures.ifEmpty { listOf("credibility_below_threshold") }
+            if (!evaluation.passedHardGates) {
+                val reasons = evaluation.hardGateFailures.ifEmpty { listOf("eligibility_failed") }
                 addSystemMessage(
                     "join denied for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: ${reasons.joinToString(", ")} (score ${evaluation.profile.score}/100)"
                 )
@@ -883,10 +983,25 @@ class CommandProcessor(
                     credibilitySnapshotJson = evaluation.profile.snapshotJson
                 )
             )
-            val activated = escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
-            addSystemMessage(
-                "joined ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: score ${evaluation.profile.score}/100, deposit ${activated.depositStatus.lowercase()}, status ${activated.joinStatus.lowercase()}"
-            )
+            if (isNativeSolStakeAsset(lendingChannel.stakeTokenMint, lendingChannel.stakeTokenSymbol) && viewModel != null) {
+                viewModel.requestLendingStakeApproval(lendingChannel.lendingId, myPeerID)
+                addSystemMessage(
+                    "join pending for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: review and sign the SOL stake in the drawer"
+                )
+            } else {
+                try {
+                    val activated = escrowService.activateMembership(lendingChannel.lendingId, myPeerID)
+                    broadcastLendingChannelAnnouncement(lendingService, lendingChannel.lendingId, meshService, activated)
+                    viewModel?.switchToChannelWithTimelineContext(lendingChannel.channelKey)
+                    addSystemMessage(
+                        "joined ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: score ${evaluation.profile.score}/100, deposit ${activated.depositStatus.lowercase()}, status ${activated.joinStatus.lowercase()}"
+                    )
+                } catch (t: Throwable) {
+                    addSystemMessage(
+                        "join failed for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: ${t.message ?: "stake_transfer_failed"}"
+                    )
+                }
+            }
         }
         return null
     }
@@ -919,14 +1034,20 @@ class CommandProcessor(
                 it.joinStatus == LendingMemberStatus.ACTIVE || it.joinStatus == LendingMemberStatus.PENDING
             }
             val pool = status.poolSnapshot
+            val escrowAccount = lendingEscrowService?.getEscrowAccount(status.channel.lendingId)
             addSystemMessage(
                 buildString {
                     append("lending status for ${status.channel.displayName} • id ${status.channel.lendingId}\n")
                     append("stake: ${status.channel.requiredStakeAmount} ${status.channel.stakeTokenSymbol.ifBlank { status.channel.stakeTokenMint.take(8) }}\n")
                     append("members: $activeMembers\n")
-                    append("escrow: ${status.channel.escrowMultisigAddress.ifBlank { "pending-provision" }}\n")
+                    append("treasury: ${escrowAccount?.provider?.lowercase() ?: "app_treasury"}\n")
+                    append("escrow: ${status.channel.escrowMultisigAddress.ifBlank { "app-treasury" }}\n")
+                    append("vault: ${escrowAccount?.vaultAddress?.ifBlank { "pending-provision" } ?: "pending-provision"}\n")
                     append("pool: total ${pool?.totalStakedAmount ?: 0}, available ${pool?.availableLiquidityAmount ?: 0}, reserved ${pool?.reservedAmount ?: 0}, disbursed ${pool?.disbursedAmount ?: 0}\n")
                     append("active loans: ${status.activeLoanCount}\n")
+                    if (status.unreconciledActiveMemberCount > 0) {
+                        append("reconciliation warning: ${status.unreconciledActiveMemberCount} active member(s) missing recorded stake deposit\n")
+                    }
                     append("credibility threshold: $DEFAULT_CREDIBILITY_THRESHOLD/100")
                 }
             )
@@ -934,10 +1055,84 @@ class CommandProcessor(
         return null
     }
 
+    private fun handleLendingSquad(
+        parts: List<String>,
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
+    ): CommandResult? {
+        val lendingService = lendingChannelService
+        if (lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 3) {
+            return CommandResult(
+                prefillText = "/lending squad ",
+                hintText = "usage: /lending squad [#channel|lendingId] <multisig> [vault]"
+            )
+        }
+
+        val identifier: String
+        val multisigAddress: String
+        val vaultAddress: String?
+        if (parts.size == 3) {
+            identifier = state.getCurrentChannelValue()?.let { ChannelKeys.parseChannelName(it) }
+                ?: return CommandResult(
+                    prefillText = "/lending squad ",
+                    hintText = "usage: /lending squad [#channel|lendingId] <multisig> [vault]"
+                )
+            multisigAddress = parts[2]
+            vaultAddress = null
+        } else {
+            val explicitIdentifier = parts[2]
+            val currentChannelName = state.getCurrentChannelValue()?.let { ChannelKeys.parseChannelName(it) }
+            val looksLikeIdentifier = explicitIdentifier.startsWith("#") ||
+                explicitIdentifier.startsWith("mesh:") ||
+                explicitIdentifier.startsWith("geo:") ||
+                explicitIdentifier.equals(currentChannelName, ignoreCase = true)
+            if (looksLikeIdentifier) {
+                identifier = explicitIdentifier
+                multisigAddress = parts[3]
+                vaultAddress = parts.getOrNull(4)
+            } else {
+                identifier = currentChannelName ?: return CommandResult(
+                    prefillText = "/lending squad ",
+                    hintText = "usage: /lending squad [#channel|lendingId] <multisig> [vault]"
+                )
+                multisigAddress = explicitIdentifier
+                vaultAddress = parts.getOrNull(3)
+            }
+        }
+
+        val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
+        commandScope.launch {
+            try {
+                val channel = lendingService.configureSquad(
+                    ConfigureLendingSquadRequest(
+                        identifier = identifier,
+                        preferredChannelKey = preferredChannelKey,
+                        multisigAddress = multisigAddress,
+                        vaultAddress = vaultAddress
+                    )
+                )
+                broadcastLendingChannelAnnouncement(lendingService, channel.lendingId, meshService)
+                val escrowAccount = lendingEscrowService?.getEscrowAccount(channel.lendingId)
+                addSystemMessage(
+                    "configured Squad for ${channel.displayName} • multisig ${channel.escrowMultisigAddress} • vault ${escrowAccount?.vaultAddress ?: "unknown"}"
+                )
+            } catch (error: Exception) {
+                addSystemMessage("couldn't configure Squad: ${friendlyLendingSquadError(error)}")
+            }
+        }
+        return null
+    }
+
     private fun handleLendingRequest(
         parts: List<String>,
         myPeerID: String,
-        viewModel: ChatViewModel?
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService,
+        onSendMessage: (String, List<String>, String?) -> Unit
     ): CommandResult? {
         val loanService = lendingLoanService
         if (loanService == null) {
@@ -945,55 +1140,93 @@ class CommandProcessor(
             return null
         }
 
-        if (parts.size < 6) {
+        if (parts.size < 5) {
             return CommandResult(
                 prefillText = "/lending request ",
-                hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose...>"
+                hintText = lendingRequestHint()
             )
         }
 
-        val isGroup = parts[2].equals("group", ignoreCase = true)
-        val identifierIndex = if (isGroup) 3 else 2
-        val amountIndex = if (isGroup) 4 else 3
-        val daysIndex = if (isGroup) 5 else 4
-        val purposeIndex = if (isGroup) 6 else 5
-        val identifier = parts.getOrNull(identifierIndex) ?: return null
-        val amount = parts.getOrNull(amountIndex)?.toLongOrNull()
-        val durationDays = parts.getOrNull(daysIndex)?.toIntOrNull()
-        val purpose = parts.drop(purposeIndex).joinToString(" ").trim()
-        if (amount == null || amount <= 0L || durationDays == null || durationDays <= 0 || purpose.isBlank()) {
+        val firstArg = parts.getOrNull(2)
+        val hasExplicitIdentifier = firstArg?.toLongOrNull() == null
+        val identifier = if (hasExplicitIdentifier) {
+            firstArg
+        } else {
+            state.getCurrentChannelValue()?.let { ChannelKeys.parseChannelName(it) }
+        }
+        val argsStart = if (hasExplicitIdentifier) 3 else 2
+        if (identifier.isNullOrBlank() || parts.size <= argsStart + 1) {
             return CommandResult(
-                prefillText = "/lending request ${if (isGroup) "group " else ""}",
-                hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose...>"
+                prefillText = "/lending request ",
+                hintText = lendingRequestHint()
             )
         }
 
         val preferredChannelKey = resolvePreferredLendingChannelKey(identifier, viewModel)
         commandScope.launch {
             try {
+                val lendingService = lendingChannelService
+                    ?: throw IllegalStateException("lending_unavailable")
+                val channel = lendingService.getChannelByIdentifier(identifier, preferredChannelKey)
+                    ?: throw IllegalArgumentException("lending_channel_not_found")
+                val parsedAmount = parseLendingLoanAmount(parts.drop(argsStart), channel)
+                    ?: throw IllegalArgumentException("invalid_loan_amount")
+                val durationIndex = argsStart + parsedAmount.consumedTokenCount
+                val durationDays = parts.getOrNull(durationIndex)?.toIntOrNull()
+                    ?: throw IllegalArgumentException("invalid_loan_duration")
+                if (durationDays <= 0) throw IllegalArgumentException("invalid_loan_duration")
+                val endorserTokens = mutableListOf<String>()
+                var cursor = durationIndex + 1
+                while (cursor < parts.size && parts[cursor].startsWith("@")) {
+                    endorserTokens += parts[cursor].removePrefix("@")
+                    cursor++
+                }
+                val purpose = parts.drop(cursor).joinToString(" ").trim()
+                if (purpose.isBlank()) {
+                    throw IllegalArgumentException("missing_loan_purpose")
+                }
+                val endorserPeerIds = endorserTokens.distinct().map { endorserName ->
+                    val peerId = getPeerIDForNickname(endorserName, meshService, viewModel)
+                        ?: throw IllegalArgumentException("endorser_not_found:$endorserName")
+                    val role = channelManager.getChannelRole(channel.channelKey, peerId)
+                    if (role !in setOf(ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.ENDORSER)) {
+                        throw IllegalArgumentException("endorser_role_required:$endorserName")
+                    }
+                    peerId
+                }
                 val loan = loanService.createLoanRequest(
                     CreateLoanRequest(
                         identifier = identifier,
                         preferredChannelKey = preferredChannelKey,
                         requesterPeerId = myPeerID,
-                        borrowerType = if (isGroup) BorrowerType.GROUP else BorrowerType.INDIVIDUAL,
-                        principalAmount = amount,
+                        borrowerType = BorrowerType.INDIVIDUAL,
+                        principalAmount = parsedAmount.amountAtomic,
                         durationDays = durationDays,
                         purpose = purpose,
+                        endorserPeerIds = endorserPeerIds,
                         interestBps = DEFAULT_INTEREST_BPS
                     )
                 )
-                addSystemMessage(
-                    "loan request ${loan.requestId} opened for ${loan.principalAmount} over ${loan.durationDays}d at ${loan.interestBps / 100.0}% interest"
+                publishLendingLoanRequestMessage(
+                    buildLoanRequestMessage(loan, channel, state.getNicknameValue()),
+                    myPeerID = myPeerID,
+                    onSendMessage = onSendMessage,
+                    targetChannelKey = channel.channelKey
                 )
+                viewModel?.updateLendingLoanRequestStatus(loan.requestId, loan.status)
             } catch (error: Exception) {
-                addSystemMessage("couldn't create loan request: ${error.message}")
+                addSystemMessage("couldn't create loan request: ${friendlyLendingRequestError(error)}")
             }
         }
         return null
     }
 
-    private fun handleLendingVote(parts: List<String>, myPeerID: String): CommandResult? {
+    private fun handleLendingVote(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ): CommandResult? {
         val loanService = lendingLoanService
         if (loanService == null) {
             addSystemMessage("lending is not available yet — try again in a moment.")
@@ -1002,17 +1235,16 @@ class CommandProcessor(
         if (parts.size < 4) {
             return CommandResult(
                 prefillText = "/lending vote ",
-                hintText = "usage: /lending vote <request_id> yes|no"
+                hintText = "usage: /lending vote <request_id> approve"
             )
         }
 
         val requestId = parts[2]
         val choice = when (parts[3].lowercase()) {
-            "yes" -> VoteChoice.YES
-            "no" -> VoteChoice.NO
+            "yes", "approve", "upvote" -> VoteChoice.YES
             else -> return CommandResult(
                 prefillText = "/lending vote $requestId ",
-                hintText = "vote must be yes or no"
+                hintText = "vote must be approve"
             )
         }
 
@@ -1025,23 +1257,158 @@ class CommandProcessor(
                         voteChoice = choice
                     )
                 )
-                val yesVotes = result.votes.count { it.voteChoice == VoteChoice.YES }
-                val noVotes = result.votes.count { it.voteChoice == VoteChoice.NO }
+                val approvalCount = countLoanApprovals(result.votes)
                 val suffix = when {
-                    result.approved -> "loan approved and marked disbursed"
-                    result.rejected -> "loan rejected"
-                    result.quorumReached -> "quorum met, decision pending recount"
-                    else -> "vote recorded"
+                    result.request.status == com.bitchat.android.data.local.entities.LoanRequestStatus.DISBURSED ->
+                        "loan approved and disbursed"
+                    result.approved -> "loan approved"
+                    result.quorumReached -> "approval threshold met"
+                    else -> "approval recorded"
                 }
-                addSystemMessage("${result.request.requestId}: yes $yesVotes, no $noVotes • $suffix")
+                viewModel?.updateLendingLoanRequestStatus(result.request.requestId, result.request.status)
+                publishLendingLoanVoteMessage(
+                    LendingLoanVoteMessage(
+                        requestId = result.request.requestId,
+                        lendingId = result.request.lendingId,
+                        voterPeerId = myPeerID,
+                        voterLabel = state.getNicknameValue(),
+                        voteChoice = choice,
+                        yesVotes = approvalCount,
+                        noVotes = 0,
+                        requestStatus = result.request.status,
+                        approvedAt = result.request.approvedAt,
+                        disbursedAt = result.request.disbursedAt,
+                        squadsMultisigAddress = result.request.squadsMultisigAddress,
+                        squadsVaultAddress = result.request.squadsVaultAddress,
+                        squadsProposalAddress = result.request.squadsProposalAddress,
+                        squadsTransactionIndex = result.request.squadsTransactionIndex
+                    ),
+                    onSendMessage = onSendMessage,
+                    targetChannelKey = lendingChannelService
+                        ?.getChannelByLendingId(result.request.lendingId)
+                        ?.channelKey
+                )
+                addSystemMessage(
+                    "${result.request.requestId}: approvals $approvalCount/$REQUIRED_LOAN_APPROVAL_COUNT • $suffix"
+                )
             } catch (error: Exception) {
-                addSystemMessage("couldn't record vote: ${error.message}")
+                addSystemMessage("couldn't record vote: ${friendlyLendingVoteError(error)}")
             }
         }
         return null
     }
 
-    private fun handleLendingRepay(parts: List<String>, myPeerID: String): CommandResult? {
+    private fun handleLendingForward(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ): CommandResult? {
+        val loanService = lendingLoanService
+        val lendingService = lendingChannelService
+        if (loanService == null || lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 4) {
+            return CommandResult(
+                prefillText = "/lending forward ",
+                hintText = "usage: /lending forward <request_id> <#channel|lendingId>"
+            )
+        }
+
+        val requestId = parts[2]
+        val destinationIdentifier = parts[3]
+        val preferredChannelKey = resolvePreferredLendingChannelKey(destinationIdentifier, viewModel)
+        commandScope.launch {
+            try {
+                val forwarded = loanService.forwardLoanRequest(
+                    ForwardLoanRequest(
+                        requestId = requestId,
+                        destinationIdentifier = destinationIdentifier,
+                        preferredChannelKey = preferredChannelKey,
+                        actorPeerId = myPeerID
+                    )
+                )
+                val destinationChannel = lendingService.getChannelByLendingId(forwarded.lendingId)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+                publishLendingLoanRequestMessage(
+                    content = buildLoanRequestMessage(forwarded, destinationChannel),
+                    myPeerID = myPeerID,
+                    onSendMessage = onSendMessage,
+                    targetChannelKey = destinationChannel.channelKey
+                )
+                viewModel?.updateLendingLoanRequestStatus(forwarded.requestId, forwarded.status)
+                addSystemMessage("${forwarded.requestId}: forwarded to ${destinationChannel.displayName}")
+            } catch (error: Exception) {
+                addSystemMessage("couldn't forward loan request: ${friendlyLendingForwardError(error)}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingCancel(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ): CommandResult? {
+        val loanService = lendingLoanService
+        val lendingService = lendingChannelService
+        if (loanService == null || lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 3) {
+            return CommandResult(
+                prefillText = "/lending cancel ",
+                hintText = "usage: /lending cancel <request_id>"
+            )
+        }
+
+        val requestId = parts[2]
+        commandScope.launch {
+            try {
+                val loan = loanService.getLoanRequest(requestId)
+                    ?: throw IllegalArgumentException("loan_request_not_found")
+                val channel = lendingService.getChannelByLendingId(loan.lendingId)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+                val actorIsBorrower = loan.borrowerPeerId == myPeerID
+                val actorIsAdmin = channelManager.isChannelAdmin(channel.channelKey, myPeerID)
+                if (!actorIsBorrower && !actorIsAdmin) {
+                    throw IllegalStateException("borrower_or_admin_only_cancellation")
+                }
+                val result = loanService.cancelLoanRequest(
+                    CancelLoanRequest(
+                        requestId = requestId,
+                        actorPeerId = myPeerID,
+                        actorIsAdmin = actorIsAdmin
+                    )
+                )
+                result.affectedRequests.forEach { cancelled ->
+                    viewModel?.updateLendingLoanRequestStatus(cancelled.requestId, cancelled.status)
+                    lendingService.getChannelByLendingId(cancelled.lendingId)?.let { linkedChannel ->
+                        publishLendingLoanRequestMessage(
+                            content = buildLoanRequestMessage(cancelled, linkedChannel, myPeerID),
+                            myPeerID = myPeerID,
+                            onSendMessage = onSendMessage,
+                            targetChannelKey = linkedChannel.channelKey
+                        )
+                    }
+                }
+                addSystemMessage("${result.request.requestId}: loan request cancelled")
+            } catch (error: Exception) {
+                addSystemMessage("couldn't cancel loan request: ${friendlyLendingCancelError(error)}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingRepay(
+        parts: List<String>,
+        myPeerID: String,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ): CommandResult? {
         val loanService = lendingLoanService
         if (loanService == null) {
             addSystemMessage("lending is not available yet — try again in a moment.")
@@ -1050,33 +1417,105 @@ class CommandProcessor(
         if (parts.size < 4) {
             return CommandResult(
                 prefillText = "/lending repay ",
-                hintText = "usage: /lending repay <request_id> <amount>"
+                hintText = "usage: /lending repay <request_id> <amount> [asset] • e.g. /lending repay abc123 0.25 SOL"
             )
         }
 
         val requestId = parts[2]
-        val amount = parts[3].toLongOrNull()
-        if (amount == null || amount <= 0L) {
-            return CommandResult(
-                prefillText = "/lending repay $requestId ",
-                hintText = "repayment amount must be a positive integer"
-            )
-        }
 
         commandScope.launch {
             try {
+                val request = loanService.getLoanRequest(requestId)
+                    ?: throw IllegalArgumentException("loan_request_not_found")
+                val channel = lendingChannelService?.getChannelByLendingId(request.lendingId)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+                val parsedAmount = parseLendingRepaymentAmount(parts.drop(3), channel)
+                    ?: throw IllegalArgumentException("invalid_repayment_amount")
                 val result = loanService.repayLoan(
                     RecordLoanRepaymentRequest(
                         requestId = requestId,
                         payerPeerId = myPeerID,
-                        amount = amount
+                        amount = parsedAmount.amountAtomic
                     )
                 )
+                publishLendingLoanRepaymentMessage(
+                    LendingLoanRepaymentMessage(
+                        repaymentId = result.repayment.repaymentId,
+                        requestId = result.updatedRequest.requestId,
+                        lendingId = result.updatedRequest.lendingId,
+                        payerPeerId = myPeerID,
+                        payerLabel = state.getNicknameValue(),
+                        amount = result.repayment.amount,
+                        txSignature = result.repayment.txSignature,
+                        txStatus = result.repayment.txStatus,
+                        totalRepaidAmount = result.totalRepaidAmount,
+                        remainingBalance = result.remainingBalance,
+                        requestStatus = result.updatedRequest.status,
+                        paidAt = result.repayment.paidAt
+                    ),
+                    onSendMessage = onSendMessage,
+                    targetChannelKey = channel.channelKey
+                )
                 addSystemMessage(
-                    "repayment recorded for ${result.updatedRequest.requestId}: paid ${result.repayment.amount}, remaining ${result.remainingBalance}, status ${result.updatedRequest.status.lowercase()}"
+                    "repayment recorded for ${result.updatedRequest.requestId}: paid ${formatDisplayAmount(result.repayment.amount, channel.stakeTokenDecimals)} ${repaymentAssetSymbol(channel)}, remaining ${formatDisplayAmount(result.remainingBalance, channel.stakeTokenDecimals)} ${repaymentAssetSymbol(channel)}, status ${result.updatedRequest.status.lowercase()}"
                 )
             } catch (error: Exception) {
-                addSystemMessage("couldn't record repayment: ${error.message}")
+                addSystemMessage("couldn't record repayment: ${friendlyLendingRepaymentError(error, requestId)}")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingDisburse(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ): CommandResult? {
+        val loanService = lendingLoanService
+        val lendingService = lendingChannelService
+        if (loanService == null || lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 3) {
+            return CommandResult(
+                prefillText = "/lending disburse ",
+                hintText = "usage: /lending disburse <request_id>"
+            )
+        }
+
+        val requestId = parts[2]
+        commandScope.launch {
+            try {
+                val loan = loanService.getLoanRequest(requestId)
+                    ?: throw IllegalArgumentException("loan_request_not_found")
+                val channel = lendingService.getChannelByLendingId(loan.lendingId)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+                if (!channelManager.isChannelAdmin(channel.channelKey, myPeerID)) {
+                    throw IllegalStateException("admin_only_disbursement")
+                }
+                val updated = loanService.disburseApprovedLoan(requestId)
+                val linkedRequests = loanService.getLinkedLoanRequests(updated.requestId)
+                linkedRequests.forEach { linked ->
+                    viewModel?.updateLendingLoanRequestStatus(linked.requestId, linked.status)
+                    lendingService.getChannelByLendingId(linked.lendingId)?.let { linkedChannel ->
+                        publishLendingLoanRequestMessage(
+                            content = buildLoanRequestMessage(linked, linkedChannel, myPeerID),
+                            myPeerID = myPeerID,
+                            onSendMessage = onSendMessage,
+                            targetChannelKey = linkedChannel.channelKey
+                        )
+                    }
+                }
+                val statusLabel = when (updated.status) {
+                    com.bitchat.android.data.local.entities.LoanRequestStatus.DISBURSED -> "loan disbursed"
+                    else -> "disbursement queued"
+                }
+                viewModel?.updateLendingLoanRequestStatus(updated.requestId, updated.status)
+                addSystemMessage("${updated.requestId}: $statusLabel")
+            } catch (error: Exception) {
+                addSystemMessage("couldn't disburse loan: ${friendlyLendingDisbursementError(error)}")
             }
         }
         return null
@@ -1085,10 +1524,12 @@ class CommandProcessor(
     private fun handleLendingLeave(
         parts: List<String>,
         myPeerID: String,
-        viewModel: ChatViewModel?
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
     ): CommandResult? {
         val loanService = lendingLoanService
-        if (loanService == null) {
+        val lendingService = lendingChannelService
+        if (loanService == null || lendingService == null) {
             addSystemMessage("lending is not available yet — try again in a moment.")
             return null
         }
@@ -1111,6 +1552,7 @@ class CommandProcessor(
                         memberPeerId = myPeerID
                     )
                 )
+                broadcastLendingChannelAnnouncement(lendingService, result.membership.lendingId, meshService)
                 addSystemMessage(
                     "left lending channel ${result.membership.lendingId}: stake ${result.membership.depositStatus.lowercase()}, membership ${result.membership.joinStatus.lowercase()}"
                 )
@@ -1125,6 +1567,40 @@ class CommandProcessor(
         if (!identifier.startsWith("#")) return null
         val timeline = viewModel?.selectedLocationChannel?.value
         return ChannelKeys.create(timeline, identifier)
+    }
+
+    private suspend fun broadcastLendingChannelAnnouncement(
+        lendingService: LendingChannelService,
+        lendingId: String,
+        meshService: BluetoothMeshService,
+        confirmedMembership: com.bitchat.android.data.local.entities.LendingMembershipEntity? = null
+    ) {
+        val channel = lendingService.getChannelByLendingId(lendingId) ?: return
+        val totalStakedAmount = lendingService.getPoolSnapshot(lendingId)?.totalStakedAmount ?: 0L
+        val escrowAccount = lendingEscrowService?.getEscrowAccount(lendingId)
+        val announcement = LendingChannelAnnouncement(
+            lendingId = channel.lendingId,
+            channelKey = channel.channelKey,
+            displayName = channel.displayName,
+            creatorPeerId = channel.creatorPeerId,
+            creatorWalletAddress = channel.creatorWalletAddress,
+            requiredStakeAmount = channel.requiredStakeAmount,
+            stakeTokenMint = channel.stakeTokenMint,
+            stakeTokenSymbol = channel.stakeTokenSymbol,
+            stakeTokenDecimals = channel.stakeTokenDecimals,
+            treasuryMultisigAddress = escrowAccount?.multisigAddress,
+            treasuryOwnerAddress = escrowAccount?.vaultAddress,
+            treasuryTokenAccountAddress = escrowAccount?.vaultTokenAccountAddress,
+            custodyProvider = escrowAccount?.provider,
+            custodyState = escrowAccount?.custodyState,
+            totalStakedAmount = totalStakedAmount,
+            confirmedMemberPeerId = confirmedMembership?.memberPeerId,
+            confirmedMemberWalletAddress = confirmedMembership?.walletAddress,
+            confirmedMemberStakeAmount = confirmedMembership?.stakeAmount
+        )
+        meshService.sendMessage(
+            "${channel.displayName} ${LendingChannelAnnouncementCodec.encode(announcement)}"
+        )
     }
 
     private fun handleCreateCommand(parts: List<String>, myPeerID: String, viewModel: ChatViewModel?, meshService: BluetoothMeshService): CommandResult? {
@@ -1625,6 +2101,90 @@ class CommandProcessor(
         }
     }
 
+    private fun publishLendingLoanRequestMessage(
+        content: LendingLoanRequestMessage,
+        myPeerID: String,
+        onSendMessage: (String, List<String>, String?) -> Unit,
+        targetChannelKey: String? = null
+    ) {
+        val encoded = LendingLoanRequestMessageCodec.encode(content)
+        val currentChannel = targetChannelKey ?: state.getCurrentChannelValue()
+        val message = BitchatMessage(
+            sender = state.getNicknameValue() ?: myPeerID,
+            content = encoded,
+            timestamp = Date(),
+            isRelay = false,
+            senderPeerID = myPeerID,
+            channel = currentChannel
+        )
+        if (!currentChannel.isNullOrBlank()) {
+            channelManager.addChannelMessage(currentChannel, message, myPeerID)
+            val wireContent = "${ChannelKeys.parseChannelName(currentChannel)} $encoded"
+            onSendMessage(wireContent, emptyList(), currentChannel)
+        } else {
+            messageManager.addMessage(message)
+            onSendMessage(encoded, emptyList(), null)
+        }
+    }
+
+    private fun buildLoanRequestMessage(
+        loan: com.bitchat.android.data.local.entities.LoanRequestEntity,
+        channel: com.bitchat.android.data.local.entities.LendingChannelEntity,
+        fallbackBorrowerLabel: String? = null
+    ): LendingLoanRequestMessage {
+        return LendingLoanRequestMessage(
+            requestId = loan.requestId,
+            lendingId = loan.lendingId,
+            channelDisplayName = channel.displayName,
+            principalAmount = loan.principalAmount,
+            assetSymbol = channel.stakeTokenSymbol.ifBlank { channel.stakeTokenMint.take(8).uppercase() },
+            assetDecimals = channel.stakeTokenDecimals,
+            durationDays = loan.durationDays,
+            interestBps = loan.interestBps,
+            purpose = loan.purpose,
+            requestedAt = loan.requestedAt,
+            borrowerPeerId = loan.borrowerPeerId,
+            borrowerWalletAddress = loan.borrowerWalletAddress,
+            borrowerLabel = fallbackBorrowerLabel,
+            status = loan.status,
+            parentRequestId = loan.parentRequestId,
+            originLendingId = loan.originLendingId,
+            forwardedFromRequestId = loan.forwardedFromRequestId,
+            fundingLendingId = loan.fundingLendingId,
+            requestKind = loan.requestKind
+        )
+    }
+
+    private fun publishLendingLoanVoteMessage(
+        content: LendingLoanVoteMessage,
+        onSendMessage: (String, List<String>, String?) -> Unit,
+        targetChannelKey: String? = null
+    ) {
+        val currentChannel = targetChannelKey ?: state.getCurrentChannelValue()
+        val encoded = LendingLoanVoteMessageCodec.encode(content)
+        if (!currentChannel.isNullOrBlank()) {
+            val wireContent = "${ChannelKeys.parseChannelName(currentChannel)} $encoded"
+            onSendMessage(wireContent, emptyList(), currentChannel)
+        } else {
+            onSendMessage(encoded, emptyList(), null)
+        }
+    }
+
+    private fun publishLendingLoanRepaymentMessage(
+        content: LendingLoanRepaymentMessage,
+        onSendMessage: (String, List<String>, String?) -> Unit,
+        targetChannelKey: String? = null
+    ) {
+        val currentChannel = targetChannelKey ?: state.getCurrentChannelValue()
+        val encoded = LendingLoanRepaymentMessageCodec.encode(content)
+        if (!currentChannel.isNullOrBlank()) {
+            val wireContent = "${ChannelKeys.parseChannelName(currentChannel)} $encoded"
+            onSendMessage(wireContent, emptyList(), currentChannel)
+        } else {
+            onSendMessage(encoded, emptyList(), null)
+        }
+    }
+
     private fun handleChannelsCommand() {
         val allChannels = channelManager.getJoinedChannelsList()
         val channelList = if (allChannels.isEmpty()) {
@@ -1686,11 +2246,6 @@ class CommandProcessor(
             CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
             CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint>", "create lending channel"),
             CommandSuggestion("/lending join", emptyList(), "[#channel|lendingId]", "join lending channel"),
-            CommandSuggestion("/lending status", emptyList(), "[#channel|lendingId]", "show lending status"),
-            CommandSuggestion("/lending request", emptyList(), "[group] [#channel|lendingId] <amount> <days> <purpose>", "request a loan"),
-            CommandSuggestion("/lending vote", emptyList(), "<request_id> yes|no", "vote on a loan request"),
-            CommandSuggestion("/lending repay", emptyList(), "<request_id> <amount>", "repay a loan"),
-            CommandSuggestion("/lending leave", emptyList(), "[#channel|lendingId]", "leave lending channel"),
             CommandSuggestion("/users", emptyList(), "[#channel]", "list tracked users in channel"),
             CommandSuggestion("/gm", emptyList(), "@user", "send a gm"),
             CommandSuggestion("/tip", emptyList(), "@user <amount>", "send SOL"),
@@ -1700,6 +2255,10 @@ class CommandProcessor(
             CommandSuggestion("/channel users", emptyList(), "[#channel]", "list tracked users in channel"),
             CommandSuggestion("/channel gate show", emptyList(), "[#channel]", "show token gate settings")
         )
+
+        if (state.getCurrentChannelIsLendingValue()) {
+            commands.addAll(lendingChannelOnlyCommands)
+        }
 
         val isAdmin = channelManager.isChannelAdmin(currentChannel, myPeerID)
         val isOwner = channelManager.isChannelCreator(currentChannel, myPeerID)
@@ -1752,13 +2311,16 @@ class CommandProcessor(
         // Pre-fill with contextual hint based on what the command expects
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
-            "/lending" -> CommandResult(prefillText = "/lending ", hintText = "create | join | status | request | vote | repay | leave")
+            "/lending" -> CommandResult(prefillText = "/lending ", hintText = lendingHint())
             "/lending create" -> CommandResult(prefillText = "/lending create #", hintText = "usage: /lending create #channel <stake_amount> <mint>")
             "/lending join" -> CommandResult(prefillText = "/lending join ", hintText = "use #channel or lendingId")
             "/lending status" -> CommandResult(prefillText = "/lending status ", hintText = "use #channel or lendingId")
-            "/lending request" -> CommandResult(prefillText = "/lending request ", hintText = "usage: /lending request [group] [#channel|lendingId] <amount> <days> <purpose>")
-            "/lending vote" -> CommandResult(prefillText = "/lending vote ", hintText = "usage: /lending vote <request_id> yes|no")
-            "/lending repay" -> CommandResult(prefillText = "/lending repay ", hintText = "usage: /lending repay <request_id> <amount>")
+            "/lending request" -> CommandResult(prefillText = "/lending request ", hintText = lendingRequestHint())
+            "/lending cancel" -> CommandResult(prefillText = "/lending cancel ", hintText = "usage: /lending cancel <request_id>")
+            "/lending forward" -> CommandResult(prefillText = "/lending forward ", hintText = "usage: /lending forward <request_id> <#channel|lendingId>")
+            "/lending vote" -> CommandResult(prefillText = "/lending vote ", hintText = "usage: /lending vote <request_id> approve")
+            "/lending disburse" -> CommandResult(prefillText = "/lending disburse ", hintText = "usage: /lending disburse <request_id>")
+            "/lending repay" -> CommandResult(prefillText = "/lending repay ", hintText = "usage: /lending repay <request_id> <amount> [asset] • e.g. /lending repay abc123 0.25 SOL")
             "/lending leave" -> CommandResult(prefillText = "/lending leave ", hintText = "use #channel or lendingId")
             "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
@@ -1788,6 +2350,205 @@ class CommandProcessor(
             "/gm" -> CommandResult(prefillText = "/gm @", hintText = "who gets your gm?")
             "/hug" -> CommandResult(prefillText = "/hug @", hintText = "who do you want to hug?")
             else -> CommandResult(prefillText = "${suggestion.command} ")
+        }
+    }
+
+    private fun lendingHint(): String {
+        return if (state.getCurrentChannelIsLendingValue()) {
+            "create | join | status | request | forward | vote | disburse | repay | leave"
+        } else {
+            "create | join"
+        }
+    }
+
+    private fun lendingRequestHint(): String {
+        val example = currentLendingAssetExample()
+        return "usage: /lending request <amount> [asset] <days> <purpose...> • e.g. /lending request $example 7 inventory"
+    }
+
+    private fun currentLendingAssetExample(): String {
+        if (!state.getCurrentChannelIsLendingValue()) {
+            return "1 SOL"
+        }
+        val channelKey = state.getCurrentChannelValue() ?: return "1 SOL"
+        val channel = runCatching {
+            runBlocking {
+                lendingChannelService?.getChannelByChannelKey(ChannelKeys.normalize(channelKey))
+            }
+        }.getOrNull() ?: return "1 SOL"
+        val symbol = channel.stakeTokenSymbol.ifBlank {
+            if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
+                NATIVE_SOL_ASSET
+            } else {
+                channel.stakeTokenMint.take(8).uppercase()
+            }
+        }
+        val amount = if (channel.stakeTokenDecimals > 0) "1" else "1"
+        return "$amount $symbol"
+    }
+
+    private data class ParsedLendingStake(
+        val amountAtomic: Long,
+        val mint: String,
+        val symbol: String,
+        val decimals: Int
+    )
+
+    private data class ParsedLendingLoanAmount(
+        val amountAtomic: Long,
+        val consumedTokenCount: Int
+    )
+
+    private fun parseLendingStakeAmount(rawAmount: String, rawMint: String): ParsedLendingStake? {
+        if (isNativeSolStakeAsset(rawMint, rawMint)) {
+            val amountSol = rawAmount.toDoubleOrNull() ?: return null
+            val lamports = (amountSol * 1_000_000_000.0).toLong()
+            if (lamports <= 0L) return null
+            return ParsedLendingStake(
+                amountAtomic = lamports,
+                mint = NATIVE_SOL_ASSET,
+                symbol = NATIVE_SOL_ASSET,
+                decimals = 9
+            )
+        }
+
+        val amountAtomic = rawAmount.toLongOrNull() ?: return null
+        if (amountAtomic <= 0L) return null
+        return ParsedLendingStake(
+            amountAtomic = amountAtomic,
+            mint = rawMint,
+            symbol = rawMint.take(8).uppercase(),
+            decimals = 6
+        )
+    }
+
+    private fun parseLendingLoanAmount(
+        args: List<String>,
+        channel: com.bitchat.android.data.local.entities.LendingChannelEntity
+    ): ParsedLendingLoanAmount? {
+        val rawAmount = args.getOrNull(0) ?: return null
+        val explicitAsset = args.getOrNull(1)
+        val assetSymbol = channel.stakeTokenSymbol.ifBlank {
+            if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) NATIVE_SOL_ASSET
+            else channel.stakeTokenMint.take(8).uppercase()
+        }
+        val symbolMatches = explicitAsset?.let {
+            it.equals(assetSymbol, ignoreCase = true) ||
+                it.equals(channel.stakeTokenMint, ignoreCase = true) ||
+                (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol) && it.equals(NATIVE_SOL_ASSET, ignoreCase = true))
+        } == true
+        val amountAtomic = parseDisplayAmountToAtomic(rawAmount, channel.stakeTokenDecimals) ?: return null
+        return ParsedLendingLoanAmount(
+            amountAtomic = amountAtomic,
+            consumedTokenCount = if (symbolMatches) 2 else 1
+        )
+    }
+
+    private fun parseDisplayAmountToAtomic(rawAmount: String, decimals: Int): Long? {
+        val normalized = rawAmount.trim().replace(",", "")
+        if (normalized.isBlank()) return null
+        val amount = normalized.toBigDecimalOrNull() ?: return null
+        if (amount <= BigDecimal.ZERO) return null
+        val scaled = amount.movePointRight(decimals)
+        if (scaled.stripTrailingZeros().scale() > 0) return null
+        return runCatching { scaled.setScale(0, RoundingMode.UNNECESSARY).longValueExact() }.getOrNull()
+    }
+
+    private fun parseLendingRepaymentAmount(
+        args: List<String>,
+        channel: com.bitchat.android.data.local.entities.LendingChannelEntity
+    ): ParsedLendingLoanAmount? {
+        return parseLendingLoanAmount(args, channel)
+    }
+
+    private fun repaymentAssetSymbol(
+        channel: com.bitchat.android.data.local.entities.LendingChannelEntity
+    ): String {
+        return channel.stakeTokenSymbol.ifBlank {
+            if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
+                NATIVE_SOL_ASSET
+            } else {
+                channel.stakeTokenMint.take(8).uppercase()
+            }
+        }
+    }
+
+    private fun formatDisplayAmount(amountAtomic: Long, decimals: Int): String {
+        return BigDecimal.valueOf(amountAtomic)
+            .movePointLeft(decimals)
+            .stripTrailingZeros()
+            .toPlainString()
+    }
+
+    private fun friendlyLendingRequestError(error: Exception): String {
+        return when (error.message) {
+            "invalid_loan_amount" -> "amount must match the channel asset, e.g. 1 SOL or 25.5"
+            "invalid_loan_duration" -> "days must be a whole number greater than 0"
+            "missing_loan_purpose" -> "add a short purpose after the amount and days"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingForwardError(error: Exception): String {
+        return when (error.message) {
+            "loan_request_not_found" -> "loan request not found"
+            "loan_request_not_forwardable" -> "only pending or approved loans can be forwarded"
+            "admin_only_loan_forward" -> "only a channel admin can forward this loan"
+            "cannot_forward_to_same_channel" -> "choose a different lending channel"
+            "membership_not_found", "membership_not_active" -> "borrower needs an active membership in the destination lending channel"
+            "loan_request_already_funded_elsewhere" -> "this loan family has already been funded by another channel"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingVoteError(error: Exception): String {
+        return when (error.message) {
+            "loan_request_not_found" -> "loan request was not found on this device yet"
+            "loan_request_not_open_for_voting" -> "loan is no longer open for voting"
+            "borrower_cannot_vote_own_request" -> "borrower cannot approve their own loan request"
+            "membership_not_found", "membership_not_active" -> "you need an active lending membership to approve this loan"
+            "vote_must_be_upvote" -> "vote must be approve"
+            "vote_must_be_yes_or_no" -> "vote must be approve"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingCancelError(error: Exception): String {
+        return when (error.message) {
+            "loan_request_not_found" -> "loan request not found"
+            "loan_request_not_cancellable" -> "only open, undisbursed loan requests can be cancelled"
+            "loan_request_already_funded_elsewhere" -> "this loan family has already been funded and cannot be cancelled"
+            "borrower_or_admin_only_cancellation" -> "only the borrower or a channel admin can cancel this loan request"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingSquadError(error: Exception): String {
+        return when (error.message) {
+            "lending_channel_not_found" -> "lending channel not found"
+            "squad_multisig_required" -> "enter a Squad multisig address"
+            "squad_threshold_must_be_2" -> "the Squad threshold must be set to 2 approvals"
+            "squad_member_count_must_be_at_least_3" -> "the Squad must have at least 3 members"
+            "account_not_found" -> "the Squad multisig account was not found on chain"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingRepaymentError(error: Exception, requestId: String): String {
+        return when (error.message) {
+            "invalid_repayment_amount" -> "amount must match the loan asset, e.g. /lending repay $requestId 0.25 SOL"
+            "loan_request_not_found" -> "loan request $requestId was not found"
+            else -> error.message ?: "unknown error"
+        }
+    }
+
+    private fun friendlyLendingDisbursementError(error: Exception): String {
+        return when (error.message) {
+            "loan_request_not_found" -> "loan request not found"
+            "loan_request_not_ready_for_disbursement" -> "loan must be approved before disbursement"
+            "admin_only_disbursement" -> "only a channel admin can disburse an approved loan"
+            "loan_request_already_funded_elsewhere" -> "another linked channel already funded this loan"
+            else -> error.message ?: "unknown error"
         }
     }
     

@@ -8,7 +8,12 @@ import com.bitchat.android.lending.LendingEscrowService
 import com.bitchat.android.lending.LendingIdGenerator
 import com.bitchat.android.lending.LendingLifecycleServiceImpl
 import com.bitchat.android.lending.LendingLoanService
+import com.bitchat.android.lending.SquadsService
 import com.bitchat.android.lending.SquadsLendingEscrowServiceImpl
+import com.bitchat.android.lending.SquadsServiceImpl
+import com.bitchat.android.lending.onchain.LendingOnChainService
+import com.bitchat.android.lending.onchain.LendingOnChainServiceImpl
+import com.bitchat.android.lending.onchain.LendingProgramConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -18,6 +23,10 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object LendingModule {
+
+    @Provides
+    @Singleton
+    fun provideLendingProgramConfig(): LendingProgramConfig = LendingProgramConfig()
 
     @Provides
     @Singleton
@@ -46,4 +55,16 @@ object LendingModule {
     fun provideLendingEscrowService(
         impl: SquadsLendingEscrowServiceImpl
     ): LendingEscrowService = impl
+
+    @Provides
+    @Singleton
+    fun provideSquadsService(
+        impl: SquadsServiceImpl
+    ): SquadsService = impl
+
+    @Provides
+    @Singleton
+    fun provideLendingOnChainService(
+        impl: LendingOnChainServiceImpl
+    ): LendingOnChainService = impl
 }

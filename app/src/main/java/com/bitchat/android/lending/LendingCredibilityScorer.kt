@@ -41,8 +41,6 @@ class LendingCredibilityScorer {
 
         if (!input.walletLinked) hardGateFailures += "wallet_link_required"
         if (!input.stakeBalanceSatisfied) hardGateFailures += "stake_balance_required"
-        if (input.firstSeenAt <= 0L || accountAgeMs < MIN_AGE_MS) hardGateFailures += "minimum_age_required"
-        if (input.totalActions < 20) hardGateFailures += "minimum_activity_required"
 
         val usageAgePoints = computeUsageAgePoints(accountAgeMs)
         val participationPoints = computeParticipationPoints(input.totalActions)

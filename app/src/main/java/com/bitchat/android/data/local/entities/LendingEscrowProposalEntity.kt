@@ -32,6 +32,7 @@ data class LendingEscrowProposalEntity(
 )
 
 object EscrowProposalType {
+    const val STAKE_DEPOSIT = "STAKE_DEPOSIT"
     const val LOAN_DISBURSEMENT = "LOAN_DISBURSEMENT"
     const val STAKE_RELEASE = "STAKE_RELEASE"
 }

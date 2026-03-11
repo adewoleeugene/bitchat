@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import com.bitchat.android.data.local.entities.LendingChannelEntity
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.ui.media.FullScreenImageViewer
 import com.bitchat.android.ui.theme.BitchatColors
@@ -84,10 +85,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var isScrolledUp by remember { mutableStateOf(false) }
     var showWalletScreen by remember { mutableStateOf(false) }
     var showNotificationsSheet by remember { mutableStateOf(false) }
+    var forwardRequestId by remember { mutableStateOf<String?>(null) }
+    var forwardSourceLendingId by remember { mutableStateOf<String?>(null) }
     var feedJumpTargetPostId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val selectedTab by viewModel.selectedTab.observeAsState("chat")
     val showNewPostComposer by viewModel.showNewPostComposer.observeAsState(false)
+    val pendingLendingStakeApproval by viewModel.pendingLendingStakeApproval.observeAsState()
+    val isSubmittingLendingStakeApproval by viewModel.isSubmittingLendingStakeApproval.observeAsState(false)
+    val pendingLendingLeaveApproval by viewModel.pendingLendingLeaveApproval.observeAsState()
+    val isSubmittingLendingLeaveApproval by viewModel.isSubmittingLendingLeaveApproval.observeAsState(false)
+    val lendingLoanRequestStatuses by viewModel.lendingLoanRequestStatuses.observeAsState(emptyMap())
+    val availableLendingChannels by viewModel.availableLendingChannels.observeAsState(emptyList())
 
     // Show password dialog when needed
     LaunchedEffect(showPasswordPrompt) {
@@ -168,6 +177,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     messages = displayMessages,
                     currentUserNickname = nickname,
                     meshService = viewModel.meshService,
+                    lendingLoanRequestStatuses = lendingLoanRequestStatuses,
+                    currentUserPeerId = viewModel.meshService.myPeerID,
+                    canDisburseLoans = viewModel.canManageFeedPins(),
                     modifier = Modifier.weight(1f),
                     forceScrollToBottom = forceScrollToBottom,
                     onScrolledUpChanged = { isUp -> isScrolledUp = isUp },
@@ -203,6 +215,23 @@ fun ChatScreen(viewModel: ChatViewModel) {
                         viewerImagePaths = allImagePaths
                         initialViewerIndex = initialIndex
                         showFullScreenImageViewer = true
+                    },
+                    onLoanVoteAction = viewModel::sendLendingVoteAction,
+                    onLoanCancelAction = viewModel::sendLendingCancelAction,
+                    onLoanForwardAction = { requestId, lendingId ->
+                        forwardRequestId = requestId
+                        forwardSourceLendingId = lendingId
+                    },
+                    onLoanDisburseAction = viewModel::sendLendingDisburseAction,
+                    onEnsureLoanRequestStatus = viewModel::ensureLendingLoanRequestStatusLoaded,
+                    onLoanRepayPrefill = { requestId, assetSymbol ->
+                        val text = "/lending repay $requestId "
+                        val assetExample = assetSymbol.ifBlank { "SOL" }
+                        messageText = TextFieldValue(
+                            text = text,
+                            selection = TextRange(text.length)
+                        )
+                        commandHint = "enter amount, e.g. /lending repay $requestId 0.25 $assetExample"
                     }
                 )
                 // Input area - stays at bottom
@@ -451,6 +480,64 @@ fun ChatScreen(viewModel: ChatViewModel) {
         )
     }
 
+    pendingLendingStakeApproval?.let { approval ->
+        LendingStakeApprovalSheet(
+            approval = approval,
+            isSubmitting = isSubmittingLendingStakeApproval,
+            onDismiss = { viewModel.dismissLendingStakeApproval() },
+            onConfirm = { viewModel.confirmLendingStakeApproval() }
+        )
+    }
+    pendingLendingLeaveApproval?.let { approval ->
+        LendingLeaveApprovalSheet(
+            approval = approval,
+            isSubmitting = isSubmittingLendingLeaveApproval,
+            onDismiss = { viewModel.dismissLendingLeaveApproval() },
+            onConfirm = { viewModel.confirmLendingLeaveApproval() }
+        )
+    }
+
+    forwardRequestId?.let { requestId ->
+        val forwardTargets = availableLendingChannels.filter { it.lendingId != forwardSourceLendingId }
+        AlertDialog(
+            onDismissRequest = {
+                forwardRequestId = null
+                forwardSourceLendingId = null
+            },
+            title = { Text("Forward Request") },
+            text = {
+                if (forwardTargets.isEmpty()) {
+                    Text("No other lending channels are available.")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        forwardTargets.forEach { channel: LendingChannelEntity ->
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.sendLendingForwardAction(requestId, channel.channelKey)
+                                    forwardRequestId = null
+                                    forwardSourceLendingId = null
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(channel.displayName.ifBlank { ChannelKeys.parseChannelName(channel.channelKey) })
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        forwardRequestId = null
+                        forwardSourceLendingId = null
+                    }
+                ) {
+                    Text(if (forwardTargets.isEmpty()) "Close" else "Cancel")
+                }
+            }
+        )
+    }
+
     if (showNotificationsSheet) {
         InAppNotificationsSheet(
             viewModel = viewModel,
@@ -659,6 +746,214 @@ private fun InAppNotificationsSheet(
             }
             Spacer(modifier = Modifier.height(12.dp))
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LendingStakeApprovalSheet(
+    approval: com.bitchat.android.lending.LendingStakeApprovalRequest,
+    isSubmitting: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BitchatColors.BackgroundLayer1
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = approval.actionLabel,
+                style = MaterialTheme.typography.titleMedium,
+                color = BitchatColors.TextPrimary
+            )
+            Text(
+                text = "This signs and submits a real devnet transaction from your in-app wallet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = BitchatColors.TextSecondary
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = BitchatShapes.Card,
+                color = BitchatColors.InputFieldBg,
+                border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LendingStakeDetailRow("Channel", approval.channelDisplayName)
+                    LendingStakeDetailRow("Asset", approval.assetDescriptor)
+                    LendingStakeDetailRow("Amount", "${formatStakeApprovalAmount(approval.amountAtomic, approval.decimals)} ${approval.symbol}")
+                    LendingStakeDetailRow("To treasury", shortKey(approval.treasuryAddress))
+                    LendingStakeDetailRow("Network", "Solana Devnet")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    enabled = !isSubmitting,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = onConfirm,
+                    enabled = !isSubmitting,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BitchatColors.ButtonPrimaryBg,
+                        contentColor = Color.White
+                    )
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(if (isSubmitting) "Signing..." else "Sign and Send")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LendingLeaveApprovalSheet(
+    approval: com.bitchat.android.lending.LendingLeaveApprovalRequest,
+    isSubmitting: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BitchatColors.BackgroundLayer1
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Confirm stake refund",
+                style = MaterialTheme.typography.titleMedium,
+                color = BitchatColors.TextPrimary
+            )
+            Text(
+                text = "Review and confirm the refund transaction from the channel treasury to your wallet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = BitchatColors.TextSecondary
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = BitchatShapes.Card,
+                color = BitchatColors.InputFieldBg,
+                border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LendingStakeDetailRow("Channel", approval.channelDisplayName)
+                    LendingStakeDetailRow("Asset", approval.assetDescriptor)
+                    LendingStakeDetailRow("Refund", "${formatStakeApprovalAmount(approval.amountAtomic, approval.decimals)} ${approval.symbol}")
+                    LendingStakeDetailRow("From treasury", shortKey(approval.treasuryAddress))
+                    LendingStakeDetailRow("To wallet", shortKey(approval.recipientAddress))
+                    LendingStakeDetailRow("Network", "Solana Devnet")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    enabled = !isSubmitting,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = onConfirm,
+                    enabled = !isSubmitting,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BitchatColors.ButtonPrimaryBg,
+                        contentColor = Color.White
+                    )
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(if (isSubmitting) "Confirming..." else "Confirm Refund")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun LendingStakeDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = BitchatColors.TextTertiary
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = BitchatColors.TextPrimary
+        )
+    }
+}
+
+private fun formatStakeApprovalAmount(amountAtomic: Long, decimals: Int): String {
+    if (decimals <= 0) return amountAtomic.toString()
+    val divisor = Math.pow(10.0, decimals.toDouble())
+    val normalized = amountAtomic.toDouble() / divisor
+    val formatted = if (decimals >= 6) {
+        "%,.4f".format(normalized)
+    } else {
+        "%,.2f".format(normalized)
+    }
+    return formatted.trimEnd('0').trimEnd('.')
+}
+
+private fun shortKey(value: String): String {
+    return if (value.length > 16) {
+        "${value.take(8)}...${value.takeLast(6)}"
+    } else {
+        value
     }
 }
 

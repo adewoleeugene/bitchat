@@ -45,8 +45,8 @@ class SolanaPaymentManager @Inject constructor(
         private const val MAX_CONFIRMATION_POLLS = 24
         private const val BALANCE_MESH_TIMEOUT_MS = 30_000L
         private const val BALANCE_MESH_STALE_MS = 90_000L
-        private const val TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         private const val TOKEN_TRANSFER_CHECKED_INSTRUCTION_INDEX: Byte = 12
+        private const val CREATE_ASSOCIATED_TOKEN_ACCOUNT_INSTRUCTION_INDEX: Byte = 0
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -83,10 +83,30 @@ class SolanaPaymentManager @Inject constructor(
         memo: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val amountLamports = (amountSol * LAMPORTS_PER_SOL).toLong()
+            if (amountLamports <= 0) {
+                return@withContext Result.failure(IllegalArgumentException("Amount must be greater than 0"))
+            }
+            queuePaymentLamports(
+                recipientPublicKey = recipientPublicKey,
+                amountLamports = amountLamports,
+                memo = memo
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to queue payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun queuePaymentLamports(
+        recipientPublicKey: String,
+        amountLamports: Long,
+        memo: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
             val senderPublicKey = walletService.getPublicKeyBase58()
                 ?: return@withContext Result.failure(IllegalStateException("No wallet found. Create a wallet first."))
 
-            val amountLamports = (amountSol * LAMPORTS_PER_SOL).toLong()
             if (amountLamports <= 0) {
                 return@withContext Result.failure(IllegalArgumentException("Amount must be greater than 0"))
             }
@@ -96,7 +116,7 @@ class SolanaPaymentManager @Inject constructor(
 
             val entity = QueuedTransactionEntity(
                 id = txId,
-                signedTransactionBase64 = "", // Will be signed at broadcast time with fresh blockhash
+                signedTransactionBase64 = "",
                 senderPublicKey = senderPublicKey,
                 recipientPublicKey = recipientPublicKey,
                 amountLamports = amountLamports,
@@ -109,9 +129,10 @@ class SolanaPaymentManager @Inject constructor(
             )
 
             transactionDao.insertTransaction(entity)
-            Log.d(TAG, "Queued payment: $amountSol SOL to $recipientPublicKey (id=$txId)")
-
-            // Try to broadcast immediately
+            Log.d(TAG, "Queued payment: $amountLamports lamports to $recipientPublicKey (id=$txId)")
+            memo?.let {
+                Log.d(TAG, "Ignoring native SOL memo until memo program support is added: $it")
+            }
             tryBroadcastPending()
 
             Result.success(txId)
@@ -786,32 +807,21 @@ class SolanaPaymentManager @Inject constructor(
             val sourceTokenAccount = rpcService.getTokenAccountAddress(ownerPublicKey, mintAddress)
                 .getOrNull()
                 ?: return null
-            val destinationTokenAccount = rpcService.getTokenAccountAddress(recipientOwnerPublicKey, mintAddress)
+            val existingDestinationTokenAccount = rpcService.getTokenAccountAddress(recipientOwnerPublicKey, mintAddress)
                 .getOrNull()
-                ?: return null
-
-            val ownerPubKeyBytes = decodeBase58(ownerPublicKey)
-            val sourceTokenAccountBytes = decodeBase58(sourceTokenAccount)
-            val mintBytes = decodeBase58(mintAddress)
-            val destinationTokenAccountBytes = decodeBase58(destinationTokenAccount)
-            val tokenProgramBytes = decodeBase58(TOKEN_PROGRAM_ID)
-            val recentBlockhash = decodeBase58(blockhash)
-
-            val instructionData = ByteArray(10)
-            instructionData[0] = TOKEN_TRANSFER_CHECKED_INSTRUCTION_INDEX
-            for (i in 0..7) {
-                instructionData[1 + i] = ((amountAtomic shr (i * 8)) and 0xFF).toByte()
-            }
-            instructionData[9] = decimals.toByte()
-
+            val destinationTokenAccount = existingDestinationTokenAccount
+                ?: SolanaTokenAccountUtils.findAssociatedTokenAddress(recipientOwnerPublicKey, mintAddress)
             val message = buildSplTokenTransferMessage(
-                ownerPubKey = ownerPubKeyBytes,
-                sourceTokenAccount = sourceTokenAccountBytes,
-                mintPubKey = mintBytes,
-                destinationTokenAccount = destinationTokenAccountBytes,
-                tokenProgramId = tokenProgramBytes,
-                recentBlockhash = recentBlockhash,
-                instructionData = instructionData
+                payerOwnerPublicKey = ownerPublicKey,
+                ownerPublicKey = ownerPublicKey,
+                sourceTokenAccount = sourceTokenAccount,
+                recipientOwnerPublicKey = recipientOwnerPublicKey,
+                mintAddress = mintAddress,
+                destinationTokenAccount = destinationTokenAccount,
+                recentBlockhash = blockhash,
+                amountAtomic = amountAtomic,
+                decimals = decimals,
+                createDestinationAta = existingDestinationTokenAccount == null
             )
 
             val signature = walletService.sign(message) ?: return null
@@ -865,39 +875,86 @@ class SolanaPaymentManager @Inject constructor(
                 instructionData
     }
 
-    private fun buildSplTokenTransferMessage(
-        ownerPubKey: ByteArray,
-        sourceTokenAccount: ByteArray,
-        mintPubKey: ByteArray,
-        destinationTokenAccount: ByteArray,
-        tokenProgramId: ByteArray,
-        recentBlockhash: ByteArray,
-        instructionData: ByteArray
+    internal fun buildSplTokenTransferMessage(
+        payerOwnerPublicKey: String,
+        ownerPublicKey: String,
+        sourceTokenAccount: String,
+        recipientOwnerPublicKey: String,
+        mintAddress: String,
+        destinationTokenAccount: String,
+        recentBlockhash: String,
+        amountAtomic: Long,
+        decimals: Int,
+        createDestinationAta: Boolean
     ): ByteArray {
-        val header = byteArrayOf(1, 0, 2)
-        val accountKeys =
-            ownerPubKey +
-                sourceTokenAccount +
-                mintPubKey +
-                destinationTokenAccount +
-                tokenProgramId
-        val numAccounts = byteArrayOf(5)
-        val numInstructions = byteArrayOf(1)
-        val programIdIndex = byteArrayOf(4)
-        val numAccountIndices = byteArrayOf(4)
-        val accountIndices = byteArrayOf(1, 2, 3, 0)
-        val dataLen = compactU16(instructionData.size)
+        val payerOwnerPubKey = decodeBase58(payerOwnerPublicKey)
+        val ownerPubKey = decodeBase58(ownerPublicKey)
+        val sourceTokenAccountBytes = decodeBase58(sourceTokenAccount)
+        val recipientOwnerPubKey = decodeBase58(recipientOwnerPublicKey)
+        val mintPubKey = decodeBase58(mintAddress)
+        val destinationTokenAccountBytes = decodeBase58(destinationTokenAccount)
+        val tokenProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.TOKEN_PROGRAM_ID)
+        val associatedTokenProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.ASSOCIATED_TOKEN_PROGRAM_ID)
+        val systemProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.SYSTEM_PROGRAM_ID)
+        val recentBlockhashBytes = decodeBase58(recentBlockhash)
+
+        val transferInstructionData = ByteArray(10)
+        transferInstructionData[0] = TOKEN_TRANSFER_CHECKED_INSTRUCTION_INDEX
+        for (i in 0..7) {
+            transferInstructionData[1 + i] = ((amountAtomic shr (i * 8)) and 0xFF).toByte()
+        }
+        transferInstructionData[9] = decimals.toByte()
+
+        val accountKeyList = mutableListOf<ByteArray>()
+        fun addKey(key: ByteArray): Int {
+            val existing = accountKeyList.indexOfFirst { it.contentEquals(key) }
+            if (existing >= 0) return existing
+            accountKeyList += key
+            return accountKeyList.lastIndex
+        }
+
+        val payerIndex = addKey(payerOwnerPubKey)
+        val ownerIndex = addKey(ownerPubKey)
+        val sourceIndex = addKey(sourceTokenAccountBytes)
+        val mintIndex = addKey(mintPubKey)
+        val destinationIndex = addKey(destinationTokenAccountBytes)
+        val recipientOwnerIndex = addKey(recipientOwnerPubKey)
+        val tokenProgramIndex = addKey(tokenProgramId)
+        val associatedTokenProgramIndex = addKey(associatedTokenProgramId)
+        val systemProgramIndex = addKey(systemProgramId)
+
+        val instructions = mutableListOf<ByteArray>()
+        if (createDestinationAta) {
+            val ataAccounts = byteArrayOf(
+                payerIndex.toByte(),
+                destinationIndex.toByte(),
+                recipientOwnerIndex.toByte(),
+                mintIndex.toByte(),
+                systemProgramIndex.toByte(),
+                tokenProgramIndex.toByte()
+            )
+            instructions += byteArrayOf(
+                associatedTokenProgramIndex.toByte(),
+                ataAccounts.size.toByte()
+            ) + ataAccounts + compactU16(1) + byteArrayOf(CREATE_ASSOCIATED_TOKEN_ACCOUNT_INSTRUCTION_INDEX)
+        }
+        val transferAccounts = byteArrayOf(sourceIndex.toByte(), mintIndex.toByte(), destinationIndex.toByte(), ownerIndex.toByte())
+        instructions += byteArrayOf(
+            tokenProgramIndex.toByte(),
+            transferAccounts.size.toByte()
+        ) + transferAccounts + compactU16(transferInstructionData.size) + transferInstructionData
+
+        val header = byteArrayOf(1, 0, 3)
+        val numAccounts = compactU16(accountKeyList.size)
+        val accountKeys = accountKeyList.fold(ByteArray(0)) { acc, key -> acc + key }
+        val numInstructions = compactU16(instructions.size)
 
         return header +
             numAccounts +
             accountKeys +
-            recentBlockhash +
+            recentBlockhashBytes +
             numInstructions +
-            programIdIndex +
-            numAccountIndices +
-            accountIndices +
-            dataLen +
-            instructionData
+            instructions.fold(ByteArray(0)) { acc, instruction -> acc + instruction }
     }
 
     /**

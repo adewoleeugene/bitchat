@@ -4,6 +4,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 interface LendingTransferGateway {
+    suspend fun queueNativeTransfer(
+        recipientPublicKey: String,
+        amountLamports: Long,
+        memo: String? = null
+    ): Result<String>
+
     suspend fun queueSplTransfer(
         recipientPublicKey: String,
         mintAddress: String,
@@ -18,6 +24,18 @@ interface LendingTransferGateway {
 class PaymentManagerLendingTransferGateway @Inject constructor(
     private val paymentManager: SolanaPaymentManager
 ) : LendingTransferGateway {
+    override suspend fun queueNativeTransfer(
+        recipientPublicKey: String,
+        amountLamports: Long,
+        memo: String?
+    ): Result<String> {
+        return paymentManager.queuePaymentLamports(
+            recipientPublicKey = recipientPublicKey,
+            amountLamports = amountLamports,
+            memo = memo
+        )
+    }
+
     override suspend fun queueSplTransfer(
         recipientPublicKey: String,
         mintAddress: String,

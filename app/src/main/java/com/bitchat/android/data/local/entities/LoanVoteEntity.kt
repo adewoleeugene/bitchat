@@ -21,5 +21,4 @@ data class LoanVoteEntity(
 
 object VoteChoice {
     const val YES = "YES"
-    const val NO = "NO"
 }

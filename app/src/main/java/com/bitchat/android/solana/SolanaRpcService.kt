@@ -172,6 +172,25 @@ class SolanaRpcService @Inject constructor(
         }
     }
 
+    suspend fun getAccountInfoBase64(address: String): Result<AccountInfoBase64> = withContext(Dispatchers.IO) {
+        try {
+            val response = rpcCall(
+                "getAccountInfo",
+                """["$address", {"encoding":"base64","commitment":"confirmed"}]"""
+            )
+            val result = response.getAsJsonObject("result")
+            val value = result?.getAsJsonObject("value")
+                ?: return@withContext Result.failure(IllegalStateException("account_not_found"))
+            val dataArray = value.getAsJsonArray("data")
+            val dataBase64 = dataArray?.get(0)?.asString
+                ?: return@withContext Result.failure(IllegalStateException("account_data_unavailable"))
+            val slot = result.getAsJsonObject("context")?.get("slot")?.asLong
+            Result.success(AccountInfoBase64(dataBase64 = dataBase64, slot = slot))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /**
      * Get SPL token accounts owned by a wallet for a specific mint.
      * Returns the token balance (in smallest unit) or 0 if no account exists.
@@ -559,6 +578,11 @@ class SolanaRpcService @Inject constructor(
         return JsonParser.parseString(responseBody).asJsonObject
     }
 }
+
+data class AccountInfoBase64(
+    val dataBase64: String,
+    val slot: Long?
+)
 
 data class NftInfo(
     val mintAddress: String,

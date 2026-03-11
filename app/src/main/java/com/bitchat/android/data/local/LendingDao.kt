@@ -39,6 +39,9 @@ interface LendingDao {
     @Query("SELECT * FROM lending_escrow_proposals WHERE lendingId = :lendingId ORDER BY createdAt DESC")
     suspend fun getEscrowProposalsForLendingChannel(lendingId: String): List<LendingEscrowProposalEntity>
 
+    @Query("SELECT * FROM lending_escrow_proposals WHERE txSignature = :txReference ORDER BY createdAt DESC")
+    suspend fun getEscrowProposalsByTxReference(txReference: String): List<LendingEscrowProposalEntity>
+
     @Query(
         """
         SELECT * FROM lending_escrow_proposals
@@ -78,14 +81,61 @@ interface LendingDao {
     @Query("SELECT * FROM lending_pool_snapshots WHERE lendingId = :lendingId LIMIT 1")
     suspend fun getPoolSnapshot(lendingId: String): LendingPoolSnapshotEntity?
 
+    @Query("SELECT * FROM lending_pool_snapshots")
+    fun observeAllPoolSnapshots(): Flow<List<LendingPoolSnapshotEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLoanRequest(request: LoanRequestEntity)
 
     @Query("SELECT * FROM loan_requests WHERE requestId = :requestId LIMIT 1")
     suspend fun getLoanRequestById(requestId: String): LoanRequestEntity?
 
+    @Query("SELECT * FROM loan_requests WHERE loanRequestPda = :loanRequestPda LIMIT 1")
+    suspend fun getLoanRequestByPda(loanRequestPda: String): LoanRequestEntity?
+
     @Query("SELECT * FROM loan_requests WHERE lendingId = :lendingId ORDER BY requestedAt DESC")
     suspend fun getLoanRequestsForLendingChannel(lendingId: String): List<LoanRequestEntity>
+
+    @Query(
+        """
+        SELECT * FROM loan_requests
+        WHERE requestId = :familyRootRequestId OR parentRequestId = :familyRootRequestId
+        ORDER BY requestedAt ASC
+        """
+    )
+    suspend fun getLinkedLoanRequests(familyRootRequestId: String): List<LoanRequestEntity>
+
+    @Query(
+        """
+        SELECT * FROM loan_requests
+        WHERE (
+            requestId = :familyRootRequestId OR parentRequestId = :familyRootRequestId
+        )
+          AND lendingId = :lendingId
+        LIMIT 1
+        """
+    )
+    suspend fun getLinkedLoanRequestForLending(
+        familyRootRequestId: String,
+        lendingId: String
+    ): LoanRequestEntity?
+
+    @Query(
+        """
+        SELECT * FROM loan_requests
+        WHERE (
+            requestId = :familyRootRequestId OR parentRequestId = :familyRootRequestId
+        )
+          AND requestId != :requestId
+          AND status IN ('DISBURSED', 'REPAID')
+        ORDER BY disbursedAt DESC, requestedAt DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getFundedSiblingLoanRequest(
+        familyRootRequestId: String,
+        requestId: String
+    ): LoanRequestEntity?
 
     @Query(
         """

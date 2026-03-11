@@ -1,6 +1,10 @@
 package com.bitchat.android.ui
 
 import android.util.Log
+import com.bitchat.android.lending.LendingChannelAnnouncementCodec
+import com.bitchat.android.lending.LendingLoanRepaymentMessageCodec
+import com.bitchat.android.lending.LendingLoanRequestMessageCodec
+import com.bitchat.android.lending.LendingLoanVoteMessageCodec
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.ui.NotificationTextUtils
 import com.bitchat.android.mesh.BluetoothMeshService
@@ -24,7 +28,8 @@ class MeshDelegateHandler(
     private val coroutineScope: CoroutineScope,
     private val onHapticFeedback: () -> Unit,
     private val getMyPeerID: () -> String,
-    private val getMeshService: () -> BluetoothMeshService
+    private val getMeshService: () -> BluetoothMeshService,
+    private val onLendingAnnouncementReceived: suspend (String) -> Boolean = { false }
 ) : BluetoothMeshDelegate {
     private data class PeerGateDecisionCache(
         val allowed: Boolean,
@@ -103,10 +108,16 @@ class MeshDelegateHandler(
                         return@launch
                     }
 
+                    val displayContent = channelInfo?.second ?: message.content
+                    if (onLendingAnnouncementReceived(displayContent)) {
+                        if (shouldRenderVisibleLendingPayload(displayContent)) {
+                            channelManager.ensureDiscoveredChannel(key, senderPeerID)
+                            channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
+                        }
+                        return@launch
+                    }
                     // Passive channel discovery: show channel when we first see traffic for it.
                     channelManager.ensureDiscoveredChannel(key, senderPeerID)
-
-                    val displayContent = channelInfo?.second ?: message.content
                     channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
                 } else {
                     // Public mesh message - always store to preserve message history
@@ -367,6 +378,13 @@ class MeshDelegateHandler(
             expiresAt = now + ttl
         )
         return allowed
+    }
+
+    private fun shouldRenderVisibleLendingPayload(content: String): Boolean {
+        if (LendingChannelAnnouncementCodec.decode(content) != null) return false
+        if (LendingLoanVoteMessageCodec.decode(content) != null) return false
+        if (LendingLoanRepaymentMessageCodec.decode(content) != null) return false
+        return LendingLoanRequestMessageCodec.decode(content) != null
     }
 
 }
