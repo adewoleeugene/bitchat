@@ -385,26 +385,29 @@ private fun LoanRequestMessageItem(
         LoanRequestStatus.FUNDED_ELSEWHERE -> "Funded by another channel"
         else -> status.lowercase()
     }
+    val canSeeTreasuryActions = canReviewLoans || canAuthorizeLoans || canDisburseLoans || canSetupTreasury
     val stageHint = when (status) {
         LoanRequestStatus.PENDING -> "Members can support this request. Treasury funds do not move at this stage."
-        LoanRequestStatus.COMMUNITY_APPROVED -> if (lendingSharedCustodyReady) {
-            "Community threshold met. Admin opens signer review next."
-        } else {
-            "Treasury setup required before admin review can begin."
+        LoanRequestStatus.COMMUNITY_APPROVED -> when {
+            lendingSharedCustodyReady -> "Community threshold met. Admin opens signer review next."
+            canSeeTreasuryActions -> "Treasury setup required before admin review can begin."
+            else -> "Community threshold met. Waiting for admin review."
         }
-        LoanRequestStatus.SIGNER_REVIEW -> if (lendingSharedCustodyReady) {
-            "Only admins and approvers can authorize payout now."
-        } else {
-            "Treasury setup required before admin and approver actions are available."
+        LoanRequestStatus.SIGNER_REVIEW -> when {
+            lendingSharedCustodyReady && canSeeTreasuryActions -> "Only admins and approvers can authorize payout now."
+            lendingSharedCustodyReady -> "Admin and approver review is in progress."
+            canSeeTreasuryActions -> "Treasury setup required before admin and approver actions are available."
+            else -> "Waiting for treasury setup and admin review."
         }
-        LoanRequestStatus.SIGNER_APPROVED -> if (lendingSharedCustodyReady) {
-            "Signer threshold met. Admin can disburse."
-        } else {
-            "Treasury setup required before funds can be disbursed."
+        LoanRequestStatus.SIGNER_APPROVED -> when {
+            lendingSharedCustodyReady && canSeeTreasuryActions -> "Signer threshold met. Admin can disburse."
+            lendingSharedCustodyReady -> "Signer threshold met. Waiting for disbursement."
+            canSeeTreasuryActions -> "Treasury setup required before funds can be disbursed."
+            else -> "Waiting for treasury setup before funds can be disbursed."
         }
         else -> null
     }
-    val treasurySetupRequired = !lendingSharedCustodyReady &&
+    val treasurySetupRequired = canSetupTreasury && !lendingSharedCustodyReady &&
         status in setOf(
             LoanRequestStatus.COMMUNITY_APPROVED,
             LoanRequestStatus.SIGNER_REVIEW,
