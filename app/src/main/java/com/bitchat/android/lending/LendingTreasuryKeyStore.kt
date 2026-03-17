@@ -9,7 +9,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class LendingTreasuryKeyStore @Inject constructor(
+open class LendingTreasuryKeyStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
@@ -33,7 +33,7 @@ class LendingTreasuryKeyStore @Inject constructor(
         )
     }
 
-    fun ensureTreasuryWallet(lendingId: String): TreasuryWalletMaterial {
+    open fun ensureTreasuryWallet(lendingId: String): TreasuryWalletMaterial {
         getTreasuryWallet(lendingId)?.let { return it }
         val privateKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val publicKey = SolanaKeyDerivation.derivePublicKey(privateKey)
@@ -48,7 +48,7 @@ class LendingTreasuryKeyStore @Inject constructor(
         )
     }
 
-    fun getTreasuryWallet(lendingId: String): TreasuryWalletMaterial? {
+    open fun getTreasuryWallet(lendingId: String): TreasuryWalletMaterial? {
         val privateKeyBase64 = securePrefs.getString(KEY_PREFIX_PRIVATE + lendingId, null) ?: return null
         val publicKeyBase64 = securePrefs.getString(KEY_PREFIX_PUBLIC + lendingId, null) ?: return null
         val privateKey = Base64.decode(privateKeyBase64, Base64.NO_WRAP)

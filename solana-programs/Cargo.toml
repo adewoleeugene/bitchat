@@ -1,3 +1,0 @@
-[workspace]
-members = ["lending_program"]
-resolver = "2"

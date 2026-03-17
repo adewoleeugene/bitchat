@@ -12,7 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class LendingTreasuryTransferService @Inject constructor(
+open class LendingTreasuryTransferService @Inject constructor(
     private val rpcService: SolanaRpcService,
     private val walletService: SolanaWalletService
 ) {
@@ -24,7 +24,7 @@ class LendingTreasuryTransferService @Inject constructor(
 
     private val ed25519Spec = EdDSANamedCurveTable.getByName(EdDSANamedCurveTable.ED_25519)
 
-    suspend fun sendSplFromTreasury(
+    open suspend fun sendSplFromTreasury(
         treasuryPrivateKey: ByteArray,
         treasuryOwnerPublicKey: String,
         sourceTokenAccount: String,
@@ -66,7 +66,7 @@ class LendingTreasuryTransferService @Inject constructor(
         return Result.failure(IllegalStateException("treasury_transfer_confirmation_timeout"))
     }
 
-    suspend fun sendSolFromTreasury(
+    open suspend fun sendSolFromTreasury(
         treasuryPrivateKey: ByteArray,
         treasuryOwnerPublicKey: String,
         recipientPublicKey: String,

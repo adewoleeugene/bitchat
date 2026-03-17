@@ -24,6 +24,20 @@ data class SquadsMultisigState(
     val memberCount: Int
 )
 
+data class SquadsProgramConfigState(
+    val treasuryAddress: String,
+    val multisigCreationFeeLamports: Long
+)
+
+data class SquadsCreatedMultisig(
+    val multisigAddress: String,
+    val vaultAddress: String,
+    val txSignature: String,
+    val threshold: Int,
+    val memberCount: Int,
+    val cluster: String
+)
+
 data class SquadsProposalState(
     val multisigAddress: String,
     val vaultAddress: String,
@@ -41,6 +55,8 @@ interface SquadsService {
     fun config(): SquadsConfig
     suspend fun resolveLendingSquad(lendingId: String): Result<SquadsVaultAccount>
     suspend fun fetchMultisigState(multisigAddress: String): Result<SquadsMultisigState>
+    suspend fun fetchProgramConfigState(): Result<SquadsProgramConfigState>
+    suspend fun createLendingMultisig(memberWallets: List<String>, threshold: Int): Result<SquadsCreatedMultisig>
     suspend fun createLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState>
     suspend fun approveLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState>
     suspend fun executeLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState>

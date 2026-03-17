@@ -10,6 +10,7 @@ import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
 import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
+import com.bitchat.android.data.local.entities.LendingSignerReviewEntity
 import com.bitchat.android.data.local.entities.LoanRepaymentEntity
 import com.bitchat.android.data.local.entities.LoanRequestEntity
 import com.bitchat.android.data.local.entities.LoanVoteEntity
@@ -83,6 +84,15 @@ interface LendingDao {
 
     @Query("SELECT * FROM lending_pool_snapshots")
     fun observeAllPoolSnapshots(): Flow<List<LendingPoolSnapshotEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSignerReview(review: LendingSignerReviewEntity)
+
+    @Query("SELECT * FROM lending_signer_reviews WHERE requestId = :requestId LIMIT 1")
+    suspend fun getSignerReviewForRequest(requestId: String): LendingSignerReviewEntity?
+
+    @Query("SELECT * FROM lending_signer_reviews WHERE lendingId = :lendingId ORDER BY openedAt DESC")
+    suspend fun getSignerReviewsForLendingChannel(lendingId: String): List<LendingSignerReviewEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLoanRequest(request: LoanRequestEntity)
@@ -164,6 +174,19 @@ interface LendingDao {
 
     @Query("SELECT * FROM loan_repayments WHERE requestId = :requestId ORDER BY paidAt ASC")
     suspend fun getRepaymentsForRequest(requestId: String): List<LoanRepaymentEntity>
+
+    @Query("SELECT * FROM loan_repayments WHERE txSignature = :txReference ORDER BY paidAt ASC")
+    suspend fun getRepaymentsByTxReference(txReference: String): List<LoanRepaymentEntity>
+
+    @Query(
+        """
+        SELECT * FROM loan_repayments
+        WHERE requestId = :requestId AND txSignature = :txSignature
+        ORDER BY paidAt ASC
+        LIMIT 1
+        """
+    )
+    suspend fun getRepaymentByRequestAndSignature(requestId: String, txSignature: String): LoanRepaymentEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCredibilityProfile(profile: CredibilityProfileEntity)

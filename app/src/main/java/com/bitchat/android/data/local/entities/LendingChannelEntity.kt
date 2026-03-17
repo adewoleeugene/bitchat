@@ -3,6 +3,7 @@ package com.bitchat.android.data.local.entities
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 
 @Entity(
     tableName = "lending_channels",
@@ -18,6 +19,9 @@ data class LendingChannelEntity(
     val creatorPeerId: String,
     val creatorWalletAddress: String = "",
     val requiredStakeAmount: Long,
+    val minimumVoteCount: Int = 2,
+    @ColumnInfo(name = "defaultLoanDurationDays")
+    val maxLoanDurationDays: Int = 14,
     val stakeTokenMint: String,
     val stakeTokenSymbol: String = "",
     val stakeTokenDecimals: Int = 6,

@@ -11,7 +11,7 @@ class LendingCredibilityScorerTest {
     private val now = 1_800_000_000_000L
 
     @Test
-    fun score_failsHardGatesWhenWalletOrMinimumSignalsMissing() {
+    fun score_failsWalletAndStakeHardGatesWhileLowSignalsLowerThresholdScore() {
         val result = scorer.score(
             LendingCredibilityScorer.Input(
                 firstSeenAt = now - 2L * 24L * 60L * 60L * 1000L,
@@ -26,8 +26,8 @@ class LendingCredibilityScorerTest {
         assertFalse(result.passedHardGates)
         assertTrue("wallet_link_required" in result.hardGateFailures)
         assertTrue("stake_balance_required" in result.hardGateFailures)
-        assertTrue("minimum_age_required" in result.hardGateFailures)
-        assertTrue("minimum_activity_required" in result.hardGateFailures)
+        assertFalse(result.passedThreshold)
+        assertEquals(2, result.hardGateFailures.size)
     }
 
     @Test

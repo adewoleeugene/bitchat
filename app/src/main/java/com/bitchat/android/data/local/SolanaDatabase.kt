@@ -13,6 +13,7 @@ import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
 import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
+import com.bitchat.android.data.local.entities.LendingSignerReviewEntity
 import com.bitchat.android.data.local.entities.LoanRepaymentEntity
 import com.bitchat.android.data.local.entities.LoanRequestEntity
 import com.bitchat.android.data.local.entities.LoanVoteEntity
@@ -39,12 +40,13 @@ import com.bitchat.android.data.local.entities.WalletEntity
         LendingEscrowProposalEntity::class,
         LendingMembershipEntity::class,
         LendingPoolSnapshotEntity::class,
+        LendingSignerReviewEntity::class,
         LoanRequestEntity::class,
         LoanVoteEntity::class,
         LoanRepaymentEntity::class,
         CredibilityProfileEntity::class
     ],
-    version = 19,
+    version = 22,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -938,6 +940,68 @@ abstract class SolanaDatabase : RoomDatabase() {
                     """
                     ALTER TABLE `loan_requests`
                     ADD COLUMN `borrowerWalletAddress` TEXT
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_channels`
+                    ADD COLUMN `minimumVoteCount` INTEGER NOT NULL DEFAULT 2
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_channels`
+                    ADD COLUMN `defaultLoanDurationDays` INTEGER NOT NULL DEFAULT 14
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_signer_reviews` (
+                        `reviewId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `requestId` TEXT NOT NULL,
+                        `createdByPeerId` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `squadsProposalAddress` TEXT,
+                        `openedAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `rejectedAt` INTEGER,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`reviewId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_signer_reviews_lendingId`
+                    ON `lending_signer_reviews` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_lending_signer_reviews_requestId`
+                    ON `lending_signer_reviews` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_signer_reviews_status`
+                    ON `lending_signer_reviews` (`status`)
                     """.trimIndent()
                 )
             }

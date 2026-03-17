@@ -1,10 +1,12 @@
 package com.bitchat.android.ui
 
 import android.util.Log
-import com.bitchat.android.lending.LendingChannelAnnouncementCodec
+import com.bitchat.android.lending.LendingChannelConfigMessageCodec
+import com.bitchat.android.lending.LendingChannelConfigRequestMessageCodec
 import com.bitchat.android.lending.LendingLoanRepaymentMessageCodec
 import com.bitchat.android.lending.LendingLoanRequestMessageCodec
 import com.bitchat.android.lending.LendingLoanVoteMessageCodec
+import com.bitchat.android.lending.LendingMembershipMessageCodec
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.ui.NotificationTextUtils
 import com.bitchat.android.mesh.BluetoothMeshService
@@ -29,7 +31,7 @@ class MeshDelegateHandler(
     private val onHapticFeedback: () -> Unit,
     private val getMyPeerID: () -> String,
     private val getMeshService: () -> BluetoothMeshService,
-    private val onLendingAnnouncementReceived: suspend (String) -> Boolean = { false }
+    private val onLendingAnnouncementReceived: suspend (String, String?, String?) -> Boolean = { _, _, _ -> false }
 ) : BluetoothMeshDelegate {
     private data class PeerGateDecisionCache(
         val allowed: Boolean,
@@ -41,6 +43,7 @@ class MeshDelegateHandler(
     companion object {
         private const val PEER_GATE_ONLINE_CACHE_MS = 15_000L
         private const val PEER_GATE_OFFLINE_CACHE_MS = 60_000L
+        private const val LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX = "__bitchat_lending_channel__:"
     }
 
     override fun didReceiveMessage(message: BitchatMessage) {
@@ -109,7 +112,7 @@ class MeshDelegateHandler(
                     }
 
                     val displayContent = channelInfo?.second ?: message.content
-                    if (onLendingAnnouncementReceived(displayContent)) {
+                    if (onLendingAnnouncementReceived(displayContent, senderPeerID, key)) {
                         if (shouldRenderVisibleLendingPayload(displayContent)) {
                             channelManager.ensureDiscoveredChannel(key, senderPeerID)
                             channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
@@ -381,7 +384,10 @@ class MeshDelegateHandler(
     }
 
     private fun shouldRenderVisibleLendingPayload(content: String): Boolean {
-        if (LendingChannelAnnouncementCodec.decode(content) != null) return false
+        if (content.startsWith(LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX)) return false
+        if (LendingChannelConfigMessageCodec.decode(content) != null) return false
+        if (LendingChannelConfigRequestMessageCodec.decode(content) != null) return false
+        if (LendingMembershipMessageCodec.decode(content) != null) return false
         if (LendingLoanVoteMessageCodec.decode(content) != null) return false
         if (LendingLoanRepaymentMessageCodec.decode(content) != null) return false
         return LendingLoanRequestMessageCodec.decode(content) != null

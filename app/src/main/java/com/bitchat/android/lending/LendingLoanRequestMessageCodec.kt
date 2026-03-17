@@ -5,6 +5,7 @@ import com.google.gson.Gson
 data class LendingLoanRequestMessage(
     val requestId: String,
     val lendingId: String,
+    val actorPeerId: String? = null,
     val channelDisplayName: String,
     val principalAmount: Long,
     val assetSymbol: String = "",

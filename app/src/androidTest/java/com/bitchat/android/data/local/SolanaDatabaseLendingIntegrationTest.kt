@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bitchat.android.data.local.entities.LendingChannelEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
+import com.bitchat.android.data.local.entities.LendingSignerReviewEntity
+import com.bitchat.android.data.local.entities.LendingSignerReviewStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -39,7 +41,16 @@ class SolanaDatabaseLendingIntegrationTest {
                 SolanaDatabase.MIGRATION_9_10,
                 SolanaDatabase.MIGRATION_10_11,
                 SolanaDatabase.MIGRATION_11_12,
-                SolanaDatabase.MIGRATION_12_13
+                SolanaDatabase.MIGRATION_12_13,
+                SolanaDatabase.MIGRATION_13_14,
+                SolanaDatabase.MIGRATION_14_15,
+                SolanaDatabase.MIGRATION_15_16,
+                SolanaDatabase.MIGRATION_16_17,
+                SolanaDatabase.MIGRATION_17_18,
+                SolanaDatabase.MIGRATION_18_19,
+                SolanaDatabase.MIGRATION_19_20,
+                SolanaDatabase.MIGRATION_20_21,
+                SolanaDatabase.MIGRATION_21_22
             )
             .build()
         database.openHelper.writableDatabase
@@ -66,6 +77,7 @@ class SolanaDatabaseLendingIntegrationTest {
         assertTrue("lending_memberships" in tables)
         assertTrue("lending_pool_snapshots" in tables)
         assertTrue("loan_requests" in tables)
+        assertTrue("lending_signer_reviews" in tables)
         assertTrue("loan_votes" in tables)
         assertTrue("loan_repayments" in tables)
         assertTrue("credibility_profiles" in tables)
@@ -96,6 +108,7 @@ class SolanaDatabaseLendingIntegrationTest {
             creatorPeerId = "peer-1",
             creatorWalletAddress = "Wallet111111111111111111111111111111111",
             requiredStakeAmount = 50_000_000L,
+            minimumVoteCount = 3,
             stakeTokenMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
             stakeTokenSymbol = "USDC"
         )
@@ -118,6 +131,27 @@ class SolanaDatabaseLendingIntegrationTest {
         assertNotNull(snapshot)
         assertEquals("mesh:#villagefund", byId!!.channelKey)
         assertEquals("AB23CD", byChannelKey!!.lendingId)
+        assertEquals(3, byId.minimumVoteCount)
         assertEquals(50_000_000L, snapshot!!.availableLiquidityAmount)
+    }
+
+    @Test
+    fun lendingDao_persistsSignerReviews() = runBlocking {
+        val dao = database.lendingDao()
+        val review = LendingSignerReviewEntity(
+            reviewId = "review-1",
+            lendingId = "AB23CD",
+            requestId = "LR-12345678",
+            createdByPeerId = "peer-admin",
+            status = LendingSignerReviewStatus.PENDING
+        )
+
+        dao.upsertSignerReview(review)
+
+        val stored = dao.getSignerReviewForRequest("LR-12345678")
+
+        assertNotNull(stored)
+        assertEquals("review-1", stored!!.reviewId)
+        assertEquals(LendingSignerReviewStatus.PENDING, stored.status)
     }
 }

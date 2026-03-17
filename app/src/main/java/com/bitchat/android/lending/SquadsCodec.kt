@@ -12,7 +12,13 @@ import java.security.MessageDigest
 
 internal object SquadsCodec {
     private val ed25519Spec = EdDSANamedCurveTable.getByName(EdDSANamedCurveTable.ED_25519)
+    private const val PERMISSION_INITIATE = 1
+    private const val PERMISSION_VOTE = 2
+    private const val PERMISSION_EXECUTE = 4
 
+    private val MULTISIG_CREATE_V2_DISCRIMINATOR = byteArrayOf(
+        50, 221.toByte(), 199.toByte(), 93, 40, 245.toByte(), 154.toByte(), 162.toByte()
+    )
     private val PROPOSAL_CREATE_DISCRIMINATOR = byteArrayOf(
         220.toByte(), 60, 73, 224.toByte(), 30, 108, 79, 159.toByte()
     )
@@ -38,7 +44,7 @@ internal object SquadsCodec {
     fun getMultisigPda(programId: String, createKey: String): String {
         return findProgramAddress(
             programId = programId,
-            seeds = listOf("multisig".toByteArray(), "multisig".toByteArray(), decodeBase58(createKey))
+            seeds = listOf("multisig".toByteArray(), decodeBase58(createKey))
         )
     }
 
@@ -46,9 +52,8 @@ internal object SquadsCodec {
         return findProgramAddress(
             programId = programId,
             seeds = listOf(
-                "multisig".toByteArray(),
-                decodeBase58(multisigAddress),
                 "vault".toByteArray(),
+                decodeBase58(multisigAddress),
                 byteArrayOf(index.toByte())
             )
         )
@@ -81,6 +86,23 @@ internal object SquadsCodec {
 
     fun proposalCreateData(transactionIndex: Long, draft: Boolean = false): ByteArray {
         return PROPOSAL_CREATE_DISCRIMINATOR + longLe(transactionIndex) + byteArrayOf(if (draft) 1 else 0)
+    }
+
+    fun multisigCreateV2Data(
+        threshold: Int,
+        members: List<SquadsMember>,
+        configAuthority: String? = null,
+        timeLockSeconds: Int = 0,
+        rentCollector: String? = null,
+        memo: String? = null
+    ): ByteArray {
+        return MULTISIG_CREATE_V2_DISCRIMINATOR +
+            optionPubkey(configAuthority) +
+            shortLe(threshold) +
+            intLe(timeLockSeconds) +
+            membersVec(members) +
+            optionPubkey(rentCollector) +
+            optionString(memo)
     }
 
     fun proposalApproveData(memo: String? = null): ByteArray {
@@ -132,16 +154,38 @@ internal object SquadsCodec {
         signer: (ByteArray) -> ByteArray?,
         instructions: List<SquadsInstruction>
     ): String {
-        val message = buildLegacyMessage(
+        return buildSignedLegacyTransaction(
             recentBlockhash = recentBlockhash,
-            feePayer = signerPublicKey,
+            signers = listOf(SignedMessageSigner(signerPublicKey, signer)),
             instructions = instructions
         )
-        val signature = signer(message) ?: throw IllegalStateException("wallet_signing_failed")
-        val transaction = ByteArray(1 + 64 + message.size)
-        transaction[0] = 1
-        System.arraycopy(signature, 0, transaction, 1, 64)
-        System.arraycopy(message, 0, transaction, 65, message.size)
+    }
+
+    fun buildSignedLegacyTransaction(
+        recentBlockhash: String,
+        signers: List<SignedMessageSigner>,
+        instructions: List<SquadsInstruction>
+    ): String {
+        val message = buildLegacyMessage(
+            recentBlockhash = recentBlockhash,
+            feePayer = signers.firstOrNull()?.publicKey
+                ?: throw IllegalArgumentException("signer_required"),
+            instructions = instructions
+        )
+        val signerOrder = readSignerOrder(message)
+        val signerMap = signers.associateBy { it.publicKey }
+        val signatures = signerOrder.map { publicKey ->
+            val signer = signerMap[publicKey] ?: throw IllegalStateException("missing_signature_for_$publicKey")
+            signer.sign(message) ?: throw IllegalStateException("wallet_signing_failed")
+        }
+        val transaction = ByteArray(1 + (64 * signatures.size) + message.size)
+        transaction[0] = signatures.size.toByte()
+        var offset = 1
+        signatures.forEach { signature ->
+            System.arraycopy(signature, 0, transaction, offset, 64)
+            offset += 64
+        }
+        System.arraycopy(message, 0, transaction, offset, message.size)
         return Base64.encodeToString(transaction, Base64.NO_WRAP)
     }
 
@@ -171,6 +215,19 @@ internal object SquadsCodec {
             transactionIndex = transactionIndex,
             staleTransactionIndex = staleTransactionIndex,
             memberCount = memberCount
+        )
+    }
+
+    fun parseProgramConfigState(dataBase64: String): SquadsProgramConfigState {
+        val data = Base64.decode(dataBase64, Base64.DEFAULT)
+        val cursor = Cursor(data)
+        cursor.skip(8)
+        cursor.skip(32) // authority
+        val multisigCreationFeeLamports = cursor.readU64()
+        val treasuryAddress = cursor.readPubkey()
+        return SquadsProgramConfigState(
+            treasuryAddress = treasuryAddress,
+            multisigCreationFeeLamports = multisigCreationFeeLamports
         )
     }
 
@@ -269,6 +326,24 @@ internal object SquadsCodec {
 
     private fun vecU8(bytes: ByteArray): ByteArray = compactU16(bytes.size) + bytes
 
+    private fun membersVec(members: List<SquadsMember>): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(intLe(members.size))
+        members.forEach { member ->
+            out.write(decodeBase58(member.publicKey))
+            out.write(byteArrayOf(member.permissionsMask.toByte()))
+        }
+        return out.toByteArray()
+    }
+
+    private fun optionPubkey(value: String?): ByteArray {
+        return if (value.isNullOrBlank()) {
+            byteArrayOf(0)
+        } else {
+            byteArrayOf(1) + decodeBase58(value)
+        }
+    }
+
     private fun optionString(value: String?): ByteArray {
         return if (value == null) {
             byteArrayOf(0)
@@ -280,6 +355,8 @@ internal object SquadsCodec {
     private fun longLe(value: Long): ByteArray = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value).array()
 
     private fun intLe(value: Int): ByteArray = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array()
+
+    private fun shortLe(value: Int): ByteArray = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(value.toShort()).array()
 
     private fun compactU16(value: Int): ByteArray {
         if (value < 0x80) return byteArrayOf(value.toByte())
@@ -330,6 +407,16 @@ internal object SquadsCodec {
         val data: ByteArray
     )
 
+    data class SquadsMember(
+        val publicKey: String,
+        val permissionsMask: Int = PERMISSION_INITIATE or PERMISSION_VOTE or PERMISSION_EXECUTE
+    )
+
+    data class SignedMessageSigner(
+        val publicKey: String,
+        val sign: (ByteArray) -> ByteArray?
+    )
+
     data class SquadsAccountMeta(
         val publicKey: String,
         val isSigner: Boolean,
@@ -370,19 +457,21 @@ internal object SquadsCodec {
             return if (tag == 0) {
                 null
             } else {
-                val key = bytes.copyOfRange(offset, offset + 32)
-                offset += 32
-                SolanaKeyDerivation.encodeBase58(key)
+                readPubkey()
             }
         }
 
         fun readPubkeyVec(): List<String> {
             val size = readU32()
             return List(size) {
-                val key = bytes.copyOfRange(offset, offset + 32)
-                offset += 32
-                SolanaKeyDerivation.encodeBase58(key)
+                readPubkey()
             }
+        }
+
+        fun readPubkey(): String {
+            val key = bytes.copyOfRange(offset, offset + 32)
+            offset += 32
+            return SolanaKeyDerivation.encodeBase58(key)
         }
 
         fun readProposalStatus(): ParsedProposalStatus {
@@ -404,5 +493,32 @@ internal object SquadsCodec {
             offset += 8
             return seconds * 1000L
         }
+    }
+
+    private fun readSignerOrder(message: ByteArray): List<String> {
+        val numRequiredSignatures = message[0].toInt() and 0xFF
+        var offset = 3
+        val accountCount = readCompactU16(message, offset)
+        offset += accountCount.second
+        return buildList {
+            repeat(accountCount.first) {
+                val key = message.copyOfRange(offset, offset + 32)
+                offset += 32
+                if (size < numRequiredSignatures) {
+                    add(SolanaKeyDerivation.encodeBase58(key))
+                }
+            }
+        }
+    }
+
+    private fun readCompactU16(bytes: ByteArray, offset: Int): Pair<Int, Int> {
+        val first = bytes[offset].toInt() and 0xFF
+        if ((first and 0x80) == 0) return first to 1
+        val second = bytes[offset + 1].toInt() and 0xFF
+        if ((second and 0x80) == 0) {
+            return ((first and 0x7F) or ((second and 0x7F) shl 7)) to 2
+        }
+        val third = bytes[offset + 2].toInt() and 0xFF
+        return ((first and 0x7F) or ((second and 0x7F) shl 7) or ((third and 0x03) shl 14)) to 3
     }
 }

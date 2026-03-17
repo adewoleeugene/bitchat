@@ -95,7 +95,10 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val isSubmittingLendingStakeApproval by viewModel.isSubmittingLendingStakeApproval.observeAsState(false)
     val pendingLendingLeaveApproval by viewModel.pendingLendingLeaveApproval.observeAsState()
     val isSubmittingLendingLeaveApproval by viewModel.isSubmittingLendingLeaveApproval.observeAsState(false)
+    val pendingLendingTreasurySetup by viewModel.pendingLendingTreasurySetup.observeAsState()
+    val isSubmittingLendingTreasurySetup by viewModel.isSubmittingLendingTreasurySetup.observeAsState(false)
     val lendingLoanRequestStatuses by viewModel.lendingLoanRequestStatuses.observeAsState(emptyMap())
+    val currentLendingSharedCustodyReady by viewModel.currentLendingSharedCustodyReady.observeAsState(false)
     val availableLendingChannels by viewModel.availableLendingChannels.observeAsState(emptyList())
 
     // Show password dialog when needed
@@ -179,7 +182,11 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     meshService = viewModel.meshService,
                     lendingLoanRequestStatuses = lendingLoanRequestStatuses,
                     currentUserPeerId = viewModel.meshService.myPeerID,
+                    lendingSharedCustodyReady = currentLendingSharedCustodyReady,
+                    canReviewLoans = viewModel.canOpenLendingSignerReview(),
+                    canAuthorizeLoans = viewModel.canAuthorizeLendingPayout(),
                     canDisburseLoans = viewModel.canManageFeedPins(),
+                    canSetupTreasury = viewModel.canSetupLendingTreasury(),
                     modifier = Modifier.weight(1f),
                     forceScrollToBottom = forceScrollToBottom,
                     onScrolledUpChanged = { isUp -> isScrolledUp = isUp },
@@ -222,6 +229,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
                         forwardRequestId = requestId
                         forwardSourceLendingId = lendingId
                     },
+                    onLoanReviewAction = viewModel::sendLendingReviewAction,
+                    onLoanAuthorizeAction = viewModel::sendLendingAuthorizeAction,
+                    onLoanSetupTreasuryAction = { viewModel.requestLendingTreasurySetup() },
                     onLoanDisburseAction = viewModel::sendLendingDisburseAction,
                     onEnsureLoanRequestStatus = viewModel::ensureLendingLoanRequestStatusLoaded,
                     onLoanRepayPrefill = { requestId, assetSymbol ->
@@ -494,6 +504,16 @@ fun ChatScreen(viewModel: ChatViewModel) {
             isSubmitting = isSubmittingLendingLeaveApproval,
             onDismiss = { viewModel.dismissLendingLeaveApproval() },
             onConfirm = { viewModel.confirmLendingLeaveApproval() }
+        )
+    }
+    pendingLendingTreasurySetup?.let { setup ->
+        LendingTreasurySetupSheet(
+            setup = setup,
+            isSubmitting = isSubmittingLendingTreasurySetup,
+            onDismiss = { viewModel.dismissLendingTreasurySetup() },
+            onConfirm = { multisigAddress, vaultAddress, selectedSignerWalletAddresses ->
+                viewModel.confirmLendingTreasurySetup(multisigAddress, vaultAddress, selectedSignerWalletAddresses)
+            }
         )
     }
 
@@ -934,6 +954,225 @@ private fun LendingStakeDetailRow(label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = BitchatColors.TextPrimary
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LendingTreasurySetupSheet(
+    setup: com.bitchat.android.lending.LendingTreasurySetupRequest,
+    isSubmitting: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String?, List<String>) -> Unit
+) {
+    var multisigAddress by remember(setup.channelKey) { mutableStateOf(setup.existingMultisigAddress) }
+    var vaultAddress by remember(setup.channelKey) { mutableStateOf(setup.existingVaultAddress) }
+    val defaultSelectedPeerIds = remember(setup.channelKey) {
+        setup.signerCandidates
+            .filter { it.recommended }
+            .take(setup.recommendedSignerCount)
+            .map { it.peerId }
+            .toSet()
+    }
+    var selectedPeerIds by remember(setup.channelKey) { mutableStateOf(defaultSelectedPeerIds) }
+    var showAdvancedDetails by remember(setup.channelKey) {
+        mutableStateOf(setup.existingMultisigAddress.isNotBlank() || setup.existingVaultAddress.isNotBlank())
+    }
+    val selectedCandidates = setup.signerCandidates.filter { it.peerId in selectedPeerIds }
+    val selectedApproverNames = selectedCandidates.joinToString(", ") { it.displayName }
+    val enoughSelectedApprovers = selectedPeerIds.size >= setup.recommendedSignerCount
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BitchatColors.BackgroundLayer1
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Set up community treasury",
+                style = MaterialTheme.typography.titleMedium,
+                color = BitchatColors.TextPrimary
+            )
+            Text(
+                text = "Choose trusted approvers for ${setup.channelDisplayName}. Members still vote first, but money only moves after this shared treasury is active.",
+                style = MaterialTheme.typography.bodySmall,
+                color = BitchatColors.TextSecondary
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = BitchatShapes.Card,
+                color = BitchatColors.InputFieldBg,
+                border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LendingStakeDetailRow("Channel", setup.channelDisplayName)
+                    LendingStakeDetailRow("Authorizations needed", "${setup.approvalThreshold} of ${setup.recommendedSignerCount}")
+                    LendingStakeDetailRow("Who approves", if (selectedApproverNames.isBlank()) "Choose trusted people below" else selectedApproverNames)
+                    LendingStakeDetailRow("Network", "Solana ${setup.cluster.replaceFirstChar { it.uppercase() }}")
+                }
+            }
+
+            Text(
+                text = "Recommended setup: you plus ${setup.approvalThreshold} trusted approvers. Only people with verified wallets appear here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = BitchatColors.TextSecondary
+            )
+
+            if (setup.signerCandidates.isEmpty()) {
+                Text(
+                    text = "No verified wallets were found for this lending channel yet. Ask the owner and approvers to open Bitchat with their wallet linked before creating treasury access.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BitchatColors.TextPrimary
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = BitchatShapes.Card,
+                    color = BitchatColors.InputFieldBg,
+                    border = BorderStroke(1.dp, BitchatColors.Border.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        setup.signerCandidates.forEach { candidate ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = candidate.peerId in selectedPeerIds,
+                                    onCheckedChange = if (isSubmitting) {
+                                        null
+                                    } else { checked ->
+                                        selectedPeerIds = if (checked == true) {
+                                            selectedPeerIds + candidate.peerId
+                                        } else {
+                                            selectedPeerIds - candidate.peerId
+                                        }
+                                    }
+                                )
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = candidate.displayName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = BitchatColors.TextPrimary
+                                    )
+                                    Text(
+                                        text = "${candidate.roleLabel} • ${shortKey(candidate.walletAddress)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = BitchatColors.TextSecondary
+                                    )
+                                }
+                                if (candidate.recommended) {
+                                    Text(
+                                        text = "Recommended",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = BitchatColors.TextTertiary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = if (enoughSelectedApprovers) {
+                    "Bitchat will use this approval group for treasury activation. If you already have a community wallet, connect it below."
+                } else {
+                    "Select at least ${setup.recommendedSignerCount} people with verified wallets to match the recommended 2-of-3 treasury model."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (enoughSelectedApprovers) BitchatColors.TextSecondary else BitchatColors.TextPrimary
+            )
+
+            TextButton(
+                onClick = { showAdvancedDetails = !showAdvancedDetails },
+                enabled = !isSubmitting
+            ) {
+                Text(if (showAdvancedDetails) "Hide existing wallet details" else "I already have a community wallet")
+            }
+
+            if (showAdvancedDetails) {
+                OutlinedTextField(
+                    value = multisigAddress,
+                    onValueChange = { multisigAddress = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Community wallet ID") },
+                    singleLine = true,
+                    enabled = !isSubmitting
+                )
+                OutlinedTextField(
+                    value = vaultAddress,
+                    onValueChange = { vaultAddress = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Treasury vault ID (optional)") },
+                    singleLine = true,
+                    enabled = !isSubmitting
+                )
+                Text(
+                    text = "Advanced: only enter the vault ID if your treasury uses a non-default vault.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BitchatColors.TextTertiary
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    enabled = !isSubmitting,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = {
+                        onConfirm(
+                            multisigAddress,
+                            vaultAddress,
+                            selectedCandidates.map { it.walletAddress }
+                        )
+                    },
+                    enabled = !isSubmitting && enoughSelectedApprovers && (multisigAddress.isNotBlank() || !showAdvancedDetails),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BitchatColors.ButtonPrimaryBg,
+                        contentColor = Color.White
+                    )
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(
+                        if (isSubmitting) {
+                            if (multisigAddress.isBlank()) "Creating..." else "Connecting..."
+                        } else {
+                            if (multisigAddress.isBlank()) "Create Treasury" else "Connect Treasury"
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
     }
 }
 

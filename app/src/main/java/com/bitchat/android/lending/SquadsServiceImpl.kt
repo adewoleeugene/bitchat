@@ -5,8 +5,10 @@ import com.bitchat.android.data.local.entities.BorrowerType
 import com.bitchat.android.data.local.entities.LoanChainStatus
 import com.bitchat.android.data.local.entities.LoanRequestStatus
 import com.bitchat.android.solana.SolanaRpcService
+import com.bitchat.android.solana.SolanaKeyDerivation
 import com.bitchat.android.solana.SolanaTokenAccountUtils
 import com.bitchat.android.solana.SolanaWalletService
+import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,6 +49,82 @@ class SquadsServiceImpl @Inject constructor(
     override suspend fun fetchMultisigState(multisigAddress: String): Result<SquadsMultisigState> {
         val account = rpcService.getAccountInfoBase64(multisigAddress).getOrElse { return Result.failure(it) }
         return runCatching { SquadsCodec.parseMultisigState(multisigAddress, account.dataBase64) }
+    }
+
+    override suspend fun fetchProgramConfigState(): Result<SquadsProgramConfigState> {
+        val configAddress = SquadsCodec.getProgramConfigPda(squadsConfig.programId)
+        val account = rpcService.getAccountInfoBase64(configAddress).getOrElse { return Result.failure(it) }
+        return runCatching { SquadsCodec.parseProgramConfigState(account.dataBase64) }
+    }
+
+    override suspend fun createLendingMultisig(
+        memberWallets: List<String>,
+        threshold: Int
+    ): Result<SquadsCreatedMultisig> {
+        val creatorWallet = walletService.getPublicKeyBase58()
+            ?: return Result.failure(IllegalStateException("wallet_not_initialized"))
+        val uniqueMembers = buildList {
+            add(creatorWallet)
+            memberWallets
+                .map { it.trim() }
+                .filter { it.isNotBlank() && it != creatorWallet }
+                .forEach { add(it) }
+        }.distinct()
+        if (uniqueMembers.size < squadsConfig.targetMemberCount) {
+            return Result.failure(IllegalArgumentException("squad_member_count_must_be_at_least_${squadsConfig.targetMemberCount}"))
+        }
+        if (threshold != squadsConfig.requiredApprovalCount) {
+            return Result.failure(IllegalArgumentException("squad_threshold_must_be_${squadsConfig.requiredApprovalCount}"))
+        }
+
+        val programConfig = fetchProgramConfigState().getOrElse { return Result.failure(it) }
+        val createKeyPrivate = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val createKeyPublic = SolanaKeyDerivation.encodeBase58(SolanaKeyDerivation.derivePublicKey(createKeyPrivate))
+        val multisigAddress = SquadsCodec.getMultisigPda(squadsConfig.programId, createKeyPublic)
+        val vaultAddress = SquadsCodec.getVaultPda(squadsConfig.programId, multisigAddress, 0)
+        val blockhash = rpcService.getLatestBlockhash().getOrElse { return Result.failure(it) }
+        val signature = submitInstruction(
+            recentBlockhash = blockhash.blockhash,
+            signers = listOf(
+                SquadsCodec.SignedMessageSigner(creatorWallet) { message -> walletService.sign(message) },
+                SquadsCodec.SignedMessageSigner(createKeyPublic) { message ->
+                    walletService.signWithPrivateKeyBytes(message, createKeyPrivate)
+                }
+            ),
+            instructions = listOf(
+                SquadsCodec.SquadsInstruction(
+                    programId = squadsConfig.programId,
+                    accounts = listOf(
+                        SquadsCodec.SquadsAccountMeta(
+                            SquadsCodec.getProgramConfigPda(squadsConfig.programId),
+                            isSigner = false,
+                            isWritable = false
+                        ),
+                        SquadsCodec.SquadsAccountMeta(createKeyPublic, isSigner = true, isWritable = false),
+                        SquadsCodec.SquadsAccountMeta(creatorWallet, isSigner = true, isWritable = true),
+                        SquadsCodec.SquadsAccountMeta(multisigAddress, isSigner = false, isWritable = true),
+                        SquadsCodec.SquadsAccountMeta(SolanaTokenAccountUtils.SYSTEM_PROGRAM_ID, isSigner = false, isWritable = false),
+                        SquadsCodec.SquadsAccountMeta(programConfig.treasuryAddress, isSigner = false, isWritable = true)
+                    ),
+                    data = SquadsCodec.multisigCreateV2Data(
+                        threshold = threshold,
+                        members = uniqueMembers.map { memberWallet ->
+                            SquadsCodec.SquadsMember(memberWallet)
+                        }
+                    )
+                )
+            )
+        )
+        return Result.success(
+            SquadsCreatedMultisig(
+                multisigAddress = multisigAddress,
+                vaultAddress = vaultAddress,
+                txSignature = signature,
+                threshold = threshold,
+                memberCount = uniqueMembers.size,
+                cluster = squadsConfig.cluster
+            )
+        )
     }
 
     override suspend fun createLoanProposal(lendingId: String, requestId: String): Result<SquadsProposalState> {
@@ -226,6 +304,19 @@ class SquadsServiceImpl @Inject constructor(
             recentBlockhash = recentBlockhash,
             signerPublicKey = signerPublicKey,
             signer = { message -> walletService.sign(message) },
+            instructions = instructions
+        )
+        return rpcService.sendTransaction(signed).getOrElse { throw it }
+    }
+
+    private suspend fun submitInstruction(
+        recentBlockhash: String,
+        signers: List<SquadsCodec.SignedMessageSigner>,
+        instructions: List<SquadsCodec.SquadsInstruction>
+    ): String {
+        val signed = SquadsCodec.buildSignedLegacyTransaction(
+            recentBlockhash = recentBlockhash,
+            signers = signers,
             instructions = instructions
         )
         return rpcService.sendTransaction(signed).getOrElse { throw it }

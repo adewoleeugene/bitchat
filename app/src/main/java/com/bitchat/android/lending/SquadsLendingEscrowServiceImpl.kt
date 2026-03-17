@@ -325,7 +325,10 @@ class SquadsLendingEscrowServiceImpl @Inject constructor(
 
     override suspend fun createLoanDisbursementProposal(requestId: String): LendingEscrowProposalEntity {
         lendingDao.getEscrowProposalsForRequest(requestId)
-            .firstOrNull { it.proposalType == EscrowProposalType.LOAN_DISBURSEMENT }
+            .firstOrNull {
+                it.proposalType == EscrowProposalType.LOAN_DISBURSEMENT &&
+                    it.custodyExecutionStatus != CustodyExecutionStatus.FAILED
+            }
             ?.let { return it }
 
         val loan = lendingDao.getLoanRequestById(requestId)
@@ -545,7 +548,9 @@ class SquadsLendingEscrowServiceImpl @Inject constructor(
             .sumOf { it.stakeAmount }
         val loanRequests = lendingDao.getLoanRequestsForLendingChannel(lendingId)
         val repaymentsByRequest = loanRequests.associate { request ->
-            request.requestId to lendingDao.getRepaymentsForRequest(request.requestId).sumOf { it.amount }
+            request.requestId to lendingDao.getRepaymentsForRequest(request.requestId)
+                .filter { it.txStatus == EscrowTransferStatus.CONFIRMED }
+                .sumOf { it.amount }
         }
         val totalRepayments = repaymentsByRequest.values.sum()
         val reservedAmount = loanRequests

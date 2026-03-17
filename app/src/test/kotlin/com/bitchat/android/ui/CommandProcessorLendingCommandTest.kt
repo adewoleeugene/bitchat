@@ -52,12 +52,30 @@ class CommandProcessorLendingCommandTest {
     }
 
     @Test
+    fun getAllSlashCommands_doesNotSurfaceForwardDuringPhaseOne() {
+        val commands = commandProcessor.getAllSlashCommands("peer-me").map { it.command }
+
+        assertTrue("/lending forward" !in commands)
+    }
+
+    @Test
+    fun getAllSlashCommands_surfacesReviewDuringPhaseOne() {
+        state.setLendingChannelKeys(setOf("mesh:#coop"))
+        state.setCurrentChannel("mesh:#coop")
+        val commands = commandProcessor.getAllSlashCommands("peer-me").map { it.command }
+
+        assertTrue("/lending review" in commands)
+        assertTrue("/lending authorize" in commands)
+    }
+
+    @Test
     fun selectCommandSuggestion_lendingCreateReturnsExpectedHint() {
         val result = commandProcessor.selectCommandSuggestion(
-            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint>", "create lending channel")
+            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes>", "create lending channel")
         )
 
         assertEquals("/lending create #", result.prefillText)
+        assertTrue(result.hintText.orEmpty().contains("<minimum_votes>"))
     }
 
     @Test
@@ -72,6 +90,36 @@ class CommandProcessorLendingCommandTest {
         )
 
         assertEquals("/lending request ", result.prefillText)
-        assertTrue(result.hintText.orEmpty().contains("group"))
+        assertTrue(result.hintText.orEmpty().contains("<amount> [asset] <days> <purpose"))
+    }
+
+    @Test
+    fun selectCommandSuggestion_lendingReviewReturnsExpectedHint() {
+        val result = commandProcessor.selectCommandSuggestion(
+            CommandSuggestion(
+                "/lending review",
+                emptyList(),
+                "<request_id>",
+                "admin opens signer review"
+            )
+        )
+
+        assertEquals("/lending review ", result.prefillText)
+        assertTrue(result.hintText.orEmpty().contains("<request_id>"))
+    }
+
+    @Test
+    fun selectCommandSuggestion_lendingAuthorizeReturnsExpectedHint() {
+        val result = commandProcessor.selectCommandSuggestion(
+            CommandSuggestion(
+                "/lending authorize",
+                emptyList(),
+                "<request_id>",
+                "approver authorizes payout"
+            )
+        )
+
+        assertEquals("/lending authorize ", result.prefillText)
+        assertTrue(result.hintText.orEmpty().contains("<request_id>"))
     }
 }

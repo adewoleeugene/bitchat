@@ -63,10 +63,17 @@ object BorrowerType {
 
 object LoanRequestStatus {
     const val PENDING = "PENDING"
-    const val APPROVED = "APPROVED"
-    const val REJECTED = "REJECTED"
+    const val COMMUNITY_APPROVED = "COMMUNITY_APPROVED"
+    const val COMMUNITY_REJECTED = "COMMUNITY_REJECTED"
+    const val APPROVED = COMMUNITY_APPROVED
+    const val REJECTED = COMMUNITY_REJECTED
+    const val SIGNER_REVIEW = "SIGNER_REVIEW"
+    const val SIGNER_APPROVED = "SIGNER_APPROVED"
+    const val SIGNER_REJECTED = "SIGNER_REJECTED"
     const val DISBURSED = "DISBURSED"
+    const val PARTIALLY_REPAID = "PARTIALLY_REPAID"
     const val REPAID = "REPAID"
+    const val OVERDUE = "OVERDUE"
     const val FUNDED_ELSEWHERE = "FUNDED_ELSEWHERE"
     const val DEFAULTED = "DEFAULTED"
     const val CANCELLED = "CANCELLED"

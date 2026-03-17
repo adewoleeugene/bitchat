@@ -11,8 +11,7 @@ import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
 import com.bitchat.android.data.local.entities.CustodyExecutionStatus
 import com.bitchat.android.data.local.entities.EscrowProposalType
 import com.bitchat.android.data.local.entities.LoanRequestStatus
-import com.bitchat.android.lending.onchain.InitializeLendingChannelOnChainParams
-import com.bitchat.android.lending.onchain.LendingOnChainService
+import kotlin.math.max
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,8 +20,7 @@ import javax.inject.Singleton
 class LendingChannelServiceImpl @Inject constructor(
     private val lendingDao: LendingDao,
     private val lendingIdGenerator: LendingIdGenerator,
-    private val squadsService: SquadsService,
-    private val lendingOnChainService: LendingOnChainService
+    private val squadsService: SquadsService
 ) : LendingChannelService {
 
     override suspend fun getChannelByLendingId(lendingId: String): LendingChannelEntity? {
@@ -46,6 +44,15 @@ class LendingChannelServiceImpl @Inject constructor(
         preferredChannelKey: String?
     ): LendingChannelEntity? {
         val normalized = identifier.trim()
+        val exactPreferredKey = preferredChannelKey
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { if (it.startsWith("mesh:") || it.startsWith("geo:")) it else "mesh:$it" }
+
+        exactPreferredKey?.let { directKey ->
+            lendingDao.getLendingChannelByChannelKey(directKey)?.let { return it }
+        }
+
         if (normalized.isBlank()) return null
 
         val allChannels = lendingDao.getAllLendingChannels()
@@ -84,14 +91,22 @@ class LendingChannelServiceImpl @Inject constructor(
                     existing.stakeTokenDecimals == request.stakeTokenDecimals
             }
             val sameStake = existing.requiredStakeAmount == request.requiredStakeAmount
-            if (!sameAsset || !sameStake) {
+            val sameMinimumVotes = existing.minimumVoteCount == request.minimumVoteCount
+            val sameDuration = existing.maxLoanDurationDays == request.maxLoanDurationDays
+            if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration) {
                 val existingAsset = existing.stakeTokenSymbol.ifBlank { existing.stakeTokenMint }
-                val requestedAsset = request.stakeTokenSymbol.ifBlank { request.stakeTokenMint }
                 throw IllegalStateException(
-                    "lending channel ${request.displayName} already exists with ${existing.requiredStakeAmount} $existingAsset; use a different channel name or leave/reset the existing lending channel before changing it to ${request.requiredStakeAmount} $requestedAsset"
+                    "lending channel ${request.displayName} already exists with ${existing.requiredStakeAmount} $existingAsset, minimum ${existing.minimumVoteCount} votes, and max payback ${existing.maxLoanDurationDays} days; use a different channel name or leave/reset the existing lending channel before changing it"
                 )
             }
             return existing
+        }
+
+        if (request.minimumVoteCount <= 0) {
+            throw IllegalArgumentException("minimum_vote_count_must_be_positive")
+        }
+        if (request.maxLoanDurationDays <= 0) {
+            throw IllegalArgumentException("max_loan_duration_days_must_be_positive")
         }
 
         val lendingId = lendingIdGenerator.generateUniqueId { candidate ->
@@ -104,6 +119,8 @@ class LendingChannelServiceImpl @Inject constructor(
             creatorPeerId = request.creatorPeerId,
             creatorWalletAddress = request.creatorWalletAddress,
             requiredStakeAmount = request.requiredStakeAmount,
+            minimumVoteCount = request.minimumVoteCount,
+            maxLoanDurationDays = request.maxLoanDurationDays,
             stakeTokenMint = request.stakeTokenMint,
             stakeTokenSymbol = request.stakeTokenSymbol,
             stakeTokenDecimals = request.stakeTokenDecimals
@@ -130,104 +147,64 @@ class LendingChannelServiceImpl @Inject constructor(
                 credibilitySnapshotJson = ""
             )
         )
-        if (lendingOnChainService.isEnabled()) {
-            lendingOnChainService.initializeChannelOnChain(
-                InitializeLendingChannelOnChainParams(
-                    lendingId = lendingId,
-                    creatorWallet = request.creatorWalletAddress,
-                    quorumThresholdPercent = entity.quorumThresholdPercent,
-                    approvalThresholdPercent = entity.approvalThresholdPercent,
-                    memberCount = 1,
-                    lifecycleState = 0,
-                    requiredStakeAmount = entity.requiredStakeAmount,
-                    stakeTokenMint = entity.stakeTokenMint,
-                    stakeTokenDecimals = entity.stakeTokenDecimals,
-                    createdAt = entity.createdAt
-                )
-            ).getOrElse { throw it }
-        }
         return entity
     }
 
-    override suspend fun importDiscoveredChannel(announcement: LendingChannelAnnouncement): LendingChannelEntity {
-        val lendingId = announcement.lendingId.uppercase()
-        val existing = lendingDao.getLendingChannelById(lendingId)
-            ?: lendingDao.getLendingChannelByChannelKey(announcement.channelKey)
+    override suspend fun importSharedChannel(request: ImportLendingChannelRequest): LendingChannelEntity {
+        if (request.minimumVoteCount <= 0) {
+            throw IllegalArgumentException("minimum_vote_count_must_be_positive")
+        }
+        if (request.maxLoanDurationDays <= 0) {
+            throw IllegalArgumentException("max_loan_duration_days_must_be_positive")
+        }
 
-        val entity = (existing ?: LendingChannelEntity(
-            lendingId = lendingId,
-            channelKey = announcement.channelKey,
-            displayName = announcement.displayName,
-            creatorPeerId = announcement.creatorPeerId,
-            creatorWalletAddress = announcement.creatorWalletAddress,
-            requiredStakeAmount = announcement.requiredStakeAmount,
-            stakeTokenMint = announcement.stakeTokenMint,
-            stakeTokenSymbol = announcement.stakeTokenSymbol,
-            stakeTokenDecimals = announcement.stakeTokenDecimals
-        )).copy(
-            lendingId = lendingId,
-            channelKey = announcement.channelKey,
-            displayName = announcement.displayName,
-            creatorPeerId = announcement.creatorPeerId,
-            creatorWalletAddress = announcement.creatorWalletAddress,
-            requiredStakeAmount = announcement.requiredStakeAmount,
-            stakeTokenMint = announcement.stakeTokenMint,
-            stakeTokenSymbol = announcement.stakeTokenSymbol,
-            stakeTokenDecimals = announcement.stakeTokenDecimals,
-            escrowMultisigAddress = announcement.treasuryMultisigAddress
-                ?: existing?.escrowMultisigAddress
-                ?: "",
-            updatedAt = System.currentTimeMillis()
+        lendingDao.getLendingChannelById(request.lendingId.uppercase())?.let { existing ->
+            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals)
+            return existing
+        }
+
+        lendingDao.getLendingChannelByChannelKey(request.channelKey)?.let { existing ->
+            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals)
+            return existing
+        }
+
+        val entity = LendingChannelEntity(
+            lendingId = request.lendingId.uppercase(),
+            channelKey = request.channelKey,
+            displayName = request.displayName,
+            creatorPeerId = request.creatorPeerId,
+            creatorWalletAddress = request.creatorWalletAddress,
+            requiredStakeAmount = request.requiredStakeAmount,
+            minimumVoteCount = request.minimumVoteCount,
+            maxLoanDurationDays = request.maxLoanDurationDays,
+            stakeTokenMint = request.stakeTokenMint,
+            stakeTokenSymbol = request.stakeTokenSymbol,
+            stakeTokenDecimals = request.stakeTokenDecimals
         )
         lendingDao.insertLendingChannel(entity)
-        val existingSnapshot = lendingDao.getPoolSnapshot(entity.lendingId)
+        val seededStakeAmount = if (request.seedCreatorMembership) request.requiredStakeAmount else 0L
         lendingDao.upsertPoolSnapshot(
-            (existingSnapshot ?: LendingPoolSnapshotEntity(lendingId = entity.lendingId)).copy(
-                totalStakedAmount = announcement.totalStakedAmount ?: existingSnapshot?.totalStakedAmount ?: 0L,
-                availableLiquidityAmount = announcement.totalStakedAmount
-                    ?: existingSnapshot?.availableLiquidityAmount
-                    ?: 0L,
-                updatedAt = System.currentTimeMillis()
+            LendingPoolSnapshotEntity(
+                lendingId = entity.lendingId,
+                totalStakedAmount = seededStakeAmount,
+                reservedAmount = 0L,
+                disbursedAmount = 0L,
+                availableLiquidityAmount = seededStakeAmount
             )
         )
-        if (!announcement.treasuryOwnerAddress.isNullOrBlank()) {
-            lendingDao.upsertEscrowAccount(
-                (lendingDao.getEscrowAccount(entity.lendingId) ?: com.bitchat.android.data.local.entities.LendingEscrowAccountEntity(
+        if (request.seedCreatorMembership) {
+            lendingDao.upsertMembership(
+                LendingMembershipEntity(
                     lendingId = entity.lendingId,
-                    multisigAddress = announcement.treasuryMultisigAddress.orEmpty(),
-                    vaultAddress = announcement.treasuryOwnerAddress,
-                    vaultTokenAccountAddress = announcement.treasuryTokenAccountAddress.orEmpty()
-                )).copy(
-                    multisigAddress = announcement.treasuryMultisigAddress
-                        ?: lendingDao.getEscrowAccount(entity.lendingId)?.multisigAddress
-                        ?: "",
-                    vaultAddress = announcement.treasuryOwnerAddress,
-                    vaultTokenAccountAddress = announcement.treasuryTokenAccountAddress.orEmpty(),
-                    provider = announcement.custodyProvider ?: EscrowProvider.APP_TREASURY,
-                    custodyState = announcement.custodyState
-                        ?: com.bitchat.android.data.local.entities.EscrowCustodyState.PROVISIONED,
-                    updatedAt = System.currentTimeMillis()
+                    memberPeerId = request.creatorPeerId,
+                    walletAddress = request.creatorWalletAddress,
+                    stakeAmount = request.requiredStakeAmount,
+                    depositStatus = EscrowTransferStatus.CONFIRMED,
+                    joinStatus = LendingMemberStatus.ACTIVE,
+                    credibilityScore = 100,
+                    credibilitySnapshotJson = """{"source":"explicit_invite"}"""
                 )
             )
-        }
-        if (!announcement.confirmedMemberPeerId.isNullOrBlank() &&
-            !announcement.confirmedMemberWalletAddress.isNullOrBlank() &&
-            announcement.confirmedMemberStakeAmount != null
-        ) {
-            val existingMembership = lendingDao.getMembership(entity.lendingId, announcement.confirmedMemberPeerId)
-            val importedMembership = (existingMembership ?: LendingMembershipEntity(
-                lendingId = entity.lendingId,
-                memberPeerId = announcement.confirmedMemberPeerId,
-                walletAddress = announcement.confirmedMemberWalletAddress,
-                stakeAmount = announcement.confirmedMemberStakeAmount
-            )).copy(
-                walletAddress = announcement.confirmedMemberWalletAddress,
-                stakeAmount = announcement.confirmedMemberStakeAmount,
-                depositStatus = EscrowTransferStatus.CONFIRMED,
-                joinStatus = LendingMemberStatus.ACTIVE,
-                updatedAt = System.currentTimeMillis()
-            )
-            lendingDao.upsertMembership(importedMembership)
         }
         return entity
     }
@@ -235,6 +212,9 @@ class LendingChannelServiceImpl @Inject constructor(
     override suspend fun configureSquad(request: ConfigureLendingSquadRequest): LendingChannelEntity {
         val channel = getChannelByIdentifier(request.identifier, request.preferredChannelKey)
             ?: throw IllegalArgumentException("lending_channel_not_found")
+        if (channel.creatorPeerId != request.actorPeerId) {
+            throw IllegalStateException("owner_only_squad_configuration")
+        }
         val multisigAddress = request.multisigAddress.trim()
         if (multisigAddress.isBlank()) throw IllegalArgumentException("squad_multisig_required")
 
@@ -253,6 +233,27 @@ class LendingChannelServiceImpl @Inject constructor(
                 index = 0
             )
 
+        return persistSquadConfiguration(channel, multisigAddress, vaultAddress)
+    }
+
+    override suspend fun createSquad(request: CreateLendingSquadRequest): LendingChannelEntity {
+        val channel = getChannelByIdentifier(request.identifier, request.preferredChannelKey)
+            ?: throw IllegalArgumentException("lending_channel_not_found")
+        if (channel.creatorPeerId != request.actorPeerId) {
+            throw IllegalStateException("owner_only_squad_configuration")
+        }
+        val created = squadsService.createLendingMultisig(
+            memberWallets = request.memberWalletAddresses,
+            threshold = request.threshold
+        ).getOrElse { throw it }
+        return persistSquadConfiguration(channel, created.multisigAddress, created.vaultAddress)
+    }
+
+    private suspend fun persistSquadConfiguration(
+        channel: LendingChannelEntity,
+        multisigAddress: String,
+        vaultAddress: String
+    ): LendingChannelEntity {
         val updatedChannel = channel.copy(
             escrowMultisigAddress = multisigAddress,
             updatedAt = System.currentTimeMillis()
@@ -293,6 +294,61 @@ class LendingChannelServiceImpl @Inject constructor(
             updatedAt = System.currentTimeMillis()
         )
         lendingDao.upsertMembership(membership)
+        refreshPoolSnapshot(request.lendingId)
+        return membership
+    }
+
+    override suspend fun importMembershipUpdate(
+        message: LendingMembershipMessage,
+        senderPeerId: String?
+    ): LendingMembershipEntity? {
+        val channel = lendingDao.getLendingChannelById(message.lendingId.uppercase()) ?: return null
+        if (senderPeerId.isNullOrBlank() || senderPeerId != message.memberPeerId) return null
+        if (message.walletAddress.isBlank()) return null
+        if (message.stakeAmount != channel.requiredStakeAmount) return null
+
+        val normalizedJoinStatus = when (message.joinStatus) {
+            LendingMemberStatus.ACTIVE,
+            LendingMemberStatus.PENDING,
+            LendingMemberStatus.SUSPENDED,
+            LendingMemberStatus.EXITED -> message.joinStatus
+            else -> return null
+        }
+        val normalizedDepositStatus = when (message.depositStatus) {
+            EscrowTransferStatus.CONFIRMED,
+            EscrowTransferStatus.PENDING,
+            EscrowTransferStatus.FAILED,
+            EscrowTransferStatus.RELEASED -> message.depositStatus
+            else -> return null
+        }
+
+        val existing = lendingDao.getMembership(channel.lendingId, message.memberPeerId)
+        val importedJoinStatus = when {
+            existing?.joinStatus == LendingMemberStatus.ACTIVE &&
+                existing.depositStatus == EscrowTransferStatus.CONFIRMED -> existing.joinStatus
+            normalizedJoinStatus == LendingMemberStatus.EXITED -> LendingMemberStatus.EXITED
+            else -> LendingMemberStatus.PENDING
+        }
+        val importedDepositStatus = when {
+            existing?.joinStatus == LendingMemberStatus.ACTIVE &&
+                existing.depositStatus == EscrowTransferStatus.CONFIRMED -> existing.depositStatus
+            normalizedJoinStatus == LendingMemberStatus.EXITED ||
+                normalizedDepositStatus == EscrowTransferStatus.RELEASED -> EscrowTransferStatus.RELEASED
+            else -> EscrowTransferStatus.PENDING
+        }
+        val membership = (existing ?: LendingMembershipEntity(
+            lendingId = channel.lendingId,
+            memberPeerId = message.memberPeerId,
+            walletAddress = message.walletAddress,
+            stakeAmount = message.stakeAmount
+        )).copy(
+            walletAddress = message.walletAddress,
+            stakeAmount = message.stakeAmount,
+            depositStatus = importedDepositStatus,
+            joinStatus = importedJoinStatus,
+            updatedAt = maxOf(existing?.updatedAt ?: 0L, message.updatedAt, System.currentTimeMillis())
+        )
+        lendingDao.upsertMembership(membership)
         return membership
     }
 
@@ -324,5 +380,68 @@ class LendingChannelServiceImpl @Inject constructor(
                 }
         }
         return LendingChannelStatus(channel, snapshot, memberships, activeLoans, unreconciledActiveMembers)
+    }
+
+    private suspend fun refreshPoolSnapshot(lendingId: String) {
+        val memberships = lendingDao.getMembershipsForLendingChannel(lendingId)
+        val activeStake = memberships
+            .filter { it.joinStatus == LendingMemberStatus.ACTIVE && it.depositStatus == EscrowTransferStatus.CONFIRMED }
+            .sumOf { it.stakeAmount }
+        val loanRequests = lendingDao.getLoanRequestsForLendingChannel(lendingId)
+        val confirmedRepaymentsByRequest = loanRequests.associate { request ->
+            request.requestId to lendingDao.getRepaymentsForRequest(request.requestId)
+                .filter { it.txStatus == EscrowTransferStatus.CONFIRMED }
+                .sumOf { it.amount }
+        }
+        val totalRepayments = confirmedRepaymentsByRequest.values.sum()
+        val reservedAmount = loanRequests
+            .filter { it.status == LoanRequestStatus.APPROVED }
+            .sumOf { request ->
+                max(request.principalAmount - (confirmedRepaymentsByRequest[request.requestId] ?: 0L), 0L)
+            }
+        val disbursedAmount = loanRequests
+            .filter { it.status in setOf(LoanRequestStatus.DISBURSED, LoanRequestStatus.REPAID, LoanRequestStatus.DEFAULTED) }
+            .sumOf { request ->
+                max(request.principalAmount - (confirmedRepaymentsByRequest[request.requestId] ?: 0L), 0L)
+            }
+        lendingDao.upsertPoolSnapshot(
+            LendingPoolSnapshotEntity(
+                lendingId = lendingId,
+                totalStakedAmount = activeStake,
+                reservedAmount = reservedAmount,
+                disbursedAmount = disbursedAmount,
+                availableLiquidityAmount = max(activeStake + totalRepayments - reservedAmount - disbursedAmount, 0L),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun validateCompatibleChannel(
+        existing: LendingChannelEntity,
+        requestedDisplayName: String,
+        requiredStakeAmount: Long,
+        minimumVoteCount: Int,
+        maxLoanDurationDays: Int,
+        stakeTokenMint: String,
+        stakeTokenSymbol: String,
+        stakeTokenDecimals: Int
+    ) {
+        val sameAsset = if (
+            isNativeSolStakeAsset(existing.stakeTokenMint, existing.stakeTokenSymbol) &&
+            isNativeSolStakeAsset(stakeTokenMint, stakeTokenSymbol)
+        ) {
+            true
+        } else {
+            existing.stakeTokenMint == stakeTokenMint &&
+                existing.stakeTokenSymbol == stakeTokenSymbol &&
+                existing.stakeTokenDecimals == stakeTokenDecimals
+        }
+        val sameStake = existing.requiredStakeAmount == requiredStakeAmount
+        val sameMinimumVotes = existing.minimumVoteCount == minimumVoteCount
+        val sameDuration = existing.maxLoanDurationDays == maxLoanDurationDays
+        val sameName = existing.displayName.equals(requestedDisplayName, ignoreCase = true)
+        if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration || !sameName) {
+            throw IllegalStateException("lending_channel_conflict")
+        }
     }
 }
