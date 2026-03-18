@@ -29,6 +29,7 @@ data class LendingChannelEntity(
     val quorumThresholdPercent: Int = 60,
     val approvalThresholdPercent: Int = 50,
     val votingWindowHours: Int = 24,
+    val defaultGracePeriodDays: Int = 7,
     val lifecycleState: String = LendingLifecycleState.ACTIVE,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

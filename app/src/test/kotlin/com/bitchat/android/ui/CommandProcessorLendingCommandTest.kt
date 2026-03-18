@@ -71,11 +71,11 @@ class CommandProcessorLendingCommandTest {
     @Test
     fun selectCommandSuggestion_lendingCreateReturnsExpectedHint() {
         val result = commandProcessor.selectCommandSuggestion(
-            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes>", "create lending channel")
+            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes> <voting_hours> [max_payback_days] [grace_period_days]", "create lending channel")
         )
 
         assertEquals("/lending create #", result.prefillText)
-        assertTrue(result.hintText.orEmpty().contains("<minimum_votes>"))
+        assertTrue(result.hintText.orEmpty().contains("[grace_period_days]"))
     }
 
     @Test

@@ -31,6 +31,9 @@ interface LendingChannelService {
     suspend fun getMemberships(lendingId: String): List<LendingMembershipEntity>
     suspend fun getPoolSnapshot(lendingId: String): LendingPoolSnapshotEntity?
     suspend fun getStatus(identifier: String, preferredChannelKey: String? = null): LendingChannelStatus?
+    suspend fun updateMembershipStake(lendingId: String, memberPeerId: String, newStakeAmount: Long)
+    suspend fun transferOwnership(lendingId: String, currentOwnerPeerId: String, newOwnerPeerId: String): LendingChannelEntity
+    suspend fun closeChannel(lendingId: String)
 }
 
 interface LendingCredibilityService {
@@ -62,6 +65,7 @@ interface LendingLoanService {
     suspend fun getLoanRequests(lendingId: String): List<LoanRequestEntity>
     suspend fun getLoanRequest(requestId: String): LoanRequestEntity?
     suspend fun reconcileLoanRequestState(requestId: String): LoanRequestEntity?
+    suspend fun reconcileOverdueAndDefaultedLoans(): List<LoanStatusTransition>
     suspend fun getSignerReview(requestId: String): LendingSignerReviewEntity?
     suspend fun getLinkedLoanRequests(requestId: String): List<LoanRequestEntity>
     suspend fun getVotes(requestId: String): List<LoanVoteEntity>
@@ -112,7 +116,9 @@ data class CreateLendingChannelRequest(
     val maxLoanDurationDays: Int = 14,
     val stakeTokenMint: String,
     val stakeTokenSymbol: String = "",
-    val stakeTokenDecimals: Int = 6
+    val stakeTokenDecimals: Int = 6,
+    val votingWindowHours: Int = 24,
+    val defaultGracePeriodDays: Int = 7
 )
 
 data class RecordPendingMembershipRequest(
@@ -136,7 +142,9 @@ data class ImportLendingChannelRequest(
     val stakeTokenMint: String,
     val stakeTokenSymbol: String = "",
     val stakeTokenDecimals: Int = 6,
-    val seedCreatorMembership: Boolean = false
+    val seedCreatorMembership: Boolean = false,
+    val votingWindowHours: Int = 24,
+    val defaultGracePeriodDays: Int = 7
 )
 
 data class ConfigureLendingSquadRequest(
@@ -245,7 +253,9 @@ data class LoanVoteResult(
     val votes: List<LoanVoteEntity>,
     val quorumReached: Boolean,
     val approved: Boolean,
-    val rejected: Boolean
+    val rejected: Boolean,
+    val voterLockedAmount: Long = 0,
+    val fullyBacked: Boolean = false
 )
 
 data class RecordLoanRepaymentRequest(
@@ -279,6 +289,14 @@ data class LoanRepaymentResult(
     val remainingBalance: Long
 )
 
+data class LoanStatusTransition(
+    val requestId: String,
+    val lendingId: String,
+    val previousStatus: String,
+    val newStatus: String,
+    val channelDisplayName: String = ""
+)
+
 data class LoanCancellationResult(
     val request: LoanRequestEntity,
     val affectedRequests: List<LoanRequestEntity>
@@ -310,6 +328,41 @@ const val REQUIRED_LOAN_APPROVAL_COUNT = 2
 const val TARGET_LOAN_APPROVAL_MEMBER_COUNT = 3
 const val NATIVE_SOL_ASSET = "SOL"
 const val NATIVE_SOL_REFUND_FEE_RESERVE_LAMPORTS = 10_000L
+
+/** Maximum percentage of a voter's original stake that can be at risk across all active loans. */
+const val VOTER_MAX_RISK_PERCENT = 50
+/** Credibility score penalty applied to each voter who backed a defaulted loan. */
+const val DEFAULT_LOSS_CREDIBILITY_PENALTY = 15
+/** Suspension threshold: member is suspended if remaining stake drops below this % of channel minimum. */
+const val VOTER_SUSPENSION_THRESHOLD_PERCENT = 50
+
+/**
+ * Calculate the equal per-voter share of a loan amount.
+ * Remainder goes to the first voter (ceiling division for first, floor for rest).
+ */
+fun calculatePerVoterShare(loanAmount: Long, yesVoterCount: Int): Long {
+    if (yesVoterCount <= 0) return loanAmount
+    return loanAmount / yesVoterCount
+}
+
+/** Remainder amount assigned to the first YES voter to cover rounding. */
+fun calculatePerVoterRemainder(loanAmount: Long, yesVoterCount: Int): Long {
+    if (yesVoterCount <= 0) return 0
+    return loanAmount - (loanAmount / yesVoterCount) * yesVoterCount
+}
+
+/** Maximum amount a voter can back, respecting the 50% safety net. */
+fun maxBackingForVoter(membership: LendingMembershipEntity): Long {
+    val maxAtRisk = membership.stakeAmount * VOTER_MAX_RISK_PERCENT / 100
+    return (maxAtRisk - membership.lockedStakeAmount).coerceAtLeast(0)
+}
+
+/** Whether a member should be suspended due to stake falling below threshold. */
+fun isVoterBelowSuspensionThreshold(membership: LendingMembershipEntity, channel: LendingChannelEntity): Boolean {
+    val effectiveStake = membership.stakeAmount - membership.lockedStakeAmount
+    val threshold = channel.requiredStakeAmount * VOTER_SUSPENSION_THRESHOLD_PERCENT / 100
+    return effectiveStake < threshold
+}
 
 fun defaultVoteChoice(raw: String): String {
     return when (raw.trim().uppercase()) {

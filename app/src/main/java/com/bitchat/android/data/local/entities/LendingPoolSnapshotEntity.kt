@@ -10,6 +10,7 @@ data class LendingPoolSnapshotEntity(
     val totalStakedAmount: Long = 0,
     val reservedAmount: Long = 0,
     val disbursedAmount: Long = 0,
+    val totalLockedAmount: Long = 0,
     val availableLiquidityAmount: Long = 0,
     val updatedAt: Long = System.currentTimeMillis()
 )

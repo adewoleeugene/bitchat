@@ -46,7 +46,7 @@ import com.bitchat.android.data.local.entities.WalletEntity
         LoanRepaymentEntity::class,
         CredibilityProfileEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -1004,6 +1004,24 @@ abstract class SolanaDatabase : RoomDatabase() {
                     ON `lending_signer_reviews` (`status`)
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Voter-backed lending: per-vote backing tracking
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `lockedAmount` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `interestEarned` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `lossAbsorbed` INTEGER NOT NULL DEFAULT 0")
+                // Membership locked stake and suspension tracking
+                db.execSQL("ALTER TABLE `lending_memberships` ADD COLUMN `lockedStakeAmount` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `lending_memberships` ADD COLUMN `suspendedReason` TEXT DEFAULT NULL")
+                // Loan backing model (POOL for legacy, VOTER_BACKED for new)
+                db.execSQL("ALTER TABLE `loan_requests` ADD COLUMN `backingModel` TEXT NOT NULL DEFAULT 'VOTER_BACKED'")
+                // Pool snapshot locked amount tracking
+                db.execSQL("ALTER TABLE `lending_pool_snapshots` ADD COLUMN `totalLockedAmount` INTEGER NOT NULL DEFAULT 0")
+                // Configurable grace period per channel
+                db.execSQL("ALTER TABLE `lending_channels` ADD COLUMN `defaultGracePeriodDays` INTEGER NOT NULL DEFAULT 7")
             }
         }
     }

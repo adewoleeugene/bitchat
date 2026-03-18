@@ -510,6 +510,28 @@ private fun LoanRequestMessageItem(
                 fontFamily = SatoshiFamily,
                 fontSize = (BASE_FONT_SIZE - 2).sp
             )
+            // Aggregate backing info for voter-backed loans
+            if (request.backingModel == "VOTER_BACKED" && status in setOf(
+                    LoanRequestStatus.PENDING,
+                    LoanRequestStatus.COMMUNITY_APPROVED,
+                    LoanRequestStatus.SIGNER_REVIEW,
+                    LoanRequestStatus.SIGNER_APPROVED
+                )
+            ) {
+                Spacer(modifier = Modifier.height(2.dp))
+                val backingLabel = when (status) {
+                    LoanRequestStatus.COMMUNITY_APPROVED,
+                    LoanRequestStatus.SIGNER_REVIEW,
+                    LoanRequestStatus.SIGNER_APPROVED -> "Fully backed by voters"
+                    else -> "Voter-backed • votes open"
+                }
+                Text(
+                    text = backingLabel,
+                    color = BitchatColors.StatusInfo,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
             if (treasurySetupRequired) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(

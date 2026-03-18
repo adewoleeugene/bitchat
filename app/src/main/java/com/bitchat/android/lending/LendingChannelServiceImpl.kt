@@ -5,6 +5,7 @@ import com.bitchat.android.data.local.entities.EscrowTransferStatus
 import com.bitchat.android.data.local.entities.EscrowCustodyState
 import com.bitchat.android.data.local.entities.EscrowProvider
 import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingLifecycleState
 import com.bitchat.android.data.local.entities.LendingMemberStatus
 import com.bitchat.android.data.local.entities.LendingMembershipEntity
 import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
@@ -93,10 +94,12 @@ class LendingChannelServiceImpl @Inject constructor(
             val sameStake = existing.requiredStakeAmount == request.requiredStakeAmount
             val sameMinimumVotes = existing.minimumVoteCount == request.minimumVoteCount
             val sameDuration = existing.maxLoanDurationDays == request.maxLoanDurationDays
-            if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration) {
+            val sameVotingWindow = existing.votingWindowHours == request.votingWindowHours
+            val sameGracePeriod = existing.defaultGracePeriodDays == request.defaultGracePeriodDays
+            if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration || !sameVotingWindow || !sameGracePeriod) {
                 val existingAsset = existing.stakeTokenSymbol.ifBlank { existing.stakeTokenMint }
                 throw IllegalStateException(
-                    "lending channel ${request.displayName} already exists with ${existing.requiredStakeAmount} $existingAsset, minimum ${existing.minimumVoteCount} votes, and max payback ${existing.maxLoanDurationDays} days; use a different channel name or leave/reset the existing lending channel before changing it"
+                    "lending channel ${request.displayName} already exists with ${existing.requiredStakeAmount} $existingAsset, minimum ${existing.minimumVoteCount} votes, voting window ${existing.votingWindowHours}h, max payback ${existing.maxLoanDurationDays} days, and grace period ${existing.defaultGracePeriodDays} days; use a different channel name or leave/reset the existing lending channel before changing it"
                 )
             }
             return existing
@@ -112,6 +115,10 @@ class LendingChannelServiceImpl @Inject constructor(
         val lendingId = lendingIdGenerator.generateUniqueId { candidate ->
             lendingDao.hasLendingId(candidate)
         }
+        if (request.votingWindowHours <= 0) {
+            throw IllegalArgumentException("voting_window_hours_must_be_positive")
+        }
+
         val entity = LendingChannelEntity(
             lendingId = lendingId,
             channelKey = request.channelKey,
@@ -123,7 +130,9 @@ class LendingChannelServiceImpl @Inject constructor(
             maxLoanDurationDays = request.maxLoanDurationDays,
             stakeTokenMint = request.stakeTokenMint,
             stakeTokenSymbol = request.stakeTokenSymbol,
-            stakeTokenDecimals = request.stakeTokenDecimals
+            stakeTokenDecimals = request.stakeTokenDecimals,
+            votingWindowHours = request.votingWindowHours,
+            defaultGracePeriodDays = request.defaultGracePeriodDays
         )
         lendingDao.insertLendingChannel(entity)
         lendingDao.upsertPoolSnapshot(
@@ -159,12 +168,12 @@ class LendingChannelServiceImpl @Inject constructor(
         }
 
         lendingDao.getLendingChannelById(request.lendingId.uppercase())?.let { existing ->
-            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals)
+            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals, request.votingWindowHours, request.defaultGracePeriodDays)
             return existing
         }
 
         lendingDao.getLendingChannelByChannelKey(request.channelKey)?.let { existing ->
-            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals)
+            validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals, request.votingWindowHours, request.defaultGracePeriodDays)
             return existing
         }
 
@@ -179,7 +188,9 @@ class LendingChannelServiceImpl @Inject constructor(
             maxLoanDurationDays = request.maxLoanDurationDays,
             stakeTokenMint = request.stakeTokenMint,
             stakeTokenSymbol = request.stakeTokenSymbol,
-            stakeTokenDecimals = request.stakeTokenDecimals
+            stakeTokenDecimals = request.stakeTokenDecimals,
+            votingWindowHours = request.votingWindowHours,
+            defaultGracePeriodDays = request.defaultGracePeriodDays
         )
         lendingDao.insertLendingChannel(entity)
         val seededStakeAmount = if (request.seedCreatorMembership) request.requiredStakeAmount else 0L
@@ -360,6 +371,70 @@ class LendingChannelServiceImpl @Inject constructor(
         return lendingDao.getPoolSnapshot(lendingId)
     }
 
+    override suspend fun updateMembershipStake(lendingId: String, memberPeerId: String, newStakeAmount: Long) {
+        val membership = lendingDao.getMembership(lendingId, memberPeerId)
+            ?: throw IllegalArgumentException("membership_not_found")
+        lendingDao.upsertMembership(
+            membership.copy(
+                stakeAmount = newStakeAmount,
+                joinStatus = if (membership.joinStatus == LendingMemberStatus.SUSPENDED) LendingMemberStatus.ACTIVE else membership.joinStatus,
+                suspendedReason = if (membership.joinStatus == LendingMemberStatus.SUSPENDED) null else membership.suspendedReason,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        // Refresh pool snapshot to reflect updated stake
+        val memberships = lendingDao.getMembershipsForLendingChannel(lendingId)
+        val activeStake = memberships
+            .filter { it.joinStatus == LendingMemberStatus.ACTIVE && it.depositStatus == EscrowTransferStatus.CONFIRMED }
+            .sumOf { if (it.memberPeerId == memberPeerId) newStakeAmount else it.stakeAmount }
+        val existing = lendingDao.getPoolSnapshot(lendingId)
+        if (existing != null) {
+            lendingDao.upsertPoolSnapshot(
+                existing.copy(
+                    totalStakedAmount = activeStake,
+                    availableLiquidityAmount = (activeStake - existing.reservedAmount - existing.disbursedAmount).coerceAtLeast(0),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    override suspend fun transferOwnership(lendingId: String, currentOwnerPeerId: String, newOwnerPeerId: String): LendingChannelEntity {
+        val channel = lendingDao.getLendingChannelById(lendingId)
+            ?: throw IllegalArgumentException("lending_channel_not_found")
+        if (channel.creatorPeerId != currentOwnerPeerId) {
+            throw IllegalStateException("only_owner_can_transfer")
+        }
+        if (currentOwnerPeerId == newOwnerPeerId) {
+            throw IllegalArgumentException("cannot_transfer_to_self")
+        }
+        val newOwnerMembership = lendingDao.getMembership(lendingId, newOwnerPeerId)
+            ?: throw IllegalArgumentException("new_owner_not_a_member")
+        if (newOwnerMembership.joinStatus != LendingMemberStatus.ACTIVE ||
+            newOwnerMembership.depositStatus != EscrowTransferStatus.CONFIRMED
+        ) {
+            throw IllegalStateException("new_owner_must_be_active_member")
+        }
+        val updated = channel.copy(
+            creatorPeerId = newOwnerPeerId,
+            updatedAt = System.currentTimeMillis()
+        )
+        lendingDao.insertLendingChannel(updated)
+        return updated
+    }
+
+    override suspend fun closeChannel(lendingId: String) {
+        val channel = lendingDao.getLendingChannelById(lendingId) ?: return
+        if (channel.lifecycleState != LendingLifecycleState.CLOSED) {
+            lendingDao.insertLendingChannel(
+                channel.copy(
+                    lifecycleState = LendingLifecycleState.CLOSED,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
     override suspend fun getStatus(
         identifier: String,
         preferredChannelKey: String?
@@ -424,7 +499,9 @@ class LendingChannelServiceImpl @Inject constructor(
         maxLoanDurationDays: Int,
         stakeTokenMint: String,
         stakeTokenSymbol: String,
-        stakeTokenDecimals: Int
+        stakeTokenDecimals: Int,
+        votingWindowHours: Int = existing.votingWindowHours,
+        defaultGracePeriodDays: Int = existing.defaultGracePeriodDays
     ) {
         val sameAsset = if (
             isNativeSolStakeAsset(existing.stakeTokenMint, existing.stakeTokenSymbol) &&
@@ -439,8 +516,10 @@ class LendingChannelServiceImpl @Inject constructor(
         val sameStake = existing.requiredStakeAmount == requiredStakeAmount
         val sameMinimumVotes = existing.minimumVoteCount == minimumVoteCount
         val sameDuration = existing.maxLoanDurationDays == maxLoanDurationDays
+        val sameVotingWindow = existing.votingWindowHours == votingWindowHours
+        val sameGracePeriod = existing.defaultGracePeriodDays == defaultGracePeriodDays
         val sameName = existing.displayName.equals(requestedDisplayName, ignoreCase = true)
-        if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration || !sameName) {
+        if (!sameAsset || !sameStake || !sameMinimumVotes || !sameDuration || !sameVotingWindow || !sameGracePeriod || !sameName) {
             throw IllegalStateException("lending_channel_conflict")
         }
     }

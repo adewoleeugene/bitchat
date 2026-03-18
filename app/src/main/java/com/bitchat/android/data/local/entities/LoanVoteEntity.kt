@@ -16,6 +16,9 @@ data class LoanVoteEntity(
     val voterPeerId: String,
     val lendingId: String,
     val voteChoice: String,
+    val lockedAmount: Long = 0,
+    val interestEarned: Long = 0,
+    val lossAbsorbed: Long = 0,
     val votedAt: Long = System.currentTimeMillis()
 )
 

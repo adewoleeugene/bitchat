@@ -14,6 +14,8 @@ data class LendingChannelInvite(
     val stakeTokenMint: String,
     val stakeTokenSymbol: String = "",
     val stakeTokenDecimals: Int = 6,
+    val votingWindowHours: Int = 24,
+    val defaultGracePeriodDays: Int = 7,
     val creatorMembershipConfirmed: Boolean = true
 )
 

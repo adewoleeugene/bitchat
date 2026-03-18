@@ -109,7 +109,11 @@ class CommandProcessor(
         CommandSuggestion("/lending authorize", emptyList(), "<request_id>", "approver authorizes payout during signer review"),
         CommandSuggestion("/lending disburse", emptyList(), "<request_id>", "admin disburses an approved loan"),
         CommandSuggestion("/lending repay", emptyList(), "<request_id> <amount> [asset]", "repay a loan"),
-        CommandSuggestion("/lending leave", emptyList(), "[#channel|lendingId]", "leave lending channel")
+        CommandSuggestion("/lending forward", emptyList(), "<request_id> <#channel|lendingId>", "admin forwards loan to another channel"),
+        CommandSuggestion("/lending squad", emptyList(), "[#channel|lendingId] <multisig> [vault]", "configure squad escrow"),
+        CommandSuggestion("/lending leave", emptyList(), "[#channel|lendingId]", "leave lending channel"),
+        CommandSuggestion("/lending topup", emptyList(), "", "restore your stake after suspension"),
+        CommandSuggestion("/lending transfer-ownership", emptyList(), "@nickname", "transfer channel ownership to another member")
     )
     
     // MARK: - Command Processing
@@ -813,6 +817,8 @@ class CommandProcessor(
             "disburse" -> withLendingChannelContext("disburse") { handleLendingDisburse(parts, myPeerID, viewModel, onSendMessage) }
             "repay" -> withLendingChannelContext("repay") { handleLendingRepay(parts, myPeerID, onSendMessage) }
             "leave" -> withLendingChannelContext("leave") { handleLendingLeave(parts, myPeerID, viewModel, meshService) }
+            "topup" -> withLendingChannelContext("topup") { handleLendingTopup(parts, myPeerID, viewModel) }
+            "transfer-ownership" -> withLendingChannelContext("transfer-ownership") { handleLendingTransferOwnership(parts, myPeerID, viewModel, meshService) }
             else -> CommandResult(
                 prefillText = "/lending ",
                 hintText = lendingHint()
@@ -840,10 +846,10 @@ class CommandProcessor(
         meshService: BluetoothMeshService,
         onSendMessage: (String, List<String>, String?) -> Unit
     ): CommandResult? {
-        if (parts.size < 6) {
+        if (parts.size < 7) {
             return CommandResult(
                 prefillText = "/lending create #",
-                hintText = "usage: /lending create #channel <stake_amount> <mint> <minimum_votes> [max_payback_days]"
+                hintText = "usage: /lending create #channel <stake_amount> <mint> <minimum_votes> <voting_hours> [max_payback_days] [grace_period_days]"
             )
         }
 
@@ -863,7 +869,9 @@ class CommandProcessor(
         val channel = if (channelName.startsWith("#")) channelName else "#$channelName"
         val mint = parts[4]
         val minimumVotes = parts[5].toIntOrNull()
-        val maxLoanDurationDays = parts.getOrNull(6)?.toIntOrNull() ?: 14
+        val votingHours = parts[6].toIntOrNull()
+        val maxLoanDurationDays = parts.getOrNull(7)?.toIntOrNull() ?: 14
+        val gracePeriodDays = parts.getOrNull(8)?.toIntOrNull() ?: 7
         val parsedStake = parseLendingStakeAmount(parts[3], mint)
         if (parsedStake == null || parsedStake.amountAtomic <= 0L) {
             return CommandResult(
@@ -877,9 +885,15 @@ class CommandProcessor(
                 hintText = "minimum votes must be a positive integer"
             )
         }
-        if (maxLoanDurationDays <= 0) {
+        if (votingHours == null || votingHours <= 0) {
             return CommandResult(
                 prefillText = "/lending create $channel ${parts[3]} $mint ${parts[5]} ",
+                hintText = "voting window hours must be a positive integer"
+            )
+        }
+        if (maxLoanDurationDays <= 0) {
+            return CommandResult(
+                prefillText = "/lending create $channel ${parts[3]} $mint ${parts[5]} ${parts[6]} ",
                 hintText = "max payback days must be a positive integer"
             )
         }
@@ -903,9 +917,17 @@ class CommandProcessor(
                     maxLoanDurationDays = maxLoanDurationDays,
                     stakeTokenMint = parsedStake.mint,
                     stakeTokenSymbol = parsedStake.symbol,
-                    stakeTokenDecimals = parsedStake.decimals
+                    stakeTokenDecimals = parsedStake.decimals,
+                    votingWindowHours = votingHours,
+                    defaultGracePeriodDays = gracePeriodDays
                 )
             )
+            // Auto-provision treasury escrow immediately at channel creation
+            try {
+                escrowService.provisionChannelEscrow(lendingChannel.lendingId)
+            } catch (_: Throwable) {
+                // Non-blocking — treasury starts as app treasury and upgrades to Squads later
+            }
             if (isNativeSolStakeAsset(lendingChannel.stakeTokenMint, lendingChannel.stakeTokenSymbol) && viewModel != null) {
                 publishLendingChannelConfigMessage(
                     buildLendingChannelConfigMessage(lendingChannel),
@@ -915,7 +937,7 @@ class CommandProcessor(
                 viewModel.switchToChannelWithTimelineContext(lendingChannel.channelKey)
                 viewModel.requestLendingStakeApproval(lendingChannel.lendingId, myPeerID)
                 addSystemMessage(
-                    "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • min votes ${lendingChannel.minimumVoteCount} • max payback ${lendingChannel.maxLoanDurationDays} days • review and sign the SOL stake in the drawer"
+                    "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • min votes ${lendingChannel.minimumVoteCount} • voting window ${lendingChannel.votingWindowHours}h • max payback ${lendingChannel.maxLoanDurationDays} days • grace period ${lendingChannel.defaultGracePeriodDays} days • review and sign the SOL stake in the drawer"
                 )
             } else {
                 try {
@@ -939,7 +961,7 @@ class CommandProcessor(
                     )
                     viewModel?.switchToChannelWithTimelineContext(lendingChannel.channelKey)
                     addSystemMessage(
-                        "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }} • min votes ${lendingChannel.minimumVoteCount} • max payback ${lendingChannel.maxLoanDurationDays} days • creator deposit ${membership.depositStatus.lowercase()}"
+                        "created lending channel ${lendingChannel.displayName} • id ${lendingChannel.lendingId} • stake ${lendingChannel.requiredStakeAmount} ${lendingChannel.stakeTokenSymbol.ifBlank { "token" }} • min votes ${lendingChannel.minimumVoteCount} • voting window ${lendingChannel.votingWindowHours}h • max payback ${lendingChannel.maxLoanDurationDays} days • grace period ${lendingChannel.defaultGracePeriodDays} days • creator deposit ${membership.depositStatus.lowercase()}"
                     )
                 } catch (t: Throwable) {
                     addSystemMessage(
@@ -1140,6 +1162,8 @@ class CommandProcessor(
                     stakeTokenMint = channel.stakeTokenMint,
                     stakeTokenSymbol = channel.stakeTokenSymbol,
                     stakeTokenDecimals = channel.stakeTokenDecimals,
+                    votingWindowHours = channel.votingWindowHours,
+                    defaultGracePeriodDays = channel.defaultGracePeriodDays,
                     creatorMembershipConfirmed = creatorMembership?.joinStatus == LendingMemberStatus.ACTIVE &&
                         creatorMembership.depositStatus == com.bitchat.android.data.local.entities.EscrowTransferStatus.CONFIRMED
                 )
@@ -1190,12 +1214,14 @@ class CommandProcessor(
                         stakeTokenMint = invite.stakeTokenMint,
                         stakeTokenSymbol = invite.stakeTokenSymbol,
                         stakeTokenDecimals = invite.stakeTokenDecimals,
-                        seedCreatorMembership = false
+                        seedCreatorMembership = false,
+                        votingWindowHours = invite.votingWindowHours,
+                        defaultGracePeriodDays = invite.defaultGracePeriodDays
                     )
                 )
                 viewModel?.switchToChannelWithTimelineContext(channel.channelKey)
                 addSystemMessage(
-                    "imported lending channel ${channel.displayName} • id ${channel.lendingId} • min votes ${channel.minimumVoteCount} • max payback ${channel.maxLoanDurationDays} days. creator liquidity is unverified until treasury reconciliation; now run /lending join ${channel.displayName}"
+                    "imported lending channel ${channel.displayName} • id ${channel.lendingId} • min votes ${channel.minimumVoteCount} • voting window ${channel.votingWindowHours}h • max payback ${channel.maxLoanDurationDays} days. creator liquidity is unverified until treasury reconciliation; now run /lending join ${channel.displayName}"
                 )
             } catch (error: Exception) {
                 addSystemMessage("couldn't import lending channel: ${error.message ?: "import_failed"}")
@@ -1238,12 +1264,38 @@ class CommandProcessor(
                     append("lending status for ${status.channel.displayName} • id ${status.channel.lendingId}\n")
                     append("stake: ${status.channel.requiredStakeAmount} ${status.channel.stakeTokenSymbol.ifBlank { status.channel.stakeTokenMint.take(8) }}\n")
                     append("minimum votes: ${status.channel.minimumVoteCount}\n")
+                    append("voting window: ${status.channel.votingWindowHours} hours\n")
                     append("max payback: ${status.channel.maxLoanDurationDays} days\n")
+                    append("grace period: ${status.channel.defaultGracePeriodDays} days\n")
                     append("members: $activeMembers\n")
                     append("treasury: ${escrowAccount?.provider?.lowercase() ?: "app_treasury"}\n")
                     append("escrow: ${status.channel.escrowMultisigAddress.ifBlank { "app-treasury" }}\n")
                     append("vault: ${escrowAccount?.vaultAddress?.ifBlank { "pending-provision" } ?: "pending-provision"}\n")
                     append("pool: total ${pool?.totalStakedAmount ?: 0}, available ${pool?.availableLiquidityAmount ?: 0}, reserved ${pool?.reservedAmount ?: 0}, disbursed ${pool?.disbursedAmount ?: 0}\n")
+                    // Voter-backed metrics
+                    val totalLocked = pool?.totalLockedAmount ?: 0L
+                    val suspendedCount = status.memberships.count { it.joinStatus == LendingMemberStatus.SUSPENDED }
+                    val voterBackedLoanCount = lendingLoanService?.getLoanRequests(status.channel.lendingId)
+                        ?.count { it.backingModel == com.bitchat.android.data.local.entities.LoanBackingModel.VOTER_BACKED &&
+                            it.status in setOf(
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.PENDING,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.COMMUNITY_APPROVED,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.SIGNER_REVIEW,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.SIGNER_APPROVED,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.DISBURSED,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.PARTIALLY_REPAID,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.OVERDUE
+                            )
+                        } ?: 0
+                    val totalBackingCapacity = status.memberships
+                        .filter { it.joinStatus == LendingMemberStatus.ACTIVE && it.depositStatus == com.bitchat.android.data.local.entities.EscrowTransferStatus.CONFIRMED }
+                        .sumOf { maxBackingForVoter(it) }
+                    append("locked stakes: ${totalLocked}\n")
+                    append("voter-backed loans: $voterBackedLoanCount\n")
+                    append("backing capacity: $totalBackingCapacity\n")
+                    if (suspendedCount > 0) {
+                        append("suspended members: $suspendedCount\n")
+                    }
                     append("active loans: ${status.activeLoanCount}\n")
                     if (status.unreconciledActiveMemberCount > 0) {
                         append("reconciliation warning: ${status.unreconciledActiveMemberCount} active member(s) missing recorded stake deposit\n")
@@ -1493,8 +1545,10 @@ class CommandProcessor(
                         voterLabel = state.getNicknameValue(),
                         voteChoice = choice,
                         yesVotes = approvalCount,
-                        noVotes = 0,
+                        noVotes = rejectionCount,
                         requestStatus = result.request.status,
+                        voterLockedAmount = result.voterLockedAmount,
+                        fullyBacked = result.fullyBacked,
                         approvedAt = result.request.approvedAt,
                         disbursedAt = result.request.disbursedAt,
                         squadsMultisigAddress = result.request.squadsMultisigAddress,
@@ -1507,8 +1561,15 @@ class CommandProcessor(
                         ?.getChannelByLendingId(result.request.lendingId)
                         ?.channelKey
                 )
+                val backingInfo = if (result.voterLockedAmount > 0L) {
+                    val channel = lendingChannelService?.getChannelByLendingId(result.request.lendingId)
+                    val decimals = channel?.stakeTokenDecimals ?: 9
+                    val symbol = channel?.stakeTokenSymbol?.ifBlank { "token" } ?: "token"
+                    " • your backing: ${formatDisplayAmount(result.voterLockedAmount, decimals)} $symbol"
+                } else ""
+                val backingStatus = if (result.fullyBacked) " • fully backed" else if (approvalCount > 0) " • not yet fully backed" else ""
                 addSystemMessage(
-                    "${result.request.requestId}: yes $approvalCount • no $rejectionCount • $suffix"
+                    "${result.request.requestId}: yes $approvalCount • no $rejectionCount$backingInfo$backingStatus • $suffix"
                 )
             } catch (error: Exception) {
                 addSystemMessage("couldn't record vote: ${friendlyLendingVoteError(error)}")
@@ -1896,12 +1957,28 @@ class CommandProcessor(
                         memberPeerId = myPeerID
                     )
                 )
-                lendingService.getChannelByLendingId(result.membership.lendingId)?.let { channel ->
+                val leavingChannel = lendingService.getChannelByLendingId(result.membership.lendingId)
+                val channelClosed = leavingChannel?.lifecycleState == com.bitchat.android.data.local.entities.LendingLifecycleState.CLOSED
+                leavingChannel?.let { channel ->
+                    if (channelClosed) {
+                        // Broadcast closure to mesh so peers know the channel is closed
+                        publishLendingChannelConfigMessage(
+                            buildLendingChannelConfigMessage(channel),
+                            onSendMessage,
+                            channel.channelKey
+                        )
+                    }
                     channelManager.leaveChannel(channel.channelKey)
                 }
-                addSystemMessage(
-                    "left lending channel ${result.membership.lendingId}: stake ${result.membership.depositStatus.lowercase()}, membership ${result.membership.joinStatus.lowercase()}"
-                )
+                if (channelClosed) {
+                    addSystemMessage(
+                        "lending channel closed. all member stakes have been released. your stake: ${result.membership.depositStatus.lowercase()}"
+                    )
+                } else {
+                    addSystemMessage(
+                        "left lending channel ${result.membership.lendingId}: stake ${result.membership.depositStatus.lowercase()}, membership ${result.membership.joinStatus.lowercase()}"
+                    )
+                }
             } catch (error: Exception) {
                 val channel = runCatching {
                     lendingService.getChannelByIdentifier(identifier, preferredChannelKey)
@@ -1910,8 +1987,132 @@ class CommandProcessor(
                     viewModel.leaveChannel(channel.channelKey)
                     addSystemMessage("prepared leave for ${channel.displayName}: review the refund approval in the drawer.")
                 } else {
-                    addSystemMessage("couldn't leave lending channel: ${error.message}")
+                    val leaveError = when {
+                        error.message == "locked_stake_blocks_exit" -> "you have stake locked as collateral for active loans — wait for those loans to be repaid or resolved before leaving"
+                        error.message == "active_loan_blocks_exit" -> "you have an active loan in this channel"
+                        error.message == "admin_cannot_leave_with_active_loans" -> "as admin, you can't leave while there are active loans — wait for all loans to be settled first. alternatively, transfer ownership with /lending transfer-ownership @nickname"
+                        error.message?.startsWith("channel_close_partial_failure") == true -> {
+                            val count = error.message?.substringAfter(":")?.toIntOrNull() ?: 0
+                            "couldn't release stakes for $count member(s) — try again or contact those members to leave manually first"
+                        }
+                        else -> error.message ?: "unknown error"
+                    }
+                    addSystemMessage("couldn't leave lending channel: $leaveError")
                 }
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingTopup(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?
+    ): CommandResult? {
+        val lendingService = lendingChannelService
+        val escrowService = lendingEscrowService
+        val ws = walletService
+        if (lendingService == null || escrowService == null || ws == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (!ws.hasWallet()) {
+            addSystemMessage("you need a wallet first — open settings to create one.")
+            return null
+        }
+
+        commandScope.launch {
+            try {
+                val currentChannelKey = state.getCurrentChannelValue()
+                    ?: throw IllegalStateException("not_in_a_channel")
+                val channel = lendingService.getChannelByChannelKey(currentChannelKey)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+                val membership = lendingService.getMemberships(channel.lendingId)
+                    .firstOrNull { it.memberPeerId == myPeerID }
+                    ?: throw IllegalStateException("membership_not_found")
+
+                val deficit = channel.requiredStakeAmount - membership.stakeAmount
+                if (deficit <= 0L && membership.joinStatus != com.bitchat.android.data.local.entities.LendingMemberStatus.SUSPENDED) {
+                    addSystemMessage("your stake is already at the required amount. no top-up needed.")
+                    return@launch
+                }
+
+                // Restore stake amount to channel minimum before triggering deposit
+                lendingService.updateMembershipStake(
+                    channel.lendingId, myPeerID, channel.requiredStakeAmount
+                )
+
+                if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol) && viewModel != null) {
+                    viewModel.requestLendingStakeApproval(channel.lendingId, myPeerID)
+                    addSystemMessage(
+                        "top-up requested for ${formatDisplayAmount(deficit.coerceAtLeast(0), channel.stakeTokenDecimals)} ${channel.stakeTokenSymbol.ifBlank { "token" }} — review and sign the deposit in the drawer to restore your stake."
+                    )
+                } else {
+                    val result = escrowService.activateMembership(channel.lendingId, myPeerID)
+                    addSystemMessage(
+                        "top-up deposit ${result.depositStatus.lowercase()} — your stake is being restored."
+                    )
+                }
+            } catch (error: Exception) {
+                val msg = when (error.message) {
+                    "lending_channel_not_found" -> "you're not in a lending channel"
+                    "membership_not_found" -> "you're not a member of this lending channel"
+                    else -> error.message ?: "unknown error"
+                }
+                addSystemMessage("couldn't top up stake: $msg")
+            }
+        }
+        return null
+    }
+
+    private fun handleLendingTransferOwnership(
+        parts: List<String>,
+        myPeerID: String,
+        viewModel: ChatViewModel?,
+        meshService: BluetoothMeshService
+    ): CommandResult? {
+        val lendingService = lendingChannelService
+        if (lendingService == null) {
+            addSystemMessage("lending is not available yet — try again in a moment.")
+            return null
+        }
+        if (parts.size < 3) {
+            return CommandResult(
+                prefillText = "/lending transfer-ownership @",
+                hintText = "usage: /lending transfer-ownership @nickname"
+            )
+        }
+
+        val targetNickname = parts[2].removePrefix("@")
+        commandScope.launch {
+            try {
+                val currentChannelKey = state.getCurrentChannelValue()
+                    ?: throw IllegalStateException("not_in_a_channel")
+                val channel = lendingService.getChannelByChannelKey(currentChannelKey)
+                    ?: throw IllegalStateException("lending_channel_not_found")
+
+                // Resolve peer ID from nickname
+                val targetPeerId = meshService.connectedPeers.firstOrNull { peerId ->
+                    meshService.getPeerInfo(peerId)?.name?.equals(targetNickname, ignoreCase = true) == true
+                } ?: throw IllegalArgumentException("peer_not_found")
+
+                val updated = lendingService.transferOwnership(channel.lendingId, myPeerID, targetPeerId)
+                // Also transfer the channel role
+                channelManager.transferChannelOwnership(currentChannelKey, targetPeerId)
+                addSystemMessage(
+                    "ownership of ${updated.displayName} transferred to @$targetNickname. you can now leave the channel."
+                )
+            } catch (error: Exception) {
+                val msg = when (error.message) {
+                    "lending_channel_not_found" -> "you're not in a lending channel"
+                    "only_owner_can_transfer" -> "only the channel owner can transfer ownership"
+                    "cannot_transfer_to_self" -> "can't transfer ownership to yourself"
+                    "new_owner_not_a_member" -> "@$targetNickname is not a member of this lending channel"
+                    "new_owner_must_be_active_member" -> "@$targetNickname must be an active member with confirmed stake"
+                    "peer_not_found" -> "couldn't find @$targetNickname among connected peers"
+                    else -> error.message ?: "unknown error"
+                }
+                addSystemMessage("couldn't transfer ownership: $msg")
             }
         }
         return null
@@ -2537,7 +2738,10 @@ class CommandProcessor(
             maxLoanDurationDays = channel.maxLoanDurationDays,
             stakeTokenMint = channel.stakeTokenMint,
             stakeTokenSymbol = channel.stakeTokenSymbol,
-            stakeTokenDecimals = channel.stakeTokenDecimals
+            stakeTokenDecimals = channel.stakeTokenDecimals,
+            votingWindowHours = channel.votingWindowHours,
+            defaultGracePeriodDays = channel.defaultGracePeriodDays,
+            lifecycleState = channel.lifecycleState
         )
     }
 
@@ -2567,7 +2771,8 @@ class CommandProcessor(
             originLendingId = loan.originLendingId,
             forwardedFromRequestId = loan.forwardedFromRequestId,
             fundingLendingId = loan.fundingLendingId,
-            requestKind = loan.requestKind
+            requestKind = loan.requestKind,
+            backingModel = loan.backingModel
         )
     }
 
@@ -2660,7 +2865,7 @@ class CommandProcessor(
         // Channel context: do not show global commands.
         val commands = mutableListOf(
             CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
-            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes> [max_payback_days]", "create lending channel"),
+            CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes> <voting_hours> [max_payback_days] [grace_period_days]", "create lending channel"),
             CommandSuggestion("/lending invite", emptyList(), "[#channel|lendingId]", "create a lending invite code"),
             CommandSuggestion("/lending import", emptyList(), "<invite_code>", "import a lending invite"),
             CommandSuggestion("/lending join", emptyList(), "[#channel|channel|lendingId]", "join lending channel"),
@@ -2730,7 +2935,7 @@ class CommandProcessor(
         return when (suggestion.command) {
             "/create" -> CommandResult(prefillText = "/create #", hintText = "type a channel name")
             "/lending" -> CommandResult(prefillText = "/lending ", hintText = lendingHint())
-            "/lending create" -> CommandResult(prefillText = "/lending create #", hintText = "usage: /lending create #channel <stake_amount> <mint> <minimum_votes> [max_payback_days]")
+            "/lending create" -> CommandResult(prefillText = "/lending create #", hintText = "usage: /lending create #channel <stake_amount> <mint> <minimum_votes> <voting_hours> [max_payback_days] [grace_period_days]")
             "/lending invite" -> CommandResult(prefillText = "/lending invite ", hintText = "usage: /lending invite [#channel|lendingId]")
             "/lending import" -> CommandResult(prefillText = "/lending import ", hintText = "usage: /lending import <invite_code>")
             "/lending join" -> CommandResult(prefillText = "/lending join #", hintText = "use #channel, channel, or lendingId")
@@ -2743,6 +2948,10 @@ class CommandProcessor(
             "/lending disburse" -> CommandResult(prefillText = "/lending disburse ", hintText = "usage: /lending disburse <request_id>")
             "/lending repay" -> CommandResult(prefillText = "/lending repay ", hintText = "usage: /lending repay <request_id> <amount> [asset] • e.g. /lending repay abc123 0.25 SOL")
             "/lending leave" -> CommandResult(prefillText = "/lending leave ", hintText = "use #channel or lendingId")
+            "/lending squad" -> CommandResult(prefillText = "/lending squad ", hintText = "usage: /lending squad [#channel|lendingId] <multisig> [vault]")
+            "/lending forward" -> CommandResult(prefillText = "/lending forward ", hintText = "usage: /lending forward <request_id> <#channel|lendingId>")
+            "/lending topup" -> CommandResult(prefillText = "/lending topup", hintText = "restores your stake to the channel minimum after suspension")
+            "/lending transfer-ownership" -> CommandResult(prefillText = "/lending transfer-ownership @", hintText = "usage: /lending transfer-ownership @nickname")
             "/gate" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate create" -> CommandResult(prefillText = "/gate create #", hintText = "usage: /gate create #vip <spl|sol|nft-specific|nft-collection> ...")
             "/gate status" -> CommandResult(prefillText = "/gate status #", hintText = "or use /gate status in current channel")
@@ -2910,6 +3119,8 @@ class CommandProcessor(
             "membership_not_found", "membership_not_active" -> "you need an active lending membership before requesting a loan"
             "active_individual_loan_exists" -> "you already have an active individual loan in this channel"
             "request_exceeds_pool_cap" -> "requested amount is above the current pool cap"
+            "request_exceeds_backing_capacity" -> "requested amount exceeds what members can back — not enough available stake across voters"
+            "insufficient_eligible_voters" -> "not enough members to vote on your loan — invite more people to join the channel first"
             "loan_duration_exceeds_channel_max" -> "loan duration is longer than this channel allows"
             else -> error.message ?: "unknown error"
         }
@@ -2917,11 +3128,13 @@ class CommandProcessor(
 
     private fun friendlyLendingForwardError(error: Exception): String {
         return when (error.message) {
-            "forwarding_disabled_phase_one" -> "loan forwarding is disabled in phase one while single-channel production flow is being hardened"
             "loan_request_not_found" -> "loan request not found"
             "loan_request_not_forwardable" -> "only pending or approved loans can be forwarded"
+            "admin_only_forwarding" -> "only the channel admin can forward loan requests"
             "admin_only_loan_forward" -> "only a channel admin can forward this loan"
+            "destination_channel_not_found" -> "destination lending channel not found"
             "cannot_forward_to_same_channel" -> "choose a different lending channel"
+            "already_forwarded_to_channel" -> "this loan request was already forwarded to that channel"
             "membership_not_found", "membership_not_active" -> "borrower needs an active membership in the destination lending channel"
             "loan_request_already_funded_elsewhere" -> "this loan family has already been funded by another channel"
             else -> error.message ?: "unknown error"
@@ -2935,6 +3148,8 @@ class CommandProcessor(
             "loan_request_voting_closed" -> "the voting window for this loan has already closed"
             "borrower_cannot_vote_own_request" -> "borrower cannot approve their own loan request"
             "membership_not_found", "membership_not_active" -> "you need an active lending membership to approve this loan"
+            "member_suspended_from_voting" -> "your voting is suspended — top up your stake to restore voting power"
+            "insufficient_available_stake_for_backing" -> "you don't have enough available stake to back this loan (50% safety cap)"
             "vote_must_be_upvote" -> "vote must be approve"
             "vote_must_be_yes_or_no" -> "vote must be approve or deny"
             else -> error.message ?: "unknown error"
@@ -3009,6 +3224,7 @@ class CommandProcessor(
             "loan_request_not_ready_for_disbursement" -> "loan must complete signer review before disbursement"
             "admin_only_disbursement" -> "only a channel admin can disburse a signer-approved loan"
             "loan_request_already_funded_elsewhere" -> "another linked channel already funded this loan"
+            "voter_backing_insufficient_for_disbursement" -> "voter backing no longer covers the loan amount — some backers may have been suspended"
             else -> error.message ?: "unknown error"
         }
     }

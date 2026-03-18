@@ -19,6 +19,7 @@ import com.bitchat.android.data.local.entities.LoanRequestStatus
 import com.bitchat.android.data.local.entities.LoanVoteEntity
 import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
 import com.bitchat.android.data.local.entities.EscrowProposalType
+import com.bitchat.android.data.local.entities.LoanBackingModel
 import com.bitchat.android.data.local.entities.VoteChoice
 import com.bitchat.android.data.models.TransactionStatus
 import com.bitchat.android.solana.LendingTransferGateway
@@ -128,6 +129,76 @@ class LendingLifecycleServiceImpl @Inject constructor(
         return lendingDao.getLoanRequestById(requestId) ?: reconciled
     }
 
+    /**
+     * Scan all active loans and transition overdue/defaulted ones.
+     * Called periodically from a background reconciliation loop.
+     * Returns the number of loans whose status changed.
+     */
+    override suspend fun reconcileOverdueAndDefaultedLoans(): List<LoanStatusTransition> {
+        val now = System.currentTimeMillis()
+        val channels = lendingDao.getAllLendingChannels()
+        val transitions = mutableListOf<LoanStatusTransition>()
+        for (channel in channels) {
+            val loans = lendingDao.getLoanRequestsForLendingChannel(channel.lendingId)
+            var channelChanged = false
+            for (loan in loans) {
+                if (loan.status !in setOf(
+                        LoanRequestStatus.DISBURSED,
+                        LoanRequestStatus.PARTIALLY_REPAID,
+                        LoanRequestStatus.OVERDUE
+                    )
+                ) continue
+                if (loan.dueAt <= 0L) continue
+
+                val repayments = lendingDao.getRepaymentsForRequest(loan.requestId)
+                val totalRepaid = confirmedRepaymentTotal(repayments)
+                val totalDue = loan.principalAmount + calculateInterestAmount(loan)
+
+                // Already fully repaid
+                if (totalRepaid >= totalDue) {
+                    if (loan.status != LoanRequestStatus.REPAID) {
+                        lendingDao.upsertLoanRequest(loan.copy(status = LoanRequestStatus.REPAID))
+                        if (loan.backingModel == LoanBackingModel.VOTER_BACKED) {
+                            distributeInterestToVoters(loan)
+                            unlockVoterBackings(loan.requestId, loan.lendingId)
+                        }
+                        transitions.add(LoanStatusTransition(loan.requestId, loan.lendingId, loan.status, LoanRequestStatus.REPAID, channel.displayName))
+                        channelChanged = true
+                    }
+                    continue
+                }
+
+                // Past due — mark overdue
+                if (now > loan.dueAt && loan.status in setOf(LoanRequestStatus.DISBURSED, LoanRequestStatus.PARTIALLY_REPAID)) {
+                    lendingDao.upsertLoanRequest(loan.copy(status = LoanRequestStatus.OVERDUE))
+                    transitions.add(LoanStatusTransition(loan.requestId, loan.lendingId, loan.status, LoanRequestStatus.OVERDUE, channel.displayName))
+                    channelChanged = true
+                    continue
+                }
+
+                // Grace period for default: use channel setting or 7 day fallback
+                val graceDays = channel.defaultGracePeriodDays.coerceAtLeast(1)
+                val defaultGracePeriodMs = graceDays.toLong() * 24L * 60L * 60L * 1000L
+                if (loan.status == LoanRequestStatus.OVERDUE && now > loan.dueAt + defaultGracePeriodMs) {
+                    val defaultedLoan = loan.copy(
+                        status = LoanRequestStatus.DEFAULTED,
+                        defaultedAt = now
+                    )
+                    lendingDao.upsertLoanRequest(defaultedLoan)
+                    if (loan.backingModel == LoanBackingModel.VOTER_BACKED) {
+                        absorbVoterBackedDefault(defaultedLoan)
+                    }
+                    transitions.add(LoanStatusTransition(loan.requestId, loan.lendingId, LoanRequestStatus.OVERDUE, LoanRequestStatus.DEFAULTED, channel.displayName))
+                    channelChanged = true
+                }
+            }
+            if (channelChanged) {
+                refreshPoolSnapshot(channel.lendingId)
+            }
+        }
+        return transitions
+    }
+
     override suspend fun getSignerReview(requestId: String): LendingSignerReviewEntity? {
         return lendingDao.getSignerReviewForRequest(requestId)
     }
@@ -160,9 +231,26 @@ class LendingLifecycleServiceImpl @Inject constructor(
         }
 
         val pool = refreshPoolSnapshot(channel.lendingId)
-        val cap = (pool.availableLiquidityAmount * DEFAULT_BORROW_CAP_PERCENT) / 100
+        // Check sufficient eligible voters (borrower can't vote on own loan)
+        val memberships = lendingDao.getMembershipsForLendingChannel(channel.lendingId)
+        val eligibleVoters = memberships.filter {
+            it.joinStatus == LendingMemberStatus.ACTIVE &&
+                it.depositStatus == EscrowTransferStatus.CONFIRMED &&
+                it.memberPeerId != request.requesterPeerId
+        }
+        if (eligibleVoters.size < channel.minimumVoteCount) {
+            throw IllegalStateException("insufficient_eligible_voters")
+        }
+        // For voter-backed loans, cap is based on total available backing capacity
+        // (sum of what all eligible voters could lock, respecting 50% safety net)
+        val totalBackingCapacity = eligibleVoters.sumOf { maxBackingForVoter(it) }
+        val cap = if (totalBackingCapacity > 0L) {
+            totalBackingCapacity
+        } else {
+            (pool.availableLiquidityAmount * DEFAULT_BORROW_CAP_PERCENT) / 100
+        }
         if (request.principalAmount > cap) {
-            throw IllegalArgumentException("request_exceeds_pool_cap")
+            throw IllegalArgumentException("request_exceeds_backing_capacity")
         }
         val normalizedEndorsers = request.endorserPeerIds
             .map { it.trim() }
@@ -302,7 +390,54 @@ class LendingLifecycleServiceImpl @Inject constructor(
     }
 
     override suspend fun forwardLoanRequest(request: ForwardLoanRequest): LoanRequestEntity {
-        throw IllegalStateException("forwarding_disabled_phase_one")
+        val originalLoan = lendingDao.getLoanRequestById(request.requestId)
+            ?: throw IllegalArgumentException("loan_request_not_found")
+        if (originalLoan.status !in setOf(
+                LoanRequestStatus.PENDING,
+                LoanRequestStatus.COMMUNITY_APPROVED,
+                LoanRequestStatus.COMMUNITY_REJECTED
+            )
+        ) {
+            throw IllegalStateException("loan_request_not_forwardable")
+        }
+        val sourceChannel = getChannel(originalLoan.lendingId)
+        if (sourceChannel.creatorPeerId != request.actorPeerId) {
+            throw IllegalStateException("admin_only_forwarding")
+        }
+        val destinationChannel = lendingChannelService.getChannelByIdentifier(
+            request.destinationIdentifier, request.preferredChannelKey
+        ) ?: throw IllegalArgumentException("destination_channel_not_found")
+        if (destinationChannel.lendingId == originalLoan.lendingId) {
+            throw IllegalArgumentException("cannot_forward_to_same_channel")
+        }
+        // Check if already forwarded to this channel
+        val familyRoot = familyRootRequestId(originalLoan)
+        lendingDao.getLinkedLoanRequestForLending(familyRoot, destinationChannel.lendingId)?.let {
+            throw IllegalStateException("already_forwarded_to_channel")
+        }
+        val forwarded = LoanRequestEntity(
+            requestId = nextRequestId(),
+            lendingId = destinationChannel.lendingId,
+            borrowerType = originalLoan.borrowerType,
+            borrowerPeerId = originalLoan.borrowerPeerId,
+            borrowerWalletAddress = originalLoan.borrowerWalletAddress,
+            borrowerGroupKey = originalLoan.borrowerGroupKey,
+            principalAmount = originalLoan.principalAmount,
+            interestBps = originalLoan.interestBps,
+            durationDays = originalLoan.durationDays,
+            purpose = originalLoan.purpose,
+            status = LoanRequestStatus.PENDING,
+            requestedAt = System.currentTimeMillis(),
+            dueAt = System.currentTimeMillis() + originalLoan.durationDays * 24L * 60L * 60L * 1000L,
+            parentRequestId = familyRoot,
+            requestKind = LoanRequestKind.FORWARDED_COPY,
+            originLendingId = originalLoan.originLendingId ?: originalLoan.lendingId,
+            forwardedFromRequestId = originalLoan.requestId,
+            backingModel = originalLoan.backingModel
+        )
+        lendingDao.upsertLoanRequest(forwarded)
+        refreshPoolSnapshot(destinationChannel.lendingId)
+        return forwarded
     }
 
     override suspend fun importDiscoveredLoanRequest(message: LendingLoanRequestMessage, senderPeerId: String?): LoanRequestEntity? {
@@ -330,7 +465,8 @@ class LendingLifecycleServiceImpl @Inject constructor(
             requestKind = message.requestKind,
             originLendingId = message.originLendingId ?: message.lendingId,
             forwardedFromRequestId = message.forwardedFromRequestId,
-            fundingLendingId = message.fundingLendingId
+            fundingLendingId = message.fundingLendingId,
+            backingModel = message.backingModel
         )).copy(
             lendingId = channel.lendingId,
             borrowerType = BorrowerType.INDIVIDUAL,
@@ -347,7 +483,8 @@ class LendingLifecycleServiceImpl @Inject constructor(
             requestKind = existing?.requestKind ?: message.requestKind,
             originLendingId = existing?.originLendingId ?: message.originLendingId ?: message.lendingId,
             forwardedFromRequestId = existing?.forwardedFromRequestId ?: message.forwardedFromRequestId,
-            fundingLendingId = existing?.fundingLendingId
+            fundingLendingId = existing?.fundingLendingId,
+            backingModel = existing?.backingModel ?: message.backingModel
         )
         val persisted = entity
         lendingDao.upsertLoanRequest(persisted)
@@ -371,19 +508,34 @@ class LendingLifecycleServiceImpl @Inject constructor(
             val settled = applyVoteSummary(existing, currentVoteSummary)
             if (settled != existing) {
                 lendingDao.upsertLoanRequest(settled)
+                unlockIfRejected(existing, settled)
                 refreshPoolSnapshot(channel.lendingId)
             }
             return settled
         }
         val voteChoice = normalizeVoteChoice(message.voteChoice) ?: return null
+        val isVoterBacked = existing.backingModel == LoanBackingModel.VOTER_BACKED
+        // For voter-backed loans, use the locked amount from the message or calculate it
+        val lockedAmount = if (isVoterBacked && voteChoice == VoteChoice.YES) {
+            if (message.voterLockedAmount > 0) message.voterLockedAmount
+            else {
+                val currentYesCount = currentVotes.count { it.voteChoice == VoteChoice.YES && it.voterPeerId != message.voterPeerId }
+                calculatePerVoterShare(existing.principalAmount, currentYesCount + 1)
+            }
+        } else 0L
         lendingDao.upsertLoanVote(
             LoanVoteEntity(
                 requestId = message.requestId,
                 voterPeerId = message.voterPeerId,
                 lendingId = channel.lendingId,
-                voteChoice = voteChoice
+                voteChoice = voteChoice,
+                lockedAmount = lockedAmount
             )
         )
+        // Recalculate voter backings for consistency
+        if (isVoterBacked) {
+            recalculateVoterBackings(message.requestId, existing.principalAmount, channel.lendingId)
+        }
         val hydrated = existing.copy(
             squadsMultisigAddress = message.squadsMultisigAddress ?: existing.squadsMultisigAddress,
             squadsVaultAddress = message.squadsVaultAddress ?: existing.squadsVaultAddress,
@@ -397,6 +549,7 @@ class LendingLifecycleServiceImpl @Inject constructor(
         val voteSummary = summarizeVotes(channel, hydrated, votes)
         val updated = applyVoteSummary(hydrated, voteSummary)
         lendingDao.upsertLoanRequest(updated)
+        unlockIfRejected(hydrated, updated)
         if (updated.status in setOf(LoanRequestStatus.DISBURSED, LoanRequestStatus.REPAID)) {
             markSiblingRequestsFundedElsewhere(updated)
         }
@@ -452,7 +605,7 @@ class LendingLifecycleServiceImpl @Inject constructor(
         if (loan.status != LoanRequestStatus.PENDING) {
             throw IllegalStateException("loan_request_not_open_for_voting")
         }
-        requireActiveMembership(loan.lendingId, request.voterPeerId)
+        val membership = requireActiveMembership(loan.lendingId, request.voterPeerId)
         if (hasFundedSibling(loan)) {
             throw IllegalStateException("loan_request_already_funded_elsewhere")
         }
@@ -466,6 +619,7 @@ class LendingLifecycleServiceImpl @Inject constructor(
             val settled = applyVoteSummary(loan, currentVoteSummary)
             if (settled != loan) {
                 lendingDao.upsertLoanRequest(settled)
+                unlockIfRejected(loan, settled)
                 refreshPoolSnapshot(loan.lendingId)
             }
             throw IllegalStateException("loan_request_voting_closed")
@@ -477,29 +631,65 @@ class LendingLifecycleServiceImpl @Inject constructor(
             else -> throw IllegalArgumentException("vote_must_be_yes_or_no")
         }
 
+        val isVoterBacked = loan.backingModel == LoanBackingModel.VOTER_BACKED
+        var voterLockedAmount = 0L
+
+        if (isVoterBacked && voteChoice == VoteChoice.YES) {
+            // Check suspension
+            if (membership.joinStatus == LendingMemberStatus.SUSPENDED) {
+                throw IllegalStateException("member_suspended_from_voting")
+            }
+            // Calculate per-voter share after this vote
+            val currentYesCount = currentVotes.count { it.voteChoice == VoteChoice.YES && it.voterPeerId != request.voterPeerId }
+            val newYesCount = currentYesCount + 1
+            val perVoterShare = calculatePerVoterShare(loan.principalAmount, newYesCount)
+            val remainder = calculatePerVoterRemainder(loan.principalAmount, newYesCount)
+            // First voter gets the remainder
+            voterLockedAmount = if (currentYesCount == 0) perVoterShare + remainder else perVoterShare
+            // Check 50% safety net
+            val maxBacking = maxBackingForVoter(membership)
+            if (voterLockedAmount > maxBacking) {
+                throw IllegalStateException("insufficient_available_stake_for_backing")
+            }
+        }
+
         lendingDao.upsertLoanVote(
             LoanVoteEntity(
                 requestId = loan.requestId,
                 voterPeerId = request.voterPeerId,
                 lendingId = loan.lendingId,
-                voteChoice = voteChoice
+                voteChoice = voteChoice,
+                lockedAmount = if (isVoterBacked && voteChoice == VoteChoice.YES) voterLockedAmount else 0
             )
         )
+
+        // Recalculate all YES voters' locked amounts (shares change when voter count changes)
+        if (isVoterBacked) {
+            recalculateVoterBackings(loan.requestId, loan.principalAmount, loan.lendingId)
+        }
 
         val votes = lendingDao.getVotesForRequest(loan.requestId)
         val voteSummary = summarizeVotes(channel, loan, votes)
         val updatedRequest = applyVoteSummary(loan, voteSummary)
         if (updatedRequest != loan) {
             lendingDao.upsertLoanRequest(updatedRequest)
+            unlockIfRejected(loan, updatedRequest)
         }
         refreshPoolSnapshot(loan.lendingId)
+
+        // Get the actual locked amount after recalculation
+        val finalVoterLocked = if (isVoterBacked && voteChoice == VoteChoice.YES) {
+            votes.firstOrNull { it.voterPeerId == request.voterPeerId }?.lockedAmount ?: 0L
+        } else 0L
 
         return LoanVoteResult(
             request = updatedRequest,
             votes = votes,
             quorumReached = voteSummary.quorumReached,
             approved = voteSummary.approved,
-            rejected = voteSummary.rejected
+            rejected = voteSummary.rejected,
+            voterLockedAmount = finalVoterLocked,
+            fullyBacked = voteSummary.fullyBacked
         )
     }
 
@@ -546,6 +736,10 @@ class LendingLifecycleServiceImpl @Inject constructor(
             }
         }
         cancelledRequests.forEach { lendingDao.upsertLoanRequest(it) }
+        // Unlock voter-backed stakes for all cancelled requests
+        cancelledRequests.filter { it.backingModel == LoanBackingModel.VOTER_BACKED }.forEach { cancelled ->
+            unlockVoterBackings(cancelled.requestId, cancelled.lendingId)
+        }
         cancelledRequests.map { it.lendingId }.distinct().forEach { refreshPoolSnapshot(it) }
 
         val updated = cancelledRequests.firstOrNull { it.requestId == loan.requestId } ?: loan.copy(status = LoanRequestStatus.CANCELLED)
@@ -572,6 +766,14 @@ class LendingLifecycleServiceImpl @Inject constructor(
         val actorIsAdmin = request.actorIsAdmin || channel.creatorPeerId == request.actorPeerId
         if (!actorIsAdmin) {
             throw IllegalStateException("admin_only_disbursement")
+        }
+        // Re-verify voter backing is still valid before disbursing
+        if (loan.backingModel == LoanBackingModel.VOTER_BACKED) {
+            val yesVotes = lendingDao.getYesVotesForRequest(loan.requestId)
+            val totalBacking = yesVotes.sumOf { it.lockedAmount }
+            if (totalBacking < loan.principalAmount) {
+                throw IllegalStateException("voter_backing_insufficient_for_disbursement")
+            }
         }
         val finalized = finalizeApprovedLoan(loan)
         if (finalized.status in setOf(LoanRequestStatus.DISBURSED, LoanRequestStatus.REPAID)) {
@@ -696,6 +898,63 @@ class LendingLifecycleServiceImpl @Inject constructor(
         val channel = lendingChannelService.getChannelByIdentifier(request.identifier, request.preferredChannelKey)
             ?: throw IllegalArgumentException("lending_channel_not_found")
         val membership = requireActiveMembership(channel.lendingId, request.memberPeerId)
+        val isAdmin = channel.creatorPeerId == request.memberPeerId
+
+        // Admin-specific rules
+        if (isAdmin) {
+            // Reconcile loan statuses first so stale DISBURSED loans don't block exit
+            reconcileOverdueAndDefaultedLoans()
+
+            val allLoans = lendingDao.getLoanRequestsForLendingChannel(channel.lendingId)
+            val activeLoans = allLoans.filter { loan ->
+                loan.status in setOf(
+                    LoanRequestStatus.PENDING,
+                    LoanRequestStatus.COMMUNITY_APPROVED,
+                    LoanRequestStatus.SIGNER_REVIEW,
+                    LoanRequestStatus.SIGNER_APPROVED,
+                    LoanRequestStatus.DISBURSED,
+                    LoanRequestStatus.PARTIALLY_REPAID,
+                    LoanRequestStatus.OVERDUE
+                )
+            }
+            if (activeLoans.isNotEmpty()) {
+                throw IllegalStateException("admin_cannot_leave_with_active_loans")
+            }
+            // No active loans — admin closes the channel and returns all stakes
+            val memberships = lendingDao.getMembershipsForLendingChannel(channel.lendingId)
+            val activeMembers = memberships.filter {
+                it.joinStatus == LendingMemberStatus.ACTIVE &&
+                    it.depositStatus == EscrowTransferStatus.CONFIRMED
+            }
+            // Release stakes for all members, track failures
+            val failedReleases = mutableListOf<String>()
+            for (member in activeMembers) {
+                if (member.memberPeerId == request.memberPeerId) continue // admin's own stake handled below
+                val released = runCatching {
+                    escrowService.createStakeReleaseProposal(channel.lendingId, member.memberPeerId)
+                    releaseMembershipStake(channel.lendingId, member.memberPeerId)
+                }
+                if (released.isFailure) {
+                    failedReleases.add(member.memberPeerId)
+                }
+            }
+            if (failedReleases.isNotEmpty()) {
+                throw IllegalStateException("channel_close_partial_failure:${failedReleases.size}")
+            }
+            // Mark channel as closed
+            lendingDao.insertLendingChannel(
+                channel.copy(
+                    lifecycleState = com.bitchat.android.data.local.entities.LendingLifecycleState.CLOSED,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            // Fall through to release admin's own stake below
+        }
+
+        // Block exit if member has locked stakes backing active loans
+        if (membership.lockedStakeAmount > 0) {
+            throw IllegalStateException("locked_stake_blocks_exit")
+        }
 
         val blockingLoan = lendingDao.getLoanRequestsForLendingChannel(channel.lendingId).firstOrNull { loan ->
             loan.borrowerType == BorrowerType.INDIVIDUAL &&
@@ -793,11 +1052,16 @@ class LendingLifecycleServiceImpl @Inject constructor(
                 max(request.principalAmount - (repaymentsByRequest[request.requestId] ?: 0L), 0L)
             }
 
+        val totalLockedAmount = memberships
+            .filter { it.joinStatus in setOf(LendingMemberStatus.ACTIVE, LendingMemberStatus.SUSPENDED) && it.depositStatus == EscrowTransferStatus.CONFIRMED }
+            .sumOf { it.lockedStakeAmount }
+
         val snapshot = LendingPoolSnapshotEntity(
             lendingId = lendingId,
             totalStakedAmount = activeStake,
             reservedAmount = reservedAmount,
             disbursedAmount = disbursedAmount,
+            totalLockedAmount = totalLockedAmount,
             availableLiquidityAmount = max(activeStake + totalRepayments - reservedAmount - disbursedAmount, 0L),
             updatedAt = System.currentTimeMillis()
         )
@@ -1051,6 +1315,123 @@ class LendingLifecycleServiceImpl @Inject constructor(
         if (nextStatus != loan.status) {
             lendingDao.upsertLoanRequest(loan.copy(status = nextStatus))
         }
+        // On full repayment of voter-backed loan: distribute interest and unlock stakes
+        if (nextStatus == LoanRequestStatus.REPAID && loan.backingModel == LoanBackingModel.VOTER_BACKED) {
+            distributeInterestToVoters(loan)
+            unlockVoterBackings(loan.requestId, loan.lendingId)
+        }
+        // On default of voter-backed loan: absorb losses from YES voters
+        if (nextStatus == LoanRequestStatus.DEFAULTED && loan.backingModel == LoanBackingModel.VOTER_BACKED) {
+            absorbVoterBackedDefault(loan)
+        }
+    }
+
+    /**
+     * Distribute interest earnings equally among YES voters on full repayment.
+     */
+    private suspend fun distributeInterestToVoters(loan: LoanRequestEntity) {
+        val interestAmount = calculateInterestAmount(loan)
+        if (interestAmount <= 0L) return
+        val yesVotes = lendingDao.getYesVotesForRequest(loan.requestId)
+        if (yesVotes.isEmpty()) return
+        val channel = lendingDao.getLendingChannelById(loan.lendingId) ?: return
+        val interestPerVoter = interestAmount / yesVotes.size
+        val remainder = interestAmount - (interestPerVoter * yesVotes.size)
+        yesVotes.forEachIndexed { index, vote ->
+            val share = if (index == 0) interestPerVoter + remainder else interestPerVoter
+            lendingDao.updateVoteInterestEarned(loan.requestId, vote.voterPeerId, share)
+            // Queue on-chain transfer of interest from vault to voter's wallet
+            if (share > 0L) {
+                val membership = lendingDao.getMembership(loan.lendingId, vote.voterPeerId)
+                val recipientWallet = membership?.walletAddress
+                if (!recipientWallet.isNullOrBlank()) {
+                    val maxRetries = 3
+                    var attempt = 0
+                    var success = false
+                    while (attempt < maxRetries && !success) {
+                        val result = if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
+                            transferGateway.queueNativeTransfer(
+                                recipientPublicKey = recipientWallet,
+                                amountLamports = share,
+                                memo = "interest payout ${loan.requestId}"
+                            )
+                        } else {
+                            transferGateway.queueSplTransfer(
+                                recipientPublicKey = recipientWallet,
+                                mintAddress = channel.stakeTokenMint,
+                                amountAtomic = share,
+                                decimals = channel.stakeTokenDecimals,
+                                symbol = channel.stakeTokenSymbol.ifBlank { "TOKEN" },
+                                memo = "interest payout ${loan.requestId}"
+                            )
+                        }
+                        success = result.isSuccess
+                        attempt++
+                        if (!success && attempt < maxRetries) {
+                            kotlinx.coroutines.delay(2000L)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Absorb losses from a defaulted voter-backed loan.
+     * Loss is split equally among YES voters and deducted from their stakes.
+     */
+    private suspend fun absorbVoterBackedDefault(loan: LoanRequestEntity) {
+        val repayments = lendingDao.getRepaymentsForRequest(loan.requestId)
+        val totalRepaid = confirmedRepaymentTotal(repayments)
+        val totalDue = loan.principalAmount + calculateInterestAmount(loan)
+        val outstandingLoss = (totalDue - totalRepaid).coerceAtLeast(0)
+        if (outstandingLoss <= 0L) return
+
+        val yesVotes = lendingDao.getYesVotesForRequest(loan.requestId)
+        if (yesVotes.isEmpty()) return
+        val lossPerVoter = outstandingLoss / yesVotes.size
+        val remainder = outstandingLoss - (lossPerVoter * yesVotes.size)
+        val channel = lendingDao.getLendingChannelById(loan.lendingId) ?: return
+
+        yesVotes.forEachIndexed { index, vote ->
+            val rawLoss = if (index == 0) lossPerVoter + remainder else lossPerVoter
+            // Safety clamp: loss cannot exceed what the voter actually locked, and stake can't go below zero
+            val membership = lendingDao.getMembership(loan.lendingId, vote.voterPeerId) ?: return@forEachIndexed
+            val loss = rawLoss.coerceAtMost(vote.lockedAmount).coerceAtMost(membership.stakeAmount)
+            lendingDao.updateVoteLossAbsorbed(loan.requestId, vote.voterPeerId, loss)
+            lendingDao.updateVoteLockedAmount(loan.requestId, vote.voterPeerId, 0)
+
+            // Deduct loss from voter's stake permanently
+            val newStake = (membership.stakeAmount - loss).coerceAtLeast(0)
+            val activeVotes = lendingDao.getActiveVoterBackedLoansForMember(loan.lendingId, vote.voterPeerId)
+            val newLocked = activeVotes.sumOf { it.lockedAmount }
+            val updatedMembership = membership.copy(stakeAmount = newStake, lockedStakeAmount = newLocked)
+            val shouldSuspend = isVoterBelowSuspensionThreshold(updatedMembership, channel)
+            val newStatus = if (shouldSuspend) LendingMemberStatus.SUSPENDED else membership.joinStatus
+            val suspendedReason = if (newStatus == LendingMemberStatus.SUSPENDED) "STAKE_BELOW_THRESHOLD" else null
+            lendingDao.updateMemberStakeAndStatus(
+                lendingId = loan.lendingId,
+                memberPeerId = vote.voterPeerId,
+                stakeAmount = newStake,
+                lockedStakeAmount = newLocked,
+                joinStatus = newStatus,
+                suspendedReason = suspendedReason
+            )
+            // Reduce credibility score as penalty for backing a defaulted loan
+            val newCredibility = (membership.credibilityScore - DEFAULT_LOSS_CREDIBILITY_PENALTY).coerceAtLeast(0)
+            if (newCredibility != membership.credibilityScore) {
+                lendingDao.upsertMembership(
+                    membership.copy(
+                        stakeAmount = newStake,
+                        lockedStakeAmount = newLocked,
+                        joinStatus = newStatus,
+                        suspendedReason = suspendedReason,
+                        credibilityScore = newCredibility,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
     }
 
     private suspend fun outstandingBalanceForQueueing(loan: LoanRequestEntity): Long {
@@ -1133,11 +1514,18 @@ class LendingLifecycleServiceImpl @Inject constructor(
         val votingClosed = now >= votingDeadline || (eligibleVoterCount > 0 && totalVotes >= eligibleVoterCount)
         val quorumReached = totalVotes >= quorumCount && quorumCount > 0
         val approvalPercent = if (totalVotes > 0) (yesVotes * 100) / totalVotes else 0
+        // For voter-backed loans, check if YES voters' locked amounts cover the full loan
+        val isVoterBacked = loan.backingModel == LoanBackingModel.VOTER_BACKED
+        val yesVoteEntities = if (isVoterBacked) votes.filter { it.voteChoice == VoteChoice.YES } else emptyList()
+        val totalBacking = yesVoteEntities.sumOf { it.lockedAmount }
+        val fullyBacked = !isVoterBacked || totalBacking >= loan.principalAmount
+        // Voter-backed loans require full backing for approval
         val approved = votingClosed &&
             quorumReached &&
             totalVotes >= channel.minimumVoteCount.coerceAtLeast(1) &&
             yesVotes > noVotes &&
-            approvalPercent >= channel.approvalThresholdPercent.coerceIn(1, 100)
+            approvalPercent >= channel.approvalThresholdPercent.coerceIn(1, 100) &&
+            fullyBacked
         val rejected = votingClosed && !approved
         return VoteSummary(
             yesVotes = yesVotes,
@@ -1148,8 +1536,19 @@ class LendingLifecycleServiceImpl @Inject constructor(
             votingClosed = votingClosed,
             quorumReached = quorumReached,
             approved = approved,
-            rejected = rejected
+            rejected = rejected,
+            fullyBacked = fullyBacked
         )
+    }
+
+    /** Unlock voter stakes if a voter-backed loan was rejected. Call after persisting the result. */
+    private suspend fun unlockIfRejected(loan: LoanRequestEntity, result: LoanRequestEntity) {
+        if (result.status == LoanRequestStatus.COMMUNITY_REJECTED &&
+            loan.status != LoanRequestStatus.COMMUNITY_REJECTED &&
+            result.backingModel == LoanBackingModel.VOTER_BACKED
+        ) {
+            unlockVoterBackings(result.requestId, result.lendingId)
+        }
     }
 
     private fun applyVoteSummary(
@@ -1222,6 +1621,71 @@ class LendingLifecycleServiceImpl @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * Recalculate equal locked amounts across all YES voters for a loan request.
+     * Called after every YES/NO vote change to redistribute shares.
+     */
+    private suspend fun recalculateVoterBackings(requestId: String, loanAmount: Long, lendingId: String) {
+        val yesVotes = lendingDao.getYesVotesForRequest(requestId)
+        val yesCount = yesVotes.size
+        if (yesCount == 0) return
+        val perVoterShare = calculatePerVoterShare(loanAmount, yesCount)
+        val remainder = calculatePerVoterRemainder(loanAmount, yesCount)
+        yesVotes.forEachIndexed { index, vote ->
+            val share = if (index == 0) perVoterShare + remainder else perVoterShare
+            lendingDao.updateVoteLockedAmount(requestId, vote.voterPeerId, share)
+        }
+        // Recalculate each affected voter's total locked stake
+        val affectedPeerIds = yesVotes.map { it.voterPeerId }.distinct()
+        affectedPeerIds.forEach { peerId ->
+            recalculateMemberLockedStake(lendingId, peerId)
+        }
+    }
+
+    /**
+     * Recalculate a member's total locked stake from all their active voter-backed loan votes.
+     * Also checks and applies suspension threshold.
+     */
+    private suspend fun recalculateMemberLockedStake(lendingId: String, memberPeerId: String) {
+        val activeVotes = lendingDao.getActiveVoterBackedLoansForMember(lendingId, memberPeerId)
+        val totalLocked = activeVotes.sumOf { it.lockedAmount }
+        val membership = lendingDao.getMembership(lendingId, memberPeerId) ?: return
+        val channel = lendingDao.getLendingChannelById(lendingId) ?: return
+        val updatedMembership = membership.copy(lockedStakeAmount = totalLocked)
+        val shouldSuspend = isVoterBelowSuspensionThreshold(updatedMembership, channel)
+        val newStatus = when {
+            shouldSuspend && membership.joinStatus == LendingMemberStatus.ACTIVE ->
+                LendingMemberStatus.SUSPENDED
+            !shouldSuspend && membership.joinStatus == LendingMemberStatus.SUSPENDED &&
+                membership.suspendedReason == "STAKE_BELOW_THRESHOLD" ->
+                LendingMemberStatus.ACTIVE
+            else -> membership.joinStatus
+        }
+        val suspendedReason = if (newStatus == LendingMemberStatus.SUSPENDED) "STAKE_BELOW_THRESHOLD" else null
+        lendingDao.updateMemberStakeAndStatus(
+            lendingId = lendingId,
+            memberPeerId = memberPeerId,
+            stakeAmount = membership.stakeAmount,
+            lockedStakeAmount = totalLocked,
+            joinStatus = newStatus,
+            suspendedReason = suspendedReason
+        )
+    }
+
+    /**
+     * Unlock all YES voters' locked amounts for a loan (used on cancel, full repayment, default).
+     */
+    private suspend fun unlockVoterBackings(requestId: String, lendingId: String) {
+        val yesVotes = lendingDao.getYesVotesForRequest(requestId)
+        yesVotes.forEach { vote ->
+            lendingDao.updateVoteLockedAmount(requestId, vote.voterPeerId, 0)
+        }
+        val affectedPeerIds = yesVotes.map { it.voterPeerId }.distinct()
+        affectedPeerIds.forEach { peerId ->
+            recalculateMemberLockedStake(lendingId, peerId)
+        }
+    }
+
     private data class VoteSummary(
         val yesVotes: Int,
         val noVotes: Int,
@@ -1231,6 +1695,7 @@ class LendingLifecycleServiceImpl @Inject constructor(
         val votingClosed: Boolean,
         val quorumReached: Boolean,
         val approved: Boolean,
-        val rejected: Boolean
+        val rejected: Boolean,
+        val fullyBacked: Boolean = false
     )
 }

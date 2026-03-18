@@ -22,7 +22,8 @@ data class LendingLoanRequestMessage(
     val originLendingId: String? = null,
     val forwardedFromRequestId: String? = null,
     val fundingLendingId: String? = null,
-    val requestKind: String = "ORIGIN"
+    val requestKind: String = "ORIGIN",
+    val backingModel: String = "VOTER_BACKED"
 )
 
 object LendingLoanRequestMessageCodec {

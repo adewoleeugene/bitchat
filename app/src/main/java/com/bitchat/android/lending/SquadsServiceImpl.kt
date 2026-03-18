@@ -135,9 +135,6 @@ class SquadsServiceImpl @Inject constructor(
             ?: return Result.failure(IllegalArgumentException("loan_request_not_found"))
         val channel = lendingDao.getLendingChannelById(lendingId)
             ?: return Result.failure(IllegalArgumentException("lending_channel_not_found"))
-        if (!isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
-            return Result.failure(IllegalStateException("squads_spl_not_supported_yet"))
-        }
 
         val squad = resolveLendingSquad(lendingId).getOrElse { return Result.failure(it) }
         val multisig = fetchMultisigState(squad.multisigAddress).getOrElse { return Result.failure(it) }
@@ -148,11 +145,25 @@ class SquadsServiceImpl @Inject constructor(
         val transactionPda = SquadsCodec.getTransactionPda(squadsConfig.programId, squad.multisigAddress, nextTransactionIndex)
         val proposalPda = SquadsCodec.getProposalPda(squadsConfig.programId, squad.multisigAddress, nextTransactionIndex)
         val targetWallet = resolveLoanRecipientWallet(loan, channel)
-        val transactionMessage = SquadsCodec.legacyTransferInstructionMessage(
-            vaultAddress = squad.vaultAddress,
-            recipientAddress = targetWallet,
-            amountLamports = loan.principalAmount
-        )
+        val transactionMessage = if (isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
+            SquadsCodec.legacyTransferInstructionMessage(
+                vaultAddress = squad.vaultAddress,
+                recipientAddress = targetWallet,
+                amountLamports = loan.principalAmount
+            )
+        } else {
+            val vaultTokenAccount = squad.vaultTokenAccountAddress?.takeIf { it.isNotBlank() }
+                ?: SolanaTokenAccountUtils.findAssociatedTokenAddress(squad.vaultAddress, channel.stakeTokenMint)
+            val recipientTokenAccount = SolanaTokenAccountUtils.findAssociatedTokenAddress(targetWallet, channel.stakeTokenMint)
+            SquadsCodec.legacySplTransferInstructionMessage(
+                vaultAddress = squad.vaultAddress,
+                sourceTokenAccount = vaultTokenAccount,
+                mintAddress = channel.stakeTokenMint,
+                destinationTokenAccount = recipientTokenAccount,
+                amountAtomic = loan.principalAmount,
+                decimals = channel.stakeTokenDecimals
+            )
+        }
 
         val createTxSignature = submitInstruction(
             recentBlockhash = blockhash.blockhash,
@@ -236,9 +247,6 @@ class SquadsServiceImpl @Inject constructor(
             ?: return Result.failure(IllegalArgumentException("loan_request_not_found"))
         val channel = lendingDao.getLendingChannelById(lendingId)
             ?: return Result.failure(IllegalArgumentException("lending_channel_not_found"))
-        if (!isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)) {
-            return Result.failure(IllegalStateException("squads_spl_not_supported_yet"))
-        }
         val squad = resolveLendingSquad(lendingId).getOrElse { return Result.failure(it) }
         val proposalAddress = loan.squadsProposalAddress
             ?: return Result.failure(IllegalStateException("squad_proposal_not_created"))
@@ -249,21 +257,34 @@ class SquadsServiceImpl @Inject constructor(
         val blockhash = rpcService.getLatestBlockhash().getOrElse { return Result.failure(it) }
         val targetWallet = resolveLoanRecipientWallet(loan, channel)
         val transactionPda = SquadsCodec.getTransactionPda(squadsConfig.programId, squad.multisigAddress, transactionIndex)
+        val isNativeSol = isNativeSolStakeAsset(channel.stakeTokenMint, channel.stakeTokenSymbol)
+        // Build execute accounts — SPL transfers need additional token accounts
+        val executeAccounts = mutableListOf(
+            SquadsCodec.SquadsAccountMeta(squad.multisigAddress, isSigner = false, isWritable = false),
+            SquadsCodec.SquadsAccountMeta(proposalAddress, isSigner = false, isWritable = true),
+            SquadsCodec.SquadsAccountMeta(transactionPda, isSigner = false, isWritable = false),
+            SquadsCodec.SquadsAccountMeta(memberWallet, isSigner = true, isWritable = false),
+            SquadsCodec.SquadsAccountMeta(squad.vaultAddress, isSigner = false, isWritable = true)
+        )
+        if (isNativeSol) {
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(targetWallet, isSigner = false, isWritable = true))
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(SolanaTokenAccountUtils.SYSTEM_PROGRAM_ID, isSigner = false, isWritable = false))
+        } else {
+            val vaultTokenAccount = squad.vaultTokenAccountAddress?.takeIf { it.isNotBlank() }
+                ?: SolanaTokenAccountUtils.findAssociatedTokenAddress(squad.vaultAddress, channel.stakeTokenMint)
+            val recipientTokenAccount = SolanaTokenAccountUtils.findAssociatedTokenAddress(targetWallet, channel.stakeTokenMint)
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(vaultTokenAccount, isSigner = false, isWritable = true))
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(recipientTokenAccount, isSigner = false, isWritable = true))
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(channel.stakeTokenMint, isSigner = false, isWritable = false))
+            executeAccounts.add(SquadsCodec.SquadsAccountMeta(SolanaTokenAccountUtils.TOKEN_PROGRAM_ID, isSigner = false, isWritable = false))
+        }
         val signature = submitInstruction(
             recentBlockhash = blockhash.blockhash,
             signerPublicKey = memberWallet,
             instructions = listOf(
                 SquadsCodec.SquadsInstruction(
                     programId = squadsConfig.programId,
-                    accounts = listOf(
-                        SquadsCodec.SquadsAccountMeta(squad.multisigAddress, isSigner = false, isWritable = false),
-                        SquadsCodec.SquadsAccountMeta(proposalAddress, isSigner = false, isWritable = true),
-                        SquadsCodec.SquadsAccountMeta(transactionPda, isSigner = false, isWritable = false),
-                        SquadsCodec.SquadsAccountMeta(memberWallet, isSigner = true, isWritable = false),
-                        SquadsCodec.SquadsAccountMeta(squad.vaultAddress, isSigner = false, isWritable = true),
-                        SquadsCodec.SquadsAccountMeta(targetWallet, isSigner = false, isWritable = true),
-                        SquadsCodec.SquadsAccountMeta(SolanaTokenAccountUtils.SYSTEM_PROGRAM_ID, isSigner = false, isWritable = false)
-                    ),
+                    accounts = executeAccounts,
                     data = SquadsCodec.vaultTransactionExecuteData()
                 )
             )

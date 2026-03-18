@@ -11,6 +11,8 @@ data class LendingLoanVoteMessage(
     val yesVotes: Int,
     val noVotes: Int,
     val requestStatus: String,
+    val voterLockedAmount: Long = 0,
+    val fullyBacked: Boolean = false,
     val approvedAt: Long? = null,
     val disbursedAt: Long? = null,
     val squadsMultisigAddress: String? = null,

@@ -188,6 +188,39 @@ interface LendingDao {
     )
     suspend fun getRepaymentByRequestAndSignature(requestId: String, txSignature: String): LoanRepaymentEntity?
 
+    // Voter-backed lending queries
+
+    @Query("SELECT * FROM loan_votes WHERE requestId = :requestId AND voteChoice = 'YES' ORDER BY votedAt ASC")
+    suspend fun getYesVotesForRequest(requestId: String): List<LoanVoteEntity>
+
+    @Query(
+        """
+        SELECT v.* FROM loan_votes v
+        INNER JOIN loan_requests r ON v.requestId = r.requestId
+        WHERE v.lendingId = :lendingId
+          AND v.voterPeerId = :voterPeerId
+          AND v.voteChoice = 'YES'
+          AND r.backingModel = 'VOTER_BACKED'
+          AND r.status IN ('PENDING', 'COMMUNITY_APPROVED', 'SIGNER_REVIEW', 'SIGNER_APPROVED', 'DISBURSED', 'PARTIALLY_REPAID', 'OVERDUE')
+        """
+    )
+    suspend fun getActiveVoterBackedLoansForMember(lendingId: String, voterPeerId: String): List<LoanVoteEntity>
+
+    @Query("UPDATE loan_votes SET lockedAmount = :lockedAmount WHERE requestId = :requestId AND voterPeerId = :voterPeerId")
+    suspend fun updateVoteLockedAmount(requestId: String, voterPeerId: String, lockedAmount: Long)
+
+    @Query("UPDATE loan_votes SET interestEarned = :interestEarned WHERE requestId = :requestId AND voterPeerId = :voterPeerId")
+    suspend fun updateVoteInterestEarned(requestId: String, voterPeerId: String, interestEarned: Long)
+
+    @Query("UPDATE loan_votes SET lossAbsorbed = :lossAbsorbed WHERE requestId = :requestId AND voterPeerId = :voterPeerId")
+    suspend fun updateVoteLossAbsorbed(requestId: String, voterPeerId: String, lossAbsorbed: Long)
+
+    @Query("UPDATE lending_memberships SET lockedStakeAmount = :lockedStakeAmount, updatedAt = :updatedAt WHERE lendingId = :lendingId AND memberPeerId = :memberPeerId")
+    suspend fun updateMemberLockedStake(lendingId: String, memberPeerId: String, lockedStakeAmount: Long, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE lending_memberships SET stakeAmount = :stakeAmount, lockedStakeAmount = :lockedStakeAmount, joinStatus = :joinStatus, suspendedReason = :suspendedReason, updatedAt = :updatedAt WHERE lendingId = :lendingId AND memberPeerId = :memberPeerId")
+    suspend fun updateMemberStakeAndStatus(lendingId: String, memberPeerId: String, stakeAmount: Long, lockedStakeAmount: Long, joinStatus: String, suspendedReason: String?, updatedAt: Long = System.currentTimeMillis())
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCredibilityProfile(profile: CredibilityProfileEntity)
 

@@ -53,7 +53,9 @@ data class LoanRequestEntity(
     val lastChainSyncSignature: String? = null,
     val lastChainSyncedSlot: Long? = null,
     @ColumnInfo(defaultValue = "'LOCAL_ONLY'")
-    val chainStatus: String = LoanChainStatus.LOCAL_ONLY
+    val chainStatus: String = LoanChainStatus.LOCAL_ONLY,
+    @ColumnInfo(defaultValue = "'VOTER_BACKED'")
+    val backingModel: String = LoanBackingModel.VOTER_BACKED
 )
 
 object BorrowerType {
@@ -90,4 +92,9 @@ object LoanChainStatus {
     const val SUBMITTED = "SUBMITTED"
     const val CONFIRMED = "CONFIRMED"
     const val FAILED = "FAILED"
+}
+
+object LoanBackingModel {
+    const val POOL = "POOL"
+    const val VOTER_BACKED = "VOTER_BACKED"
 }

@@ -450,7 +450,8 @@ private fun ChannelHeader(
     val displayName = ChannelKeys.displayName(channel)
     val lendingStakeLabels by viewModel.lendingChannelStakeLabels.observeAsState(emptyMap())
     val stakeLabel = lendingStakeLabels[channel]
-    
+    val showTreasurySetup = viewModel.canSetupLendingTreasury()
+
     Box(modifier = Modifier.fillMaxWidth()) {
         // Back button matches wallet header style (arrow-only)
         IconButton(
@@ -486,17 +487,36 @@ private fun ChannelHeader(
                 )
             }
         }
-        
-        // Leave button - positioned on the right
-        TextButton(
-            onClick = onLeaveChannel,
-            modifier = Modifier.align(Alignment.CenterEnd)
+
+        // Right-side actions
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = stringResource(R.string.chat_leave),
-                style = MaterialTheme.typography.bodySmall,
-                color = BitchatColors.StatusError
-            )
+            // Treasury setup button - only visible to channel owner when treasury not configured
+            if (showTreasurySetup) {
+                IconButton(
+                    onClick = { viewModel.requestLendingTreasurySetup() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    LucideIcon(
+                        imageVector = LucideIconSet.Shield,
+                        contentDescription = "Set up treasury",
+                        modifier = Modifier.size(20.dp),
+                        tint = BitchatColors.SelfMessage
+                    )
+                }
+            }
+            // Leave button
+            TextButton(
+                onClick = onLeaveChannel
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_leave),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BitchatColors.StatusError
+                )
+            }
         }
     }
 }

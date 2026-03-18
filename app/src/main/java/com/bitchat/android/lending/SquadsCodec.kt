@@ -135,6 +135,50 @@ internal object SquadsCodec {
         return output.toByteArray()
     }
 
+    /**
+     * Build a vault transaction message for SPL token transfer (transfer_checked).
+     * The vault is the token authority (signer). Accounts in order:
+     * 0 = vault (signer), 1 = source ATA, 2 = mint, 3 = destination ATA, 4 = token program
+     */
+    fun legacySplTransferInstructionMessage(
+        vaultAddress: String,
+        sourceTokenAccount: String,
+        mintAddress: String,
+        destinationTokenAccount: String,
+        amountAtomic: Long,
+        decimals: Int
+    ): ByteArray {
+        val output = ByteArrayOutputStream()
+        output.write(byteArrayOf(1)) // num signers (vault)
+        output.write(byteArrayOf(0)) // num writable signers that are not the vault itself (source ATA handled separately)
+        output.write(byteArrayOf(2)) // num writable non-signers (source ATA, destination ATA)
+        output.write(vecPubkeys(listOf(
+            vaultAddress,
+            sourceTokenAccount,
+            destinationTokenAccount,
+            mintAddress,
+            SolanaTokenAccountUtils.TOKEN_PROGRAM_ID
+        )))
+        output.write(vecBytes(compiledInstructionSplTransferChecked(amountAtomic, decimals)))
+        output.write(emptyVec()) // address table lookups
+        return output.toByteArray()
+    }
+
+    private fun compiledInstructionSplTransferChecked(amountAtomic: Long, decimals: Int): ByteArray {
+        // SPL Token transfer_checked instruction index = 12
+        val transferData = ByteArray(10)
+        transferData[0] = 12 // transfer_checked
+        for (i in 0..7) {
+            transferData[1 + i] = ((amountAtomic shr (i * 8)) and 0xFF).toByte()
+        }
+        transferData[9] = decimals.toByte()
+        val output = ByteArrayOutputStream()
+        output.write(byteArrayOf(4)) // token program index (index 4 in account list)
+        output.write(vecU8(byteArrayOf(1, 3, 2, 0))) // source ATA, mint, destination ATA, vault (authority)
+        output.write(vecBytes(transferData))
+        return output.toByteArray()
+    }
+
     private fun compiledInstructionSystemTransfer(amountLamports: Long): ByteArray {
         val transferData = ByteArray(12)
         transferData[0] = 2
