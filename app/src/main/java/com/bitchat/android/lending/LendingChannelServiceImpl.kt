@@ -338,14 +338,14 @@ class LendingChannelServiceImpl @Inject constructor(
             existing?.joinStatus == LendingMemberStatus.ACTIVE &&
                 existing.depositStatus == EscrowTransferStatus.CONFIRMED -> existing.joinStatus
             normalizedJoinStatus == LendingMemberStatus.EXITED -> LendingMemberStatus.EXITED
-            else -> LendingMemberStatus.PENDING
+            else -> normalizedJoinStatus
         }
         val importedDepositStatus = when {
             existing?.joinStatus == LendingMemberStatus.ACTIVE &&
                 existing.depositStatus == EscrowTransferStatus.CONFIRMED -> existing.depositStatus
             normalizedJoinStatus == LendingMemberStatus.EXITED ||
                 normalizedDepositStatus == EscrowTransferStatus.RELEASED -> EscrowTransferStatus.RELEASED
-            else -> EscrowTransferStatus.PENDING
+            else -> normalizedDepositStatus
         }
         val membership = (existing ?: LendingMembershipEntity(
             lendingId = channel.lendingId,
@@ -360,6 +360,7 @@ class LendingChannelServiceImpl @Inject constructor(
             updatedAt = maxOf(existing?.updatedAt ?: 0L, message.updatedAt, System.currentTimeMillis())
         )
         lendingDao.upsertMembership(membership)
+        refreshPoolSnapshot(channel.lendingId)
         return membership
     }
 
