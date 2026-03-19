@@ -87,7 +87,8 @@ class MeshDelegateHandler(
                 }
             } else {
                 // Check for channel messages: new format (content) or legacy format (channel field)
-                val channelInfo = messageManager.parseChannelInfo(message.content)
+                val rawContent: String? = message.content
+                val channelInfo = rawContent?.let { messageManager.parseChannelInfo(it) }
                 val channelName = channelInfo?.first ?: message.channel
 
                 if (channelName != null) {
@@ -111,7 +112,7 @@ class MeshDelegateHandler(
                         return@launch
                     }
 
-                    val displayContent = channelInfo?.second ?: message.content
+                    val displayContent = channelInfo?.second ?: message.content ?: return@launch
                     if (onLendingAnnouncementReceived(displayContent, senderPeerID, key)) {
                         if (shouldRenderVisibleLendingPayload(displayContent)) {
                             channelManager.ensureDiscoveredChannel(key, senderPeerID)
