@@ -1289,7 +1289,7 @@ class CommandProcessor(
                         } ?: 0
                     val totalBackingCapacity = status.memberships
                         .filter { it.joinStatus == LendingMemberStatus.ACTIVE && it.depositStatus == com.bitchat.android.data.local.entities.EscrowTransferStatus.CONFIRMED }
-                        .sumOf { maxBackingForVoter(it) }
+                        .sumOf { member -> maxBackingForVoter(member).toLong() }
                     append("locked stakes: ${totalLocked}\n")
                     append("voter-backed loans: $voterBackedLoanCount\n")
                     append("backing capacity: $totalBackingCapacity\n")
@@ -2865,6 +2865,7 @@ class CommandProcessor(
         // Channel context: do not show global commands.
         val commands = mutableListOf(
             CommandSuggestion("/leave", emptyList(), "[#channel]", "exit channel"),
+            CommandSuggestion("/lending", emptyList(), "<action>", "community lending tools"),
             CommandSuggestion("/lending create", emptyList(), "#channel <stake_amount> <mint> <minimum_votes> <voting_hours> [max_payback_days] [grace_period_days]", "create lending channel"),
             CommandSuggestion("/lending invite", emptyList(), "[#channel|lendingId]", "create a lending invite code"),
             CommandSuggestion("/lending import", emptyList(), "<invite_code>", "import a lending invite"),
