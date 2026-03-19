@@ -42,6 +42,7 @@ import com.bitchat.android.lending.NATIVE_SOL_ASSET
 import com.bitchat.android.lending.countLoanApprovals
 import com.bitchat.android.lending.countLoanRejections
 import com.bitchat.android.lending.isNativeSolStakeAsset
+import com.bitchat.android.lending.maxBackingForVoter
 import com.bitchat.android.lending.requiredJoinDebitAmount
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
@@ -816,7 +817,7 @@ class CommandProcessor(
             "authorize" -> withLendingChannelContext("authorize") { handleLendingAuthorize(parts, myPeerID, viewModel, onSendMessage) }
             "disburse" -> withLendingChannelContext("disburse") { handleLendingDisburse(parts, myPeerID, viewModel, onSendMessage) }
             "repay" -> withLendingChannelContext("repay") { handleLendingRepay(parts, myPeerID, onSendMessage) }
-            "leave" -> withLendingChannelContext("leave") { handleLendingLeave(parts, myPeerID, viewModel, meshService) }
+            "leave" -> withLendingChannelContext("leave") { handleLendingLeave(parts, myPeerID, viewModel, meshService, onSendMessage) }
             "topup" -> withLendingChannelContext("topup") { handleLendingTopup(parts, myPeerID, viewModel) }
             "transfer-ownership" -> withLendingChannelContext("transfer-ownership") { handleLendingTransferOwnership(parts, myPeerID, viewModel, meshService) }
             else -> CommandResult(
@@ -1930,7 +1931,8 @@ class CommandProcessor(
         parts: List<String>,
         myPeerID: String,
         viewModel: ChatViewModel?,
-        meshService: BluetoothMeshService
+        meshService: BluetoothMeshService,
+        onSendMessage: (String, List<String>, String?) -> Unit
     ): CommandResult? {
         val loanService = lendingLoanService
         val lendingService = lendingChannelService
@@ -2092,9 +2094,8 @@ class CommandProcessor(
                     ?: throw IllegalStateException("lending_channel_not_found")
 
                 // Resolve peer ID from nickname
-                val targetPeerId = meshService.connectedPeers.firstOrNull { peerId ->
-                    meshService.getPeerInfo(peerId)?.name?.equals(targetNickname, ignoreCase = true) == true
-                } ?: throw IllegalArgumentException("peer_not_found")
+                val targetPeerId = getPeerIDForNickname(targetNickname, meshService, viewModel)
+                    ?: throw IllegalArgumentException("peer_not_found")
 
                 val updated = lendingService.transferOwnership(channel.lendingId, myPeerID, targetPeerId)
                 // Also transfer the channel role
