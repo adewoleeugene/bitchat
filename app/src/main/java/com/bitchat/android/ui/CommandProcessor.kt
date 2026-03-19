@@ -1093,6 +1093,7 @@ class CommandProcessor(
                 )
             )
             if (isNativeSolStakeAsset(lendingChannel.stakeTokenMint, lendingChannel.stakeTokenSymbol) && viewModel != null) {
+                ensureLendingChannelVisible(lendingChannel.channelKey, myPeerID, viewModel)
                 viewModel.requestLendingStakeApproval(lendingChannel.lendingId, myPeerID)
                 addSystemMessage(
                     "join pending for ${lendingChannel.displayName} • id ${lendingChannel.lendingId}: review and sign the SOL stake in the drawer"

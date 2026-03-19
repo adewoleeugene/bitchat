@@ -724,7 +724,7 @@ class ChatViewModel(
                     stakeTokenMint = channelConfig.stakeTokenMint,
                     stakeTokenSymbol = channelConfig.stakeTokenSymbol,
                     stakeTokenDecimals = channelConfig.stakeTokenDecimals,
-                    seedCreatorMembership = false,
+                    seedCreatorMembership = true,
                     votingWindowHours = channelConfig.votingWindowHours,
                     defaultGracePeriodDays = channelConfig.defaultGracePeriodDays
                 )
