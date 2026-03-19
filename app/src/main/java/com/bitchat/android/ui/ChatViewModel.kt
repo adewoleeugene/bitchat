@@ -1437,6 +1437,7 @@ class ChatViewModel(
                     "community treasury connected for ${request.channelDisplayName}. Admin review and approver authorization are now available."
                 )
             }.onFailure { error ->
+                _pendingLendingTreasurySetup.value = null
                 messageManager.addSystemMessage(
                     "couldn't connect community treasury: ${friendlyLendingSquadSetupError(error)}"
                 )
