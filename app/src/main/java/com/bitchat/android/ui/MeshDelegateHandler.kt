@@ -114,8 +114,9 @@ class MeshDelegateHandler(
 
                     val displayContent = channelInfo?.second ?: message.content ?: return@launch
                     if (onLendingAnnouncementReceived(displayContent, senderPeerID, key)) {
+                        // Always discover the channel so it appears in the UI
+                        channelManager.ensureDiscoveredChannel(key, senderPeerID)
                         if (shouldRenderVisibleLendingPayload(displayContent)) {
-                            channelManager.ensureDiscoveredChannel(key, senderPeerID)
                             channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
                         }
                         return@launch
