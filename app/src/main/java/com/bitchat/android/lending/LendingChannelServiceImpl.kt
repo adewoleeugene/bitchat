@@ -169,11 +169,13 @@ class LendingChannelServiceImpl @Inject constructor(
 
         lendingDao.getLendingChannelById(request.lendingId.uppercase())?.let { existing ->
             validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals, request.votingWindowHours, request.defaultGracePeriodDays)
+            seedCreatorMembershipIfNeeded(existing, request)
             return existing
         }
 
         lendingDao.getLendingChannelByChannelKey(request.channelKey)?.let { existing ->
             validateCompatibleChannel(existing, request.displayName, request.requiredStakeAmount, request.minimumVoteCount, request.maxLoanDurationDays, request.stakeTokenMint, request.stakeTokenSymbol, request.stakeTokenDecimals, request.votingWindowHours, request.defaultGracePeriodDays)
+            seedCreatorMembershipIfNeeded(existing, request)
             return existing
         }
 
@@ -218,6 +220,25 @@ class LendingChannelServiceImpl @Inject constructor(
             )
         }
         return entity
+    }
+
+    private suspend fun seedCreatorMembershipIfNeeded(channel: LendingChannelEntity, request: ImportLendingChannelRequest) {
+        if (!request.seedCreatorMembership) return
+        val existing = lendingDao.getMembership(channel.lendingId, request.creatorPeerId)
+        if (existing != null) return
+        lendingDao.upsertMembership(
+            LendingMembershipEntity(
+                lendingId = channel.lendingId,
+                memberPeerId = request.creatorPeerId,
+                walletAddress = request.creatorWalletAddress,
+                stakeAmount = request.requiredStakeAmount,
+                depositStatus = EscrowTransferStatus.CONFIRMED,
+                joinStatus = LendingMemberStatus.ACTIVE,
+                credibilityScore = 100,
+                credibilitySnapshotJson = """{"source":"explicit_invite"}"""
+            )
+        )
+        refreshPoolSnapshot(channel.lendingId)
     }
 
     override suspend fun configureSquad(request: ConfigureLendingSquadRequest): LendingChannelEntity {
