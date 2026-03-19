@@ -1147,7 +1147,7 @@ private fun LendingTreasurySetupSheet(
                             selectedCandidates.map { it.walletAddress }
                         )
                     },
-                    enabled = !isSubmitting && enoughSelectedApprovers && (multisigAddress.isNotBlank() || !showAdvancedDetails),
+                    enabled = !isSubmitting && enoughSelectedApprovers,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BitchatColors.ButtonPrimaryBg,
