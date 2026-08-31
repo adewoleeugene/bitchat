@@ -1,6 +1,12 @@
 package com.bitchat.android.ui
 
 import android.util.Log
+import com.bitchat.android.lending.LendingChannelConfigMessageCodec
+import com.bitchat.android.lending.LendingChannelConfigRequestMessageCodec
+import com.bitchat.android.lending.LendingLoanRepaymentMessageCodec
+import com.bitchat.android.lending.LendingLoanRequestMessageCodec
+import com.bitchat.android.lending.LendingLoanVoteMessageCodec
+import com.bitchat.android.lending.LendingMembershipMessageCodec
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.ui.NotificationTextUtils
 import com.bitchat.android.mesh.BluetoothMeshService
@@ -24,7 +30,8 @@ class MeshDelegateHandler(
     private val coroutineScope: CoroutineScope,
     private val onHapticFeedback: () -> Unit,
     private val getMyPeerID: () -> String,
-    private val getMeshService: () -> BluetoothMeshService
+    private val getMeshService: () -> BluetoothMeshService,
+    private val onLendingAnnouncementReceived: suspend (String, String?, String?) -> Boolean = { _, _, _ -> false }
 ) : BluetoothMeshDelegate {
     private data class PeerGateDecisionCache(
         val allowed: Boolean,
@@ -36,6 +43,7 @@ class MeshDelegateHandler(
     companion object {
         private const val PEER_GATE_ONLINE_CACHE_MS = 15_000L
         private const val PEER_GATE_OFFLINE_CACHE_MS = 60_000L
+        private const val LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX = "__bitchat_lending_channel__:"
     }
 
     override fun didReceiveMessage(message: BitchatMessage) {
@@ -79,7 +87,8 @@ class MeshDelegateHandler(
                 }
             } else {
                 // Check for channel messages: new format (content) or legacy format (channel field)
-                val channelInfo = messageManager.parseChannelInfo(message.content)
+                val rawContent: String? = message.content
+                val channelInfo = rawContent?.let { messageManager.parseChannelInfo(it) }
                 val channelName = channelInfo?.first ?: message.channel
 
                 if (channelName != null) {
@@ -103,10 +112,17 @@ class MeshDelegateHandler(
                         return@launch
                     }
 
+                    val displayContent = channelInfo?.second ?: message.content ?: return@launch
+                    if (onLendingAnnouncementReceived(displayContent, senderPeerID, key)) {
+                        // Always discover the channel so it appears in the UI
+                        channelManager.ensureDiscoveredChannel(key, senderPeerID)
+                        if (shouldRenderVisibleLendingPayload(displayContent)) {
+                            channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
+                        }
+                        return@launch
+                    }
                     // Passive channel discovery: show channel when we first see traffic for it.
                     channelManager.ensureDiscoveredChannel(key, senderPeerID)
-
-                    val displayContent = channelInfo?.second ?: message.content
                     channelManager.addChannelMessage(key, message.copy(content = displayContent), senderPeerID)
                 } else {
                     // Public mesh message - always store to preserve message history
@@ -367,6 +383,16 @@ class MeshDelegateHandler(
             expiresAt = now + ttl
         )
         return allowed
+    }
+
+    private fun shouldRenderVisibleLendingPayload(content: String): Boolean {
+        if (content.startsWith(LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX)) return false
+        if (LendingChannelConfigMessageCodec.decode(content) != null) return false
+        if (LendingChannelConfigRequestMessageCodec.decode(content) != null) return false
+        if (LendingMembershipMessageCodec.decode(content) != null) return false
+        if (LendingLoanVoteMessageCodec.decode(content) != null) return false
+        if (LendingLoanRepaymentMessageCodec.decode(content) != null) return false
+        return LendingLoanRequestMessageCodec.decode(content) != null
     }
 
 }

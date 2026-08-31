@@ -1,11 +1,12 @@
 package com.bitchat.android.di
 
-import android.content.Context
+import com.bitchat.android.solana.LendingTransferGateway
+import com.bitchat.android.solana.PaymentManagerLendingTransferGateway
 import com.bitchat.android.solana.SolanaRpcService
 import dagger.Module
+import dagger.Binds
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -43,4 +44,13 @@ object SolanaModule {
     ): SolanaRpcService {
         return SolanaRpcService(okHttpClient, rpcUrl)
     }
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class SolanaBindingsModule {
+    @Binds
+    abstract fun bindLendingTransferGateway(
+        impl: PaymentManagerLendingTransferGateway
+    ): LendingTransferGateway
 }

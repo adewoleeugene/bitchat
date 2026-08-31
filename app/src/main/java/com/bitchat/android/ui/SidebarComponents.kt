@@ -95,8 +95,9 @@ fun SidebarOverlay(
                                 currentChannel = currentChannel,
                                 colorScheme = colorScheme,
                                 onChannelClick = { channelKey ->
-                                    viewModel.switchToChannelWithTimelineContext(channelKey)
-                                    onDismiss()
+                                    viewModel.openSidebarChannel(channelKey) {
+                                        onDismiss()
+                                    }
                                 },
                                 onLeaveChannel = { channel ->
                                     viewModel.leaveChannel(channel)
@@ -480,6 +481,7 @@ fun PeopleSection(
             PeerItem(
                 peerID = peerID,
                 displayName = displayName,
+                subtitle = peerID.take(8),
                 isDirect = isDirectLive,
                 isSelected = peerID == selectedPrivatePeer,
                 isFavorite = isFavorite,
@@ -537,6 +539,7 @@ fun PeopleSection(
             PeerItem(
                 peerID = favPeerID,
                 displayName = dn,
+                subtitle = favPeerID.take(8),
                 isDirect = false,
                 isSelected = (mappedConnectedPeerID ?: favPeerID) == selectedPrivatePeer,
                 isFavorite = true,
@@ -604,6 +607,7 @@ fun PeopleSection(
 private fun PeerItem(
     peerID: String,
     displayName: String,
+    subtitle: String? = null,
     isDirect: Boolean,
     isSelected: Boolean,
     isFavorite: Boolean,
@@ -680,32 +684,39 @@ private fun PeerItem(
         Spacer(modifier = Modifier.width(8.dp))
         
         // Display name with iOS-style color and hashtag suffix support
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Base name with peer-specific color
-            Text(
-                text = baseName,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = SatoshiFamily,
-                    fontSize = BASE_FONT_SIZE.sp,
-                    fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal
-                ),
-                color = baseColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            
-            // Hashtag suffix in lighter shade (iOS-style)
-            if (suffix.isNotEmpty()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = suffix,
+                    text = baseName,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontFamily = SatoshiFamily,
-                        fontSize = BASE_FONT_SIZE.sp
+                        fontSize = BASE_FONT_SIZE.sp,
+                        fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal
                     ),
-                    color = baseColor.copy(alpha = 0.6f)
+                    color = baseColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                if (suffix.isNotEmpty()) {
+                    Text(
+                        text = suffix,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = SatoshiFamily,
+                            fontSize = BASE_FONT_SIZE.sp
+                        ),
+                        color = baseColor.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = SatoshiFamily),
+                    color = colorScheme.onSurface.copy(alpha = 0.5f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

@@ -7,6 +7,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bitchat.android.data.local.entities.FeedPostEntity
 import com.bitchat.android.data.local.entities.FeedReactionEntity
 import com.bitchat.android.data.local.entities.FeedReplyEntity
+import com.bitchat.android.data.local.entities.CredibilityProfileEntity
+import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LendingEscrowAccountEntity
+import com.bitchat.android.data.local.entities.LendingEscrowProposalEntity
+import com.bitchat.android.data.local.entities.LendingMembershipEntity
+import com.bitchat.android.data.local.entities.LendingPoolSnapshotEntity
+import com.bitchat.android.data.local.entities.LendingSignerReviewEntity
+import com.bitchat.android.data.local.entities.LoanRepaymentEntity
+import com.bitchat.android.data.local.entities.LoanRequestEntity
+import com.bitchat.android.data.local.entities.LoanVoteEntity
 import com.bitchat.android.data.local.entities.MessageNotarizationEntity
 import com.bitchat.android.data.local.entities.QueuedTransactionEntity
 import com.bitchat.android.data.local.entities.TokenGateConfigEntity
@@ -24,9 +34,19 @@ import com.bitchat.android.data.local.entities.WalletEntity
         MessageNotarizationEntity::class,
         FeedPostEntity::class,
         FeedReactionEntity::class,
-        FeedReplyEntity::class
+        FeedReplyEntity::class,
+        LendingChannelEntity::class,
+        LendingEscrowAccountEntity::class,
+        LendingEscrowProposalEntity::class,
+        LendingMembershipEntity::class,
+        LendingPoolSnapshotEntity::class,
+        LendingSignerReviewEntity::class,
+        LoanRequestEntity::class,
+        LoanVoteEntity::class,
+        LoanRepaymentEntity::class,
+        CredibilityProfileEntity::class
     ],
-    version = 10,
+    version = 23,
     exportSchema = false
 )
 abstract class SolanaDatabase : RoomDatabase() {
@@ -35,6 +55,7 @@ abstract class SolanaDatabase : RoomDatabase() {
     abstract fun tokenGateDao(): TokenGateDao
     abstract fun notarizationDao(): NotarizationDao
     abstract fun feedDao(): FeedDao
+    abstract fun lendingDao(): LendingDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -313,6 +334,694 @@ abstract class SolanaDatabase : RoomDatabase() {
                     ADD COLUMN `audioPath` TEXT
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_channels` (
+                        `lendingId` TEXT NOT NULL,
+                        `channelKey` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        `creatorPeerId` TEXT NOT NULL,
+                        `creatorWalletAddress` TEXT NOT NULL,
+                        `requiredStakeAmount` INTEGER NOT NULL,
+                        `stakeTokenMint` TEXT NOT NULL,
+                        `stakeTokenSymbol` TEXT NOT NULL,
+                        `stakeTokenDecimals` INTEGER NOT NULL,
+                        `escrowMultisigAddress` TEXT NOT NULL,
+                        `quorumThresholdPercent` INTEGER NOT NULL,
+                        `approvalThresholdPercent` INTEGER NOT NULL,
+                        `votingWindowHours` INTEGER NOT NULL,
+                        `lifecycleState` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_lending_channels_channelKey`
+                    ON `lending_channels` (`channelKey`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_memberships` (
+                        `lendingId` TEXT NOT NULL,
+                        `memberPeerId` TEXT NOT NULL,
+                        `walletAddress` TEXT NOT NULL,
+                        `stakeAmount` INTEGER NOT NULL,
+                        `depositStatus` TEXT NOT NULL,
+                        `joinStatus` TEXT NOT NULL,
+                        `credibilityScore` INTEGER NOT NULL,
+                        `credibilitySnapshotJson` TEXT NOT NULL,
+                        `joinedAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`, `memberPeerId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_walletAddress`
+                    ON `lending_memberships` (`walletAddress`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_joinStatus`
+                    ON `lending_memberships` (`joinStatus`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_memberships_depositStatus`
+                    ON `lending_memberships` (`depositStatus`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_pool_snapshots` (
+                        `lendingId` TEXT NOT NULL,
+                        `totalStakedAmount` INTEGER NOT NULL,
+                        `reservedAmount` INTEGER NOT NULL,
+                        `disbursedAmount` INTEGER NOT NULL,
+                        `availableLiquidityAmount` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_requests` (
+                        `requestId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `borrowerType` TEXT NOT NULL,
+                        `borrowerPeerId` TEXT,
+                        `borrowerGroupKey` TEXT,
+                        `principalAmount` INTEGER NOT NULL,
+                        `interestBps` INTEGER NOT NULL,
+                        `durationDays` INTEGER NOT NULL,
+                        `purpose` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `requestedAt` INTEGER NOT NULL,
+                        `dueAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `disbursedAt` INTEGER,
+                        `defaultedAt` INTEGER,
+                        PRIMARY KEY(`requestId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_lendingId`
+                    ON `loan_requests` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_status`
+                    ON `loan_requests` (`status`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_borrowerPeerId`
+                    ON `loan_requests` (`borrowerPeerId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_votes` (
+                        `requestId` TEXT NOT NULL,
+                        `voterPeerId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `voteChoice` TEXT NOT NULL,
+                        `votedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`requestId`, `voterPeerId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_votes_lendingId`
+                    ON `loan_votes` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_votes_voteChoice`
+                    ON `loan_votes` (`voteChoice`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_repayments` (
+                        `repaymentId` TEXT NOT NULL,
+                        `requestId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `amount` INTEGER NOT NULL,
+                        `txSignature` TEXT,
+                        `txStatus` TEXT NOT NULL,
+                        `paidAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`repaymentId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_repayments_requestId`
+                    ON `loan_repayments` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_repayments_lendingId`
+                    ON `loan_repayments` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `credibility_profiles` (
+                        `profileId` TEXT NOT NULL,
+                        `subjectType` TEXT NOT NULL,
+                        `subjectKey` TEXT NOT NULL,
+                        `score` INTEGER NOT NULL,
+                        `usageAgePoints` INTEGER NOT NULL,
+                        `participationPoints` INTEGER NOT NULL,
+                        `recentActivityPoints` INTEGER NOT NULL,
+                        `walletStrengthPoints` INTEGER NOT NULL,
+                        `hardGateStatus` TEXT NOT NULL,
+                        `firstSeenAt` INTEGER NOT NULL,
+                        `lastComputedAt` INTEGER NOT NULL,
+                        `snapshotJson` TEXT NOT NULL,
+                        PRIMARY KEY(`profileId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_credibility_profiles_subjectType_subjectKey`
+                    ON `credibility_profiles` (`subjectType`, `subjectKey`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetKind` TEXT NOT NULL DEFAULT 'NATIVE_SOL'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetMintAddress` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetSymbol` TEXT NOT NULL DEFAULT 'SOL'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `queued_transactions`
+                    ADD COLUMN `assetDecimals` INTEGER NOT NULL DEFAULT 9
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_escrow_accounts` (
+                        `lendingId` TEXT NOT NULL,
+                        `multisigAddress` TEXT NOT NULL,
+                        `vaultAddress` TEXT NOT NULL,
+                        `provider` TEXT NOT NULL,
+                        `custodyState` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`lendingId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_escrow_proposals` (
+                        `proposalId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `requestId` TEXT,
+                        `memberPeerId` TEXT,
+                        `proposalType` TEXT NOT NULL,
+                        `appApprovalStatus` TEXT NOT NULL,
+                        `custodyExecutionStatus` TEXT NOT NULL,
+                        `targetWalletAddress` TEXT NOT NULL,
+                        `mintAddress` TEXT NOT NULL,
+                        `amountAtomic` INTEGER NOT NULL,
+                        `txSignature` TEXT,
+                        `errorMessage` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`proposalId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_lendingId`
+                    ON `lending_escrow_proposals` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_requestId`
+                    ON `lending_escrow_proposals` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_proposalType`
+                    ON `lending_escrow_proposals` (`proposalType`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_escrow_proposals_custodyExecutionStatus`
+                    ON `lending_escrow_proposals` (`custodyExecutionStatus`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_escrow_accounts`
+                    ADD COLUMN `vaultTokenAccountAddress` TEXT NOT NULL DEFAULT ''
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_escrow_accounts`
+                    ADD COLUMN `treasuryContactsJson` TEXT NOT NULL DEFAULT '[]'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_escrow_accounts`
+                    ADD COLUMN `pendingMigrationMultisigAddress` TEXT NOT NULL DEFAULT ''
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_requests_new` (
+                        `requestId` TEXT NOT NULL PRIMARY KEY,
+                        `lendingId` TEXT NOT NULL,
+                        `borrowerType` TEXT NOT NULL,
+                        `borrowerPeerId` TEXT,
+                        `borrowerGroupKey` TEXT,
+                        `principalAmount` INTEGER NOT NULL,
+                        `interestBps` INTEGER NOT NULL,
+                        `durationDays` INTEGER NOT NULL,
+                        `purpose` TEXT NOT NULL,
+                        `endorserPeerIdsJson` TEXT NOT NULL DEFAULT '[]',
+                        `status` TEXT NOT NULL,
+                        `requestedAt` INTEGER NOT NULL,
+                        `dueAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `disbursedAt` INTEGER,
+                        `defaultedAt` INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `loan_requests_new`
+                    (`requestId`, `lendingId`, `borrowerType`, `borrowerPeerId`, `borrowerGroupKey`, `principalAmount`, `interestBps`, `durationDays`, `purpose`, `endorserPeerIdsJson`, `status`, `requestedAt`, `dueAt`, `approvedAt`, `disbursedAt`, `defaultedAt`)
+                    SELECT
+                        `requestId`, `lendingId`, `borrowerType`, `borrowerPeerId`, `borrowerGroupKey`, `principalAmount`, `interestBps`, `durationDays`, `purpose`, '[]', `status`, `requestedAt`, `dueAt`, `approvedAt`, `disbursedAt`, `defaultedAt`
+                    FROM `loan_requests`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `loan_requests`")
+                db.execSQL("ALTER TABLE `loan_requests_new` RENAME TO `loan_requests`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_lendingId` ON `loan_requests` (`lendingId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_status` ON `loan_requests` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_borrowerPeerId` ON `loan_requests` (`borrowerPeerId`)")
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `channelPda` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `loanRequestPda` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `lastChainSyncSignature` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `lastChainSyncedSlot` INTEGER
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `chainStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_loanRequestPda`
+                    ON `loan_requests` (`loanRequestPda`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `squadsMultisigAddress` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `squadsVaultAddress` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `squadsProposalAddress` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `squadsTransactionIndex` INTEGER
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_squadsProposalAddress`
+                    ON `loan_requests` (`squadsProposalAddress`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `parentRequestId` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `requestKind` TEXT NOT NULL DEFAULT 'ORIGIN'
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `originLendingId` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `forwardedFromRequestId` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `fundingLendingId` TEXT
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_parentRequestId`
+                    ON `loan_requests` (`parentRequestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_originLendingId`
+                    ON `loan_requests` (`originLendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_loan_requests_fundingLendingId`
+                    ON `loan_requests` (`fundingLendingId`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `loan_requests_new` (
+                        `requestId` TEXT NOT NULL PRIMARY KEY,
+                        `lendingId` TEXT NOT NULL,
+                        `borrowerType` TEXT NOT NULL,
+                        `borrowerPeerId` TEXT,
+                        `borrowerGroupKey` TEXT,
+                        `principalAmount` INTEGER NOT NULL,
+                        `interestBps` INTEGER NOT NULL,
+                        `durationDays` INTEGER NOT NULL,
+                        `purpose` TEXT NOT NULL,
+                        `endorserPeerIdsJson` TEXT NOT NULL DEFAULT '[]',
+                        `status` TEXT NOT NULL,
+                        `requestedAt` INTEGER NOT NULL,
+                        `dueAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `disbursedAt` INTEGER,
+                        `defaultedAt` INTEGER,
+                        `parentRequestId` TEXT,
+                        `requestKind` TEXT NOT NULL DEFAULT 'ORIGIN',
+                        `originLendingId` TEXT,
+                        `forwardedFromRequestId` TEXT,
+                        `fundingLendingId` TEXT,
+                        `squadsMultisigAddress` TEXT,
+                        `squadsVaultAddress` TEXT,
+                        `squadsProposalAddress` TEXT,
+                        `squadsTransactionIndex` INTEGER,
+                        `channelPda` TEXT,
+                        `loanRequestPda` TEXT,
+                        `lastChainSyncSignature` TEXT,
+                        `lastChainSyncedSlot` INTEGER,
+                        `chainStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `loan_requests_new` (
+                        `requestId`,
+                        `lendingId`,
+                        `borrowerType`,
+                        `borrowerPeerId`,
+                        `borrowerGroupKey`,
+                        `principalAmount`,
+                        `interestBps`,
+                        `durationDays`,
+                        `purpose`,
+                        `endorserPeerIdsJson`,
+                        `status`,
+                        `requestedAt`,
+                        `dueAt`,
+                        `approvedAt`,
+                        `disbursedAt`,
+                        `defaultedAt`,
+                        `parentRequestId`,
+                        `requestKind`,
+                        `originLendingId`,
+                        `forwardedFromRequestId`,
+                        `fundingLendingId`,
+                        `squadsMultisigAddress`,
+                        `squadsVaultAddress`,
+                        `squadsProposalAddress`,
+                        `squadsTransactionIndex`,
+                        `channelPda`,
+                        `loanRequestPda`,
+                        `lastChainSyncSignature`,
+                        `lastChainSyncedSlot`,
+                        `chainStatus`
+                    )
+                    SELECT
+                        `requestId`,
+                        `lendingId`,
+                        `borrowerType`,
+                        `borrowerPeerId`,
+                        `borrowerGroupKey`,
+                        `principalAmount`,
+                        `interestBps`,
+                        `durationDays`,
+                        `purpose`,
+                        COALESCE(`endorserPeerIdsJson`, '[]'),
+                        `status`,
+                        `requestedAt`,
+                        `dueAt`,
+                        `approvedAt`,
+                        `disbursedAt`,
+                        `defaultedAt`,
+                        `parentRequestId`,
+                        COALESCE(`requestKind`, 'ORIGIN'),
+                        `originLendingId`,
+                        `forwardedFromRequestId`,
+                        `fundingLendingId`,
+                        `squadsMultisigAddress`,
+                        `squadsVaultAddress`,
+                        `squadsProposalAddress`,
+                        `squadsTransactionIndex`,
+                        `channelPda`,
+                        `loanRequestPda`,
+                        `lastChainSyncSignature`,
+                        `lastChainSyncedSlot`,
+                        COALESCE(`chainStatus`, 'LOCAL_ONLY')
+                    FROM `loan_requests`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `loan_requests`")
+                db.execSQL("ALTER TABLE `loan_requests_new` RENAME TO `loan_requests`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_lendingId` ON `loan_requests` (`lendingId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_status` ON `loan_requests` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_borrowerPeerId` ON `loan_requests` (`borrowerPeerId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_parentRequestId` ON `loan_requests` (`parentRequestId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_originLendingId` ON `loan_requests` (`originLendingId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_fundingLendingId` ON `loan_requests` (`fundingLendingId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_loanRequestPda` ON `loan_requests` (`loanRequestPda`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_loan_requests_squadsProposalAddress` ON `loan_requests` (`squadsProposalAddress`)")
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `loan_requests`
+                    ADD COLUMN `borrowerWalletAddress` TEXT
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_channels`
+                    ADD COLUMN `minimumVoteCount` INTEGER NOT NULL DEFAULT 2
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    ALTER TABLE `lending_channels`
+                    ADD COLUMN `defaultLoanDurationDays` INTEGER NOT NULL DEFAULT 14
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lending_signer_reviews` (
+                        `reviewId` TEXT NOT NULL,
+                        `lendingId` TEXT NOT NULL,
+                        `requestId` TEXT NOT NULL,
+                        `createdByPeerId` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `squadsProposalAddress` TEXT,
+                        `openedAt` INTEGER NOT NULL,
+                        `approvedAt` INTEGER,
+                        `rejectedAt` INTEGER,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`reviewId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_signer_reviews_lendingId`
+                    ON `lending_signer_reviews` (`lendingId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_lending_signer_reviews_requestId`
+                    ON `lending_signer_reviews` (`requestId`)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_lending_signer_reviews_status`
+                    ON `lending_signer_reviews` (`status`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Voter-backed lending: per-vote backing tracking
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `lockedAmount` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `interestEarned` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `loan_votes` ADD COLUMN `lossAbsorbed` INTEGER NOT NULL DEFAULT 0")
+                // Membership locked stake and suspension tracking
+                db.execSQL("ALTER TABLE `lending_memberships` ADD COLUMN `lockedStakeAmount` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `lending_memberships` ADD COLUMN `suspendedReason` TEXT DEFAULT NULL")
+                // Loan backing model (POOL for legacy, VOTER_BACKED for new)
+                db.execSQL("ALTER TABLE `loan_requests` ADD COLUMN `backingModel` TEXT NOT NULL DEFAULT 'VOTER_BACKED'")
+                // Pool snapshot locked amount tracking
+                db.execSQL("ALTER TABLE `lending_pool_snapshots` ADD COLUMN `totalLockedAmount` INTEGER NOT NULL DEFAULT 0")
+                // Configurable grace period per channel
+                db.execSQL("ALTER TABLE `lending_channels` ADD COLUMN `defaultGracePeriodDays` INTEGER NOT NULL DEFAULT 7")
             }
         }
     }

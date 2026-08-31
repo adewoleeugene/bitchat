@@ -38,6 +38,7 @@ class DataManagerChannelRoleSyncTest {
             channel = channel,
             ownerPeerID = "owner",
             adminPeerIDs = listOf("admin1"),
+            endorserPeerIDs = emptyList(),
             roleVersion = 1L
         )
         assertFalse(duplicate)
@@ -47,6 +48,7 @@ class DataManagerChannelRoleSyncTest {
             channel = channel,
             ownerPeerID = "owner",
             adminPeerIDs = listOf("admin1"),
+            endorserPeerIDs = emptyList(),
             roleVersion = 0L
         )
         assertFalse(stale)
@@ -65,6 +67,7 @@ class DataManagerChannelRoleSyncTest {
             channel = channel,
             ownerPeerID = "owner",
             adminPeerIDs = listOf("admin2"),
+            endorserPeerIDs = emptyList(),
             roleVersion = 2L
         )
 
@@ -87,6 +90,7 @@ class DataManagerChannelRoleSyncTest {
             channel = channel,
             ownerPeerID = "owner",
             adminPeerIDs = listOf("member1"),
+            endorserPeerIDs = emptyList(),
             roleVersion = 2L
         )
 
