@@ -291,7 +291,8 @@ fun ChatHeaderContent(
                 channel = currentChannel,
                 onBackClick = onBackClick,
                 onLeaveChannel = { viewModel.leaveChannel(currentChannel) },
-                onSidebarClick = onSidebarClick
+                onSidebarClick = onSidebarClick,
+                viewModel = viewModel
             )
         }
         else -> {
@@ -443,10 +444,14 @@ private fun ChannelHeader(
     channel: String,
     onBackClick: () -> Unit,
     onLeaveChannel: () -> Unit,
-    onSidebarClick: () -> Unit
+    onSidebarClick: () -> Unit,
+    viewModel: ChatViewModel
 ) {
     val displayName = ChannelKeys.displayName(channel)
-    
+    val lendingStakeLabels by viewModel.lendingChannelStakeLabels.observeAsState(emptyMap())
+    val stakeLabel = lendingStakeLabels[channel]
+    val showTreasurySetup = viewModel.canSetupLendingTreasury()
+
     Box(modifier = Modifier.fillMaxWidth()) {
         // Back button matches wallet header style (arrow-only)
         IconButton(
@@ -463,25 +468,55 @@ private fun ChannelHeader(
         }
 
         // Title - perfectly centered regardless of other elements
-        Text(
-            text = stringResource(R.string.chat_channel_prefix, displayName),
-            style = MaterialTheme.typography.titleMedium,
-            color = BitchatColors.SelfMessage, // Orange to match input field
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.Center)
                 .clickable { onSidebarClick() }
-        )
-        
-        // Leave button - positioned on the right
-        TextButton(
-            onClick = onLeaveChannel,
-            modifier = Modifier.align(Alignment.CenterEnd)
         ) {
             Text(
-                text = stringResource(R.string.chat_leave),
-                style = MaterialTheme.typography.bodySmall,
-                color = BitchatColors.StatusError
+                text = stringResource(R.string.chat_channel_prefix, displayName),
+                style = MaterialTheme.typography.titleMedium,
+                color = BitchatColors.SelfMessage
             )
+            if (stakeLabel != null) {
+                Text(
+                    text = stakeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = BitchatColors.TextSecondary
+                )
+            }
+        }
+
+        // Right-side actions
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Treasury setup button - only visible to channel owner when treasury not configured
+            if (showTreasurySetup) {
+                IconButton(
+                    onClick = { viewModel.requestLendingTreasurySetup() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    LucideIcon(
+                        imageVector = LucideIconSet.Shield,
+                        contentDescription = "Set up treasury",
+                        modifier = Modifier.size(20.dp),
+                        tint = BitchatColors.SelfMessage
+                    )
+                }
+            }
+            // Leave button
+            TextButton(
+                onClick = onLeaveChannel
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_leave),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BitchatColors.StatusError
+                )
+            }
         }
     }
 }

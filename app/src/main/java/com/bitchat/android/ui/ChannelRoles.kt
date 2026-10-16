@@ -6,6 +6,6 @@ package com.bitchat.android.ui
 object ChannelRoles {
     const val OWNER = "OWNER"
     const val ADMIN = "ADMIN"
+    const val ENDORSER = "ENDORSER"
     const val MEMBER = "MEMBER"
 }
-

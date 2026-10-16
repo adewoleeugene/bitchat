@@ -61,6 +61,12 @@ class ChatState {
     
     private val _currentChannel = MutableLiveData<String?>(null)
     val currentChannel: LiveData<String?> = _currentChannel
+
+    private val _lendingChannelKeys = MutableLiveData<Set<String>>(emptySet())
+    val lendingChannelKeys: LiveData<Set<String>> = _lendingChannelKeys
+
+    private val _currentChannelIsLending = MutableLiveData(false)
+    val currentChannelIsLending: LiveData<Boolean> = _currentChannelIsLending
     
     private val _channelMessages = MutableLiveData<Map<String, List<BitchatMessage>>>(emptyMap())
     val channelMessages: LiveData<Map<String, List<BitchatMessage>>> = _channelMessages
@@ -178,6 +184,8 @@ class ChatState {
 
 
     fun getCurrentChannelValue() = _currentChannel.value
+    fun getLendingChannelKeysValue() = _lendingChannelKeys.value ?: emptySet()
+    fun getCurrentChannelIsLendingValue() = _currentChannelIsLending.value ?: false
     fun getChannelMessagesValue() = _channelMessages.value ?: emptyMap()
     fun getUnreadChannelMessagesValue() = _unreadChannelMessages.value ?: emptyMap()
     fun getPasswordProtectedChannelsValue() = _passwordProtectedChannels.value ?: emptySet()
@@ -235,6 +243,13 @@ class ChatState {
     
     fun setCurrentChannel(channel: String?) {
         _currentChannel.value = channel
+        _currentChannelIsLending.value = channel != null && getLendingChannelKeysValue().contains(channel)
+    }
+
+    fun setLendingChannelKeys(channelKeys: Set<String>) {
+        _lendingChannelKeys.value = channelKeys
+        val current = _currentChannel.value
+        _currentChannelIsLending.value = current != null && channelKeys.contains(current)
     }
     
     fun setChannelMessages(messages: Map<String, List<BitchatMessage>>) {

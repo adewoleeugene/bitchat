@@ -45,6 +45,8 @@ class SolanaPaymentManager @Inject constructor(
         private const val MAX_CONFIRMATION_POLLS = 24
         private const val BALANCE_MESH_TIMEOUT_MS = 30_000L
         private const val BALANCE_MESH_STALE_MS = 90_000L
+        private const val TOKEN_TRANSFER_CHECKED_INSTRUCTION_INDEX: Byte = 12
+        private const val CREATE_ASSOCIATED_TOKEN_ACCOUNT_INSTRUCTION_INDEX: Byte = 0
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -81,10 +83,30 @@ class SolanaPaymentManager @Inject constructor(
         memo: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val amountLamports = (amountSol * LAMPORTS_PER_SOL).toLong()
+            if (amountLamports <= 0) {
+                return@withContext Result.failure(IllegalArgumentException("Amount must be greater than 0"))
+            }
+            queuePaymentLamports(
+                recipientPublicKey = recipientPublicKey,
+                amountLamports = amountLamports,
+                memo = memo
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to queue payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun queuePaymentLamports(
+        recipientPublicKey: String,
+        amountLamports: Long,
+        memo: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
             val senderPublicKey = walletService.getPublicKeyBase58()
                 ?: return@withContext Result.failure(IllegalStateException("No wallet found. Create a wallet first."))
 
-            val amountLamports = (amountSol * LAMPORTS_PER_SOL).toLong()
             if (amountLamports <= 0) {
                 return@withContext Result.failure(IllegalArgumentException("Amount must be greater than 0"))
             }
@@ -94,24 +116,74 @@ class SolanaPaymentManager @Inject constructor(
 
             val entity = QueuedTransactionEntity(
                 id = txId,
-                signedTransactionBase64 = "", // Will be signed at broadcast time with fresh blockhash
+                signedTransactionBase64 = "",
                 senderPublicKey = senderPublicKey,
                 recipientPublicKey = recipientPublicKey,
                 amountLamports = amountLamports,
+                assetKind = TransferAssetKind.NATIVE_SOL.name,
+                assetSymbol = "SOL",
+                assetDecimals = 9,
                 status = TransactionStatus.QUEUED.value,
                 createdAt = now,
                 ttlExpiresAt = now + TTL_MILLIS
             )
 
             transactionDao.insertTransaction(entity)
-            Log.d(TAG, "Queued payment: $amountSol SOL to $recipientPublicKey (id=$txId)")
-
-            // Try to broadcast immediately
+            Log.d(TAG, "Queued payment: $amountLamports lamports to $recipientPublicKey (id=$txId)")
+            memo?.let {
+                Log.d(TAG, "Ignoring native SOL memo until memo program support is added: $it")
+            }
             tryBroadcastPending()
 
             Result.success(txId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to queue payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun queueSplTokenTransfer(
+        recipientPublicKey: String,
+        mintAddress: String,
+        amountAtomic: Long,
+        decimals: Int,
+        symbol: String,
+        memo: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val senderPublicKey = walletService.getPublicKeyBase58()
+                ?: return@withContext Result.failure(IllegalStateException("No wallet found. Create a wallet first."))
+
+            if (amountAtomic <= 0) {
+                return@withContext Result.failure(IllegalArgumentException("Amount must be greater than 0"))
+            }
+
+            val txId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val entity = QueuedTransactionEntity(
+                id = txId,
+                signedTransactionBase64 = "",
+                senderPublicKey = senderPublicKey,
+                recipientPublicKey = recipientPublicKey,
+                amountLamports = amountAtomic,
+                assetKind = TransferAssetKind.SPL_TOKEN.name,
+                assetMintAddress = mintAddress,
+                assetSymbol = symbol,
+                assetDecimals = decimals,
+                status = TransactionStatus.QUEUED.value,
+                createdAt = now,
+                ttlExpiresAt = now + TTL_MILLIS
+            )
+
+            transactionDao.insertTransaction(entity)
+            Log.d(TAG, "Queued SPL transfer: $amountAtomic $symbol($mintAddress) to $recipientPublicKey (id=$txId)")
+            memo?.let {
+                Log.d(TAG, "Ignoring token memo until memo program support is added: $it")
+            }
+            tryBroadcastPending()
+            Result.success(txId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to queue SPL transfer: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -234,50 +306,86 @@ class SolanaPaymentManager @Inject constructor(
 
     private suspend fun broadcastTransaction(tx: QueuedTransactionEntity) {
         try {
+            val asset = tx.toTransferAsset()
             // Check connectivity FIRST — if offline, go straight to mesh relay
             // This avoids hanging on DNS/HTTP timeouts before falling back
             if (!hasInternetConnectivity()) {
-                Log.d(TAG, "Device offline for tx ${tx.id}, going directly to mesh relay")
-                safeStatusEvent("offline — routing payment via mesh relay...")
-                transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
-                tryMeshRelayFallback(tx)
+                if (asset.kind == TransferAssetKind.SPL_TOKEN) {
+                    Log.d(TAG, "Device offline for SPL tx ${tx.id}, keeping queued for later")
+                    safeStatusEvent("offline — token transfer queued until internet is available")
+                    transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
+                } else {
+                    Log.d(TAG, "Device offline for tx ${tx.id}, going directly to mesh relay")
+                    safeStatusEvent("offline — routing payment via mesh relay...")
+                    transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
+                    tryMeshRelayFallback(tx)
+                }
                 return
             }
 
             // Update status to broadcasting
             transactionDao.updateStatus(tx.id, TransactionStatus.BROADCASTING.value)
 
-            // Check sender balance first
-            val balanceResult = rpcService.getBalance(tx.senderPublicKey)
-            val balance = balanceResult.getOrNull()
-            if (balance == null) {
-                // Can't reach RPC — try mesh relay
-                Log.w(TAG, "Cannot check balance for tx ${tx.id} (RPC unreachable), trying mesh relay")
-                tryMeshRelayFallback(tx)
-                return
-            }
-            if (balance < tx.amountLamports + 5000) { // 5000 lamports for fee
-                transactionDao.markFailed(tx.id, "Insufficient balance (need ${tx.amountLamports + 5000} lamports, have $balance)")
-                return
+            if (asset.kind == TransferAssetKind.NATIVE_SOL) {
+                val balanceResult = rpcService.getBalance(tx.senderPublicKey)
+                val balance = balanceResult.getOrNull()
+                if (balance == null) {
+                    Log.w(TAG, "Cannot check balance for tx ${tx.id} (RPC unreachable), trying mesh relay")
+                    tryMeshRelayFallback(tx)
+                    return
+                }
+                if (balance < tx.amountLamports + 5000) {
+                    transactionDao.markFailed(tx.id, "Insufficient balance (need ${tx.amountLamports + 5000} lamports, have $balance)")
+                    return
+                }
+            } else {
+                val tokenBalance = rpcService.getTokenBalance(
+                    ownerPublicKey = tx.senderPublicKey,
+                    mintAddress = asset.mintAddress.orEmpty()
+                ).getOrNull()
+                if (tokenBalance == null) {
+                    transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
+                    return
+                }
+                if (tokenBalance < tx.amountLamports) {
+                    transactionDao.markFailed(
+                        tx.id,
+                        "Insufficient ${asset.symbol} balance (need ${tx.amountLamports}, have $tokenBalance)"
+                    )
+                    return
+                }
             }
 
             // Get fresh blockhash
             val blockhashResult = rpcService.getLatestBlockhash()
             val blockhashInfo = blockhashResult.getOrNull()
             if (blockhashInfo == null) {
-                // Can't reach RPC — try mesh relay
-                Log.w(TAG, "Failed to get blockhash for tx ${tx.id} (RPC unreachable), trying mesh relay")
-                tryMeshRelayFallback(tx)
+                if (asset.kind == TransferAssetKind.NATIVE_SOL) {
+                    Log.w(TAG, "Failed to get blockhash for tx ${tx.id} (RPC unreachable), trying mesh relay")
+                    tryMeshRelayFallback(tx)
+                } else {
+                    transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
+                }
                 return
             }
 
             // Build and sign the transaction
-            val signedTxBase64 = buildAndSignTransaction(
-                senderPublicKey = tx.senderPublicKey,
-                recipientPublicKey = tx.recipientPublicKey,
-                amountLamports = tx.amountLamports,
-                blockhash = blockhashInfo.blockhash
-            )
+            val signedTxBase64 = when (asset.kind) {
+                TransferAssetKind.NATIVE_SOL -> buildAndSignTransaction(
+                    senderPublicKey = tx.senderPublicKey,
+                    recipientPublicKey = tx.recipientPublicKey,
+                    amountLamports = tx.amountLamports,
+                    blockhash = blockhashInfo.blockhash
+                )
+                TransferAssetKind.SPL_TOKEN -> buildAndSignSplTokenTransaction(
+                    ownerPublicKey = tx.senderPublicKey,
+                    recipientOwnerPublicKey = tx.recipientPublicKey,
+                    mintAddress = asset.mintAddress.orEmpty(),
+                    amountAtomic = tx.amountLamports,
+                    decimals = asset.decimals,
+                    blockhash = blockhashInfo.blockhash
+                )
+            }
 
             if (signedTxBase64 == null) {
                 transactionDao.markFailed(tx.id, "Failed to sign transaction")
@@ -285,7 +393,7 @@ class SolanaPaymentManager @Inject constructor(
             }
 
             // Send to network
-            Log.d(TAG, "Broadcasting tx ${tx.id}: ${tx.amountLamports} lamports to ${tx.recipientPublicKey}")
+            Log.d(TAG, "Broadcasting tx ${tx.id}: ${tx.amountLamports} ${asset.symbol} units to ${tx.recipientPublicKey}")
             val sendResult = rpcService.sendTransaction(signedTxBase64)
             sendResult.onSuccess { signature ->
                 transactionDao.markBroadcastObserved(tx.id, signature)
@@ -298,7 +406,9 @@ class SolanaPaymentManager @Inject constructor(
                     // Blockhash expired, retry with fresh one
                     transactionDao.updateStatus(tx.id, TransactionStatus.QUEUED.value)
                     Log.w(TAG, "Blockhash expired for tx ${tx.id}, will retry")
-                } else if (errorMsg.contains("timeout") || errorMsg.contains("Unable to resolve host") || errorMsg.contains("connect")) {
+                } else if (asset.kind == TransferAssetKind.NATIVE_SOL &&
+                    (errorMsg.contains("timeout") || errorMsg.contains("Unable to resolve host") || errorMsg.contains("connect"))
+                ) {
                     // Network error — try mesh relay
                     Log.w(TAG, "RPC send failed for tx ${tx.id} (connectivity issue), trying mesh relay")
                     tryMeshRelayFallback(tx)
@@ -310,8 +420,10 @@ class SolanaPaymentManager @Inject constructor(
         } catch (e: Exception) {
             // Network exceptions (UnknownHostException, SocketTimeoutException, etc.) — try mesh relay
             val msg = e.message ?: "Unknown error"
-            if (e is java.net.UnknownHostException || e is java.net.SocketTimeoutException ||
-                e is java.net.ConnectException || msg.contains("timeout") || msg.contains("connect")) {
+            if (tx.assetKind == TransferAssetKind.NATIVE_SOL.name &&
+                (e is java.net.UnknownHostException || e is java.net.SocketTimeoutException ||
+                e is java.net.ConnectException || msg.contains("timeout") || msg.contains("connect"))
+            ) {
                 Log.w(TAG, "Broadcast error for tx ${tx.id} (connectivity issue), trying mesh relay: $msg")
                 tryMeshRelayFallback(tx)
             } else {
@@ -683,6 +795,47 @@ class SolanaPaymentManager @Inject constructor(
         }
     }
 
+    private suspend fun buildAndSignSplTokenTransaction(
+        ownerPublicKey: String,
+        recipientOwnerPublicKey: String,
+        mintAddress: String,
+        amountAtomic: Long,
+        decimals: Int,
+        blockhash: String
+    ): String? {
+        return try {
+            val sourceTokenAccount = rpcService.getTokenAccountAddress(ownerPublicKey, mintAddress)
+                .getOrNull()
+                ?: return null
+            val existingDestinationTokenAccount = rpcService.getTokenAccountAddress(recipientOwnerPublicKey, mintAddress)
+                .getOrNull()
+            val destinationTokenAccount = existingDestinationTokenAccount
+                ?: SolanaTokenAccountUtils.findAssociatedTokenAddress(recipientOwnerPublicKey, mintAddress)
+            val message = buildSplTokenTransferMessage(
+                payerOwnerPublicKey = ownerPublicKey,
+                ownerPublicKey = ownerPublicKey,
+                sourceTokenAccount = sourceTokenAccount,
+                recipientOwnerPublicKey = recipientOwnerPublicKey,
+                mintAddress = mintAddress,
+                destinationTokenAccount = destinationTokenAccount,
+                recentBlockhash = blockhash,
+                amountAtomic = amountAtomic,
+                decimals = decimals,
+                createDestinationAta = existingDestinationTokenAccount == null
+            )
+
+            val signature = walletService.sign(message) ?: return null
+            val transaction = ByteArray(1 + 64 + message.size)
+            transaction[0] = 1
+            System.arraycopy(signature, 0, transaction, 1, 64)
+            System.arraycopy(message, 0, transaction, 65, message.size)
+            android.util.Base64.encodeToString(transaction, android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to build SPL token transaction: ${e.message}", e)
+            null
+        }
+    }
+
     /**
      * Build Solana legacy transaction message bytes.
      */
@@ -722,6 +875,88 @@ class SolanaPaymentManager @Inject constructor(
                 instructionData
     }
 
+    internal fun buildSplTokenTransferMessage(
+        payerOwnerPublicKey: String,
+        ownerPublicKey: String,
+        sourceTokenAccount: String,
+        recipientOwnerPublicKey: String,
+        mintAddress: String,
+        destinationTokenAccount: String,
+        recentBlockhash: String,
+        amountAtomic: Long,
+        decimals: Int,
+        createDestinationAta: Boolean
+    ): ByteArray {
+        val payerOwnerPubKey = decodeBase58(payerOwnerPublicKey)
+        val ownerPubKey = decodeBase58(ownerPublicKey)
+        val sourceTokenAccountBytes = decodeBase58(sourceTokenAccount)
+        val recipientOwnerPubKey = decodeBase58(recipientOwnerPublicKey)
+        val mintPubKey = decodeBase58(mintAddress)
+        val destinationTokenAccountBytes = decodeBase58(destinationTokenAccount)
+        val tokenProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.TOKEN_PROGRAM_ID)
+        val associatedTokenProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.ASSOCIATED_TOKEN_PROGRAM_ID)
+        val systemProgramId = SolanaTokenAccountUtils.decodeBase58(SolanaTokenAccountUtils.SYSTEM_PROGRAM_ID)
+        val recentBlockhashBytes = decodeBase58(recentBlockhash)
+
+        val transferInstructionData = ByteArray(10)
+        transferInstructionData[0] = TOKEN_TRANSFER_CHECKED_INSTRUCTION_INDEX
+        for (i in 0..7) {
+            transferInstructionData[1 + i] = ((amountAtomic shr (i * 8)) and 0xFF).toByte()
+        }
+        transferInstructionData[9] = decimals.toByte()
+
+        val accountKeyList = mutableListOf<ByteArray>()
+        fun addKey(key: ByteArray): Int {
+            val existing = accountKeyList.indexOfFirst { it.contentEquals(key) }
+            if (existing >= 0) return existing
+            accountKeyList += key
+            return accountKeyList.lastIndex
+        }
+
+        val payerIndex = addKey(payerOwnerPubKey)
+        val ownerIndex = addKey(ownerPubKey)
+        val sourceIndex = addKey(sourceTokenAccountBytes)
+        val mintIndex = addKey(mintPubKey)
+        val destinationIndex = addKey(destinationTokenAccountBytes)
+        val recipientOwnerIndex = addKey(recipientOwnerPubKey)
+        val tokenProgramIndex = addKey(tokenProgramId)
+        val associatedTokenProgramIndex = addKey(associatedTokenProgramId)
+        val systemProgramIndex = addKey(systemProgramId)
+
+        val instructions = mutableListOf<ByteArray>()
+        if (createDestinationAta) {
+            val ataAccounts = byteArrayOf(
+                payerIndex.toByte(),
+                destinationIndex.toByte(),
+                recipientOwnerIndex.toByte(),
+                mintIndex.toByte(),
+                systemProgramIndex.toByte(),
+                tokenProgramIndex.toByte()
+            )
+            instructions += byteArrayOf(
+                associatedTokenProgramIndex.toByte(),
+                ataAccounts.size.toByte()
+            ) + ataAccounts + compactU16(1) + byteArrayOf(CREATE_ASSOCIATED_TOKEN_ACCOUNT_INSTRUCTION_INDEX)
+        }
+        val transferAccounts = byteArrayOf(sourceIndex.toByte(), mintIndex.toByte(), destinationIndex.toByte(), ownerIndex.toByte())
+        instructions += byteArrayOf(
+            tokenProgramIndex.toByte(),
+            transferAccounts.size.toByte()
+        ) + transferAccounts + compactU16(transferInstructionData.size) + transferInstructionData
+
+        val header = byteArrayOf(1, 0, 3)
+        val numAccounts = compactU16(accountKeyList.size)
+        val accountKeys = accountKeyList.fold(ByteArray(0)) { acc, key -> acc + key }
+        val numInstructions = compactU16(instructions.size)
+
+        return header +
+            numAccounts +
+            accountKeys +
+            recentBlockhashBytes +
+            numInstructions +
+            instructions.fold(ByteArray(0)) { acc, instruction -> acc + instruction }
+    }
+
     /**
      * Compact u16 encoding (Solana uses this for array lengths in serialized messages).
      */
@@ -757,6 +992,21 @@ class SolanaPaymentManager @Inject constructor(
      */
     fun lamportsToSolDisplay(lamports: Long): String {
         return walletService.lamportsToSol(lamports)
+    }
+
+    fun formatDisplayAmount(tx: QueuedTransactionEntity): String {
+        return TransferAmountFormatter.formatForDisplay(tx.amountLamports, tx.toTransferAsset())
+    }
+
+    private fun QueuedTransactionEntity.toTransferAsset(): TransferAsset {
+        val kind = runCatching { TransferAssetKind.valueOf(assetKind) }
+            .getOrDefault(TransferAssetKind.NATIVE_SOL)
+        return TransferAsset(
+            kind = kind,
+            mintAddress = assetMintAddress,
+            symbol = assetSymbol,
+            decimals = assetDecimals
+        )
     }
 
     /**

@@ -319,6 +319,14 @@ class DataManager(private val context: Context) {
         return true
     }
 
+    fun setChannelEndorser(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
+        if (!isChannelAdmin(channel, actorPeerID)) return false
+        if (isChannelCreator(channel, targetPeerID)) return false
+        addChannelMember(channel, targetPeerID)
+        setChannelRole(channel, targetPeerID, ChannelRoles.ENDORSER)
+        return true
+    }
+
     fun setChannelMember(channel: String, actorPeerID: String, targetPeerID: String): Boolean {
         if (!isChannelAdmin(channel, actorPeerID)) return false
         if (isChannelCreator(channel, targetPeerID)) return false
@@ -370,7 +378,7 @@ class DataManager(private val context: Context) {
 
     private fun setChannelRole(channel: String, peerID: String, role: String) {
         val normalized = when (role) {
-            ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.MEMBER -> role
+            ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.ENDORSER, ChannelRoles.MEMBER -> role
             else -> ChannelRoles.MEMBER
         }
         if (!_channelRoles.containsKey(channel)) {
@@ -397,6 +405,14 @@ class DataManager(private val context: Context) {
             ?: emptySet()
     }
 
+    fun getChannelEndorsers(channel: String): Set<String> {
+        return _channelRoles[channel]
+            ?.filterValues { it == ChannelRoles.ENDORSER }
+            ?.keys
+            ?.toSet()
+            ?: emptySet()
+    }
+
     /**
      * Apply a signed mesh role snapshot.
      *
@@ -407,6 +423,7 @@ class DataManager(private val context: Context) {
         channel: String,
         ownerPeerID: String,
         adminPeerIDs: List<String>,
+        endorserPeerIDs: List<String>,
         roleVersion: Long
     ): Boolean {
         if (channel.isBlank() || senderPeerID.isBlank() || ownerPeerID.isBlank() || roleVersion <= 0L) {
@@ -433,6 +450,10 @@ class DataManager(private val context: Context) {
             .map { it.trim() }
             .filter { it.isNotEmpty() && it != ownerPeerID }
             .distinct()
+        val cleanedEndorsers = endorserPeerIDs
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != ownerPeerID && !cleanedAdmins.contains(it) }
+            .distinct()
 
         if (!_channelMembers.containsKey(channel)) {
             _channelMembers[channel] = mutableSetOf()
@@ -441,6 +462,7 @@ class DataManager(private val context: Context) {
         val members = _channelMembers[channel]!!
         members.add(ownerPeerID)
         members.addAll(cleanedAdmins)
+        members.addAll(cleanedEndorsers)
 
         val newRoles = mutableMapOf<String, String>()
         members.forEach { peerID ->
@@ -449,6 +471,9 @@ class DataManager(private val context: Context) {
         newRoles[ownerPeerID] = ChannelRoles.OWNER
         cleanedAdmins.forEach { adminID ->
             newRoles[adminID] = ChannelRoles.ADMIN
+        }
+        cleanedEndorsers.forEach { endorserID ->
+            newRoles[endorserID] = ChannelRoles.ENDORSER
         }
 
         _channelCreators[channel] = ownerPeerID

@@ -13,6 +13,7 @@ data class ChannelRolePolicyPayload(
     val channelKey: String,
     val ownerPeerId: String,
     val adminPeerIds: List<String>,
+    val endorserPeerIds: List<String> = emptyList(),
     val roleVersion: Long,
     val updatedAt: Long = System.currentTimeMillis()
 ) {
@@ -36,11 +37,17 @@ data class ChannelRolePolicyPayload(
                         element?.asString?.trim()?.takeIf { it.isNotEmpty() }
                     }
                     ?: emptyList()
+                val endorsers = json.getAsJsonArray("endorserPeerIds")
+                    ?.mapNotNull { element ->
+                        element?.asString?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                    ?: emptyList()
 
                 ChannelRolePolicyPayload(
                     channelKey = channelKey,
                     ownerPeerId = ownerPeerId,
                     adminPeerIds = admins.distinct(),
+                    endorserPeerIds = endorsers.distinct(),
                     roleVersion = roleVersion,
                     updatedAt = updatedAt
                 )

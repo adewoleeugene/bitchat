@@ -1737,7 +1737,15 @@ private fun TransactionRow(
         TransactionStatus.QUEUED -> "Queued"
         TransactionStatus.AWAITING_BLOCKHASH -> "Awaiting Blockhash"
     }
-    val solAmount = tx.amountLamports.toDouble() / 1_000_000_000.0
+    val amountLabel = TransferAmountFormatter.formatForDisplay(
+        amountAtomic = tx.amountLamports,
+        asset = TransferAsset(
+            kind = runCatching { TransferAssetKind.valueOf(tx.assetKind) }.getOrDefault(TransferAssetKind.NATIVE_SOL),
+            mintAddress = tx.assetMintAddress,
+            symbol = tx.assetSymbol,
+            decimals = tx.assetDecimals
+        )
+    )
     val direction = when {
         activeWalletAddress.isNullOrBlank() -> TxDirection.OUTGOING
         tx.recipientPublicKey == activeWalletAddress -> TxDirection.INCOMING
@@ -1770,7 +1778,7 @@ private fun TransactionRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "$amountPrefix${"%.4f".format(solAmount)} SOL",
+                    text = "$amountPrefix$amountLabel",
                     fontFamily = SatoshiFamily,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,

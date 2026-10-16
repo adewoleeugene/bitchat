@@ -8,7 +8,19 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
+import com.bitchat.android.data.local.entities.LendingChannelEntity
 import com.bitchat.android.di.SolanaEntryPoint
+import com.bitchat.android.data.local.entities.EscrowTransferStatus
+import com.bitchat.android.data.local.entities.LendingMemberStatus
+import com.bitchat.android.lending.LendingLoanRepaymentMessageCodec
+import com.bitchat.android.lending.LendingLoanVoteMessageCodec
+import com.bitchat.android.lending.LendingMembershipMessageCodec
+import com.bitchat.android.lending.LendingMembershipMessage
+import com.bitchat.android.lending.LendingChannelConfigMessageCodec
+import com.bitchat.android.lending.LendingChannelConfigRequestMessageCodec
+import com.bitchat.android.lending.ImportLendingChannelRequest
+import com.bitchat.android.lending.LendingChannelService
+import com.bitchat.android.lending.LendingTelemetryStore
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
@@ -21,6 +33,8 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.bitchat.android.util.NotificationIntervalManager
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.util.Date
@@ -38,15 +52,21 @@ class ChatViewModel(
     private var notarizationService: com.bitchat.android.solana.MessageNotarizationService? = null
     private var nftAvatarService: com.bitchat.android.solana.NftAvatarService? = null
     private var solanaPaymentManager: com.bitchat.android.solana.SolanaPaymentManager? = null
+    private var lendingChannelServiceRef: LendingChannelService? = null
+    private var lendingEscrowServiceRef: com.bitchat.android.lending.LendingEscrowService? = null
     private var lastAnnouncedWalletAddress: String? = null
     private var walletLinkAnnounceJob: kotlinx.coroutines.Job? = null
     private var tokenGateRevalidationJob: kotlinx.coroutines.Job? = null
     private var tokenGatePolicySyncJob: kotlinx.coroutines.Job? = null
     private var channelRolePolicySyncJob: kotlinx.coroutines.Job? = null
     private var feedPostsJob: kotlinx.coroutines.Job? = null
+    private var lendingLoanReconciliationJob: kotlinx.coroutines.Job? = null
     private val tokenGateDenyStrikes = mutableMapOf<String, Int>()
     private val feedScopeObserver = Observer<Any?> {
         restartFeedPostsObservation()
+    }
+    private val lendingChannelContextObserver = Observer<String?> {
+        refreshCurrentLendingChannelContext()
     }
     private val channelMessagesPersistenceObserver = Observer<Map<String, List<BitchatMessage>>> { channels ->
         dataManager.saveChannelMessages(channels ?: emptyMap())
@@ -57,8 +77,10 @@ class ChatViewModel(
         private const val TOKEN_GATE_REVALIDATION_INTERVAL_MS = 60_000L
         private const val TOKEN_GATE_POLICY_SYNC_INTERVAL_MS = 5 * 60_000L
         private const val CHANNEL_ROLE_POLICY_SYNC_INTERVAL_MS = 90_000L
+        private const val LENDING_LOAN_RECONCILIATION_INTERVAL_MS = 15_000L
         private const val TOKEN_GATE_DENY_STRIKES_TO_KICK = 2
         private const val FEED_REPLY_NOTIFICATION_MAX_AGE_MS = 15 * 60_000L
+        private const val LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX = "__bitchat_lending_channel__:"
     }
 
     fun sendVoiceNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
@@ -75,6 +97,7 @@ class ChatViewModel(
 
     // MARK: - State management
     private val state = ChatState()
+    private val lendingTelemetryStore = LendingTelemetryStore(application.applicationContext)
 
     // Transfer progress tracking
     private val transferMessageMap = mutableMapOf<String, String>()
@@ -82,7 +105,7 @@ class ChatViewModel(
 
     // Specialized managers
     private val dataManager = DataManager(application.applicationContext)
-    private val messageManager = MessageManager(state)
+    private val messageManager = MessageManager(state, lendingTelemetryStore)
     private val channelManager = ChannelManager(state, messageManager, dataManager, viewModelScope)
 
     // Create Noise session delegate for clean dependency injection
@@ -103,6 +126,26 @@ class ChatViewModel(
     val inAppNotificationCount: LiveData<Int> = _inAppNotificationCount
     private val _inAppNotifications = MutableLiveData<List<NotificationManager.InAppNotificationItem>>(emptyList())
     val inAppNotifications: LiveData<List<NotificationManager.InAppNotificationItem>> = _inAppNotifications
+    private val _lendingChannelStakeLabels = MutableLiveData<Map<String, String>>(emptyMap())
+    val lendingChannelStakeLabels: LiveData<Map<String, String>> = _lendingChannelStakeLabels
+    private val _pendingLendingStakeApproval = MutableLiveData<com.bitchat.android.lending.LendingStakeApprovalRequest?>(null)
+    val pendingLendingStakeApproval: LiveData<com.bitchat.android.lending.LendingStakeApprovalRequest?> = _pendingLendingStakeApproval
+    private val _isSubmittingLendingStakeApproval = MutableLiveData(false)
+    val isSubmittingLendingStakeApproval: LiveData<Boolean> = _isSubmittingLendingStakeApproval
+    private val _pendingLendingLeaveApproval = MutableLiveData<com.bitchat.android.lending.LendingLeaveApprovalRequest?>(null)
+    val pendingLendingLeaveApproval: LiveData<com.bitchat.android.lending.LendingLeaveApprovalRequest?> = _pendingLendingLeaveApproval
+    private val _isSubmittingLendingLeaveApproval = MutableLiveData(false)
+    val isSubmittingLendingLeaveApproval: LiveData<Boolean> = _isSubmittingLendingLeaveApproval
+    private val _pendingLendingTreasurySetup = MutableLiveData<com.bitchat.android.lending.LendingTreasurySetupRequest?>(null)
+    val pendingLendingTreasurySetup: LiveData<com.bitchat.android.lending.LendingTreasurySetupRequest?> = _pendingLendingTreasurySetup
+    private val _isSubmittingLendingTreasurySetup = MutableLiveData(false)
+    val isSubmittingLendingTreasurySetup: LiveData<Boolean> = _isSubmittingLendingTreasurySetup
+    private val _lendingLoanRequestStatuses = MutableLiveData<Map<String, String>>(emptyMap())
+    val lendingLoanRequestStatuses: LiveData<Map<String, String>> = _lendingLoanRequestStatuses
+    private val _availableLendingChannels = MutableLiveData<List<LendingChannelEntity>>(emptyList())
+    val availableLendingChannels: LiveData<List<LendingChannelEntity>> = _availableLendingChannels
+    private val _currentLendingSharedCustodyReady = MutableLiveData(false)
+    val currentLendingSharedCustodyReady: LiveData<Boolean> = _currentLendingSharedCustodyReady
 
     // Media file sending manager
     private val mediaSendingManager = MediaSendingManager(state, messageManager, channelManager, meshService)
@@ -117,7 +160,10 @@ class ChatViewModel(
         coroutineScope = viewModelScope,
         onHapticFeedback = { ChatViewModelUtils.triggerHapticFeedback(application.applicationContext) },
         getMyPeerID = { meshService.myPeerID },
-        getMeshService = { meshService }
+        getMeshService = { meshService },
+        onLendingAnnouncementReceived = { content, senderPeerId, channelKey ->
+            importLendingPayload(content, senderPeerId, channelKey)
+        }
     )
     
     // New Geohash architecture ViewModel (replaces God object service usage in UI path)
@@ -178,6 +224,7 @@ class ChatViewModel(
     val showNewPostComposer: LiveData<Boolean> = state.showNewPostComposer
 
     private var feedService: com.bitchat.android.feed.FeedService? = null
+    private var lendingLoanServiceRef: com.bitchat.android.lending.LendingLoanService? = null
 
     init {
         notificationManager.onNotificationStateChanged = {
@@ -282,6 +329,15 @@ class ChatViewModel(
             commandProcessor.paymentManager = solanaEntryPoint.solanaPaymentManager()
             val tokenGateService = solanaEntryPoint.tokenGateService()
             commandProcessor.tokenGateService = tokenGateService
+            val lendingChannelService = solanaEntryPoint.lendingChannelService()
+            lendingChannelServiceRef = lendingChannelService
+            lendingEscrowServiceRef = solanaEntryPoint.lendingEscrowService()
+            lendingLoanServiceRef = solanaEntryPoint.lendingLoanService()
+            commandProcessor.lendingChannelService = lendingChannelService
+            commandProcessor.lendingCredibilityService = solanaEntryPoint.lendingCredibilityService()
+            commandProcessor.lendingLoanService = lendingLoanServiceRef
+            commandProcessor.lendingEscrowService = lendingEscrowServiceRef
+            observeLendingChannels(lendingChannelService)
 
             // Wire up token gate service to channel manager for join validation
             channelManager.tokenGateService = tokenGateService
@@ -582,13 +638,204 @@ class ChatViewModel(
         walletLinkAnnounceJob?.cancel()
         feedPostsJob?.cancel()
         runCatching { state.currentChannel.removeObserver(feedScopeObserver) }
+        runCatching { state.currentChannel.removeObserver(lendingChannelContextObserver) }
         runCatching { state.selectedLocationChannel.removeObserver(feedScopeObserver) }
         runCatching { state.channelMessages.removeObserver(channelMessagesPersistenceObserver) }
+        lendingLoanReconciliationJob?.cancel()
         tokenGateDenyStrikes.clear()
         meshService.onTokenGatePolicyReceived = null
         meshService.onChannelRolePolicyReceived = null
         meshService.verifyOwnershipProofsOnline = null
         // Note: Mesh service lifecycle is now managed by MainActivity
+    }
+
+    private fun observeLendingChannels(lendingChannelService: com.bitchat.android.lending.LendingChannelService) {
+        state.currentChannel.observeForever(lendingChannelContextObserver)
+        viewModelScope.launch {
+            lendingChannelService.observeAllChannels()
+                .combine(lendingChannelService.observeAllPoolSnapshots()) { channels, snapshots ->
+                    channels to snapshots.associateBy { it.lendingId }
+                }
+                .collectLatest { (channels, snapshotsById) ->
+                    _availableLendingChannels.postValue(channels)
+                    state.setLendingChannelKeys(channels.mapTo(mutableSetOf()) { it.channelKey })
+                    _lendingChannelStakeLabels.value = channels.associate { channel ->
+                        val token = channel.stakeTokenSymbol.ifBlank { channel.stakeTokenMint.take(8) }
+                        val totalStaked = snapshotsById[channel.lendingId]?.totalStakedAmount ?: 0L
+                        channel.channelKey to "staked ${formatStakeAmount(totalStaked, channel.stakeTokenDecimals)} $token"
+                    }
+                }
+        }
+    }
+
+    private val treasuryReminderShownForChannel = mutableSetOf<String>()
+
+    private fun refreshCurrentLendingChannelContext() {
+        state.setLendingChannelKeys(state.getLendingChannelKeysValue())
+        val currentChannelKey = state.getCurrentChannelValue()
+        val lendingService = lendingChannelServiceRef
+        val escrowService = lendingEscrowServiceRef
+        if (currentChannelKey.isNullOrBlank() || !state.getCurrentChannelIsLendingValue() || lendingService == null || escrowService == null) {
+            _currentLendingSharedCustodyReady.value = false
+        } else {
+            viewModelScope.launch {
+                val channel = runCatching { lendingService.getChannelByChannelKey(currentChannelKey) }.getOrNull()
+                val escrow = if (channel != null) runCatching { escrowService.getEscrowAccount(channel.lendingId) }.getOrNull() else null
+                val ready = channel != null &&
+                    !channel.escrowMultisigAddress.isBlank() &&
+                    !escrow?.multisigAddress.isNullOrBlank() &&
+                    !escrow?.vaultAddress.isNullOrBlank()
+                _currentLendingSharedCustodyReady.value = ready
+
+                // Remind admin to set up Squad approvers (once per channel per session)
+                if (!ready && channel != null && channel.creatorPeerId == meshService.myPeerID &&
+                    treasuryReminderShownForChannel.add(channel.lendingId)
+                ) {
+                    val members = lendingService.getMemberships(channel.lendingId)
+                    val activeCount = members.count {
+                        it.joinStatus == LendingMemberStatus.ACTIVE &&
+                            it.depositStatus == EscrowTransferStatus.CONFIRMED
+                    }
+                    val message = if (activeCount >= 3) {
+                        "you have $activeCount active members — tap the shield icon above to pick approvers and activate the on-chain treasury."
+                    } else {
+                        "treasury needs at least 3 members to set up approvers. you have $activeCount so far — invite more people to join."
+                    }
+                    messageManager.addSystemMessage(message)
+                }
+            }
+        }
+        restartLendingLoanReconciliation()
+    }
+
+    private suspend fun importLendingPayload(content: String, senderPeerId: String?, channelKey: String?): Boolean {
+        val channelConfig = LendingChannelConfigMessageCodec.decode(content)
+        if (channelConfig != null) {
+            lendingChannelServiceRef?.importSharedChannel(
+                ImportLendingChannelRequest(
+                    lendingId = channelConfig.lendingId,
+                    channelKey = channelConfig.channelKey.ifBlank { channelKey ?: "mesh:${channelConfig.displayName}" },
+                    displayName = channelConfig.displayName,
+                    creatorPeerId = channelConfig.creatorPeerId,
+                    creatorWalletAddress = channelConfig.creatorWalletAddress,
+                    requiredStakeAmount = channelConfig.requiredStakeAmount,
+                    minimumVoteCount = channelConfig.minimumVoteCount,
+                    maxLoanDurationDays = channelConfig.maxLoanDurationDays,
+                    stakeTokenMint = channelConfig.stakeTokenMint,
+                    stakeTokenSymbol = channelConfig.stakeTokenSymbol,
+                    stakeTokenDecimals = channelConfig.stakeTokenDecimals,
+                    seedCreatorMembership = true,
+                    votingWindowHours = channelConfig.votingWindowHours,
+                    defaultGracePeriodDays = channelConfig.defaultGracePeriodDays
+                )
+            )
+            // Handle channel closure notification from admin
+            if (channelConfig.lifecycleState == com.bitchat.android.data.local.entities.LendingLifecycleState.CLOSED) {
+                val localChannel = lendingChannelServiceRef?.getChannelByLendingId(channelConfig.lendingId)
+                if (localChannel != null && localChannel.lifecycleState != com.bitchat.android.data.local.entities.LendingLifecycleState.CLOSED) {
+                    lendingChannelServiceRef?.closeChannel(channelConfig.lendingId)
+                    messageManager.addSystemMessage(
+                        "lending channel ${localChannel.displayName} has been closed by the admin. your stake has been released."
+                    )
+                }
+            }
+            return true
+        }
+        val channelConfigRequest = LendingChannelConfigRequestMessageCodec.decode(content)
+        if (channelConfigRequest != null) {
+            if (!senderPeerId.isNullOrBlank() && senderPeerId != meshService.myPeerID) {
+                val localChannel = lendingChannelServiceRef?.getChannelByIdentifier(
+                    channelConfigRequest.displayName,
+                    channelConfigRequest.channelKey.ifBlank { channelKey }
+                )
+                if (localChannel != null && localChannel.creatorPeerId == meshService.myPeerID) {
+                    val encoded = LendingChannelConfigMessageCodec.encode(
+                        com.bitchat.android.lending.LendingChannelConfigMessage(
+                            lendingId = localChannel.lendingId,
+                            channelKey = localChannel.channelKey,
+                            displayName = localChannel.displayName,
+                            creatorPeerId = localChannel.creatorPeerId,
+                            creatorWalletAddress = localChannel.creatorWalletAddress,
+                            requiredStakeAmount = localChannel.requiredStakeAmount,
+                            minimumVoteCount = localChannel.minimumVoteCount,
+                            maxLoanDurationDays = localChannel.maxLoanDurationDays,
+                            stakeTokenMint = localChannel.stakeTokenMint,
+                            stakeTokenSymbol = localChannel.stakeTokenSymbol,
+                            stakeTokenDecimals = localChannel.stakeTokenDecimals,
+                            votingWindowHours = localChannel.votingWindowHours,
+                            defaultGracePeriodDays = localChannel.defaultGracePeriodDays,
+                            lifecycleState = localChannel.lifecycleState
+                        )
+                    )
+                    meshService.sendMessage(
+                        "${ChannelKeys.parseChannelName(localChannel.channelKey)} $encoded",
+                        emptyList(),
+                        localChannel.channelKey
+                    )
+                }
+            }
+            return true
+        }
+        val membership = LendingMembershipMessageCodec.decode(content)
+        if (membership != null) {
+            lendingChannelServiceRef?.importMembershipUpdate(membership, senderPeerId)
+            // Nudge admin when a new member joins and treasury isn't set up
+            if (membership.joinStatus == LendingMemberStatus.ACTIVE &&
+                membership.depositStatus == EscrowTransferStatus.CONFIRMED
+            ) {
+                val lendingService = lendingChannelServiceRef
+                val escrowService = lendingEscrowServiceRef
+                if (lendingService != null && escrowService != null) {
+                    val channel = runCatching { lendingService.getChannelByLendingId(membership.lendingId) }.getOrNull()
+                    if (channel != null && channel.creatorPeerId == meshService.myPeerID && channel.escrowMultisigAddress.isBlank()) {
+                        val activeCount = runCatching {
+                            lendingService.getMemberships(channel.lendingId).count {
+                                it.joinStatus == LendingMemberStatus.ACTIVE &&
+                                    it.depositStatus == EscrowTransferStatus.CONFIRMED
+                            }
+                        }.getOrDefault(0)
+                        if (activeCount >= 3) {
+                            messageManager.addSystemMessage(
+                                "new member joined ${channel.displayName} — you now have $activeCount active members. tap the shield icon to set up approvers and activate the on-chain treasury."
+                            )
+                        }
+                    }
+                }
+            }
+            return true
+        }
+        val request = com.bitchat.android.lending.LendingLoanRequestMessageCodec.decode(content)
+        if (request != null) {
+            lendingLoanServiceRef?.importDiscoveredLoanRequest(request, senderPeerId)?.let { imported ->
+                updateLendingLoanRequestStatus(imported.requestId, imported.status)
+            }
+            // Warn admin if a loan request arrives but treasury isn't set up
+            val lendingService = lendingChannelServiceRef
+            if (lendingService != null) {
+                val channel = runCatching { lendingService.getChannelByLendingId(request.lendingId) }.getOrNull()
+                if (channel != null && channel.creatorPeerId == meshService.myPeerID && channel.escrowMultisigAddress.isBlank()) {
+                    messageManager.addSystemMessage(
+                        "a loan request was submitted but the on-chain treasury is not set up yet. tap the shield icon to configure approvers before loans can be disbursed."
+                    )
+                }
+            }
+            return true
+        }
+        val vote = LendingLoanVoteMessageCodec.decode(content)
+        if (vote != null) {
+            lendingLoanServiceRef?.importDiscoveredLoanVote(vote, senderPeerId)?.let { imported ->
+                updateLendingLoanRequestStatus(imported.requestId, imported.status)
+            }
+            return true
+        }
+        val repayment = LendingLoanRepaymentMessageCodec.decode(content)
+        if (repayment != null) {
+            lendingLoanServiceRef?.importDiscoveredLoanRepayment(repayment, senderPeerId)?.let { imported ->
+                updateLendingLoanRequestStatus(imported.updatedRequest.requestId, imported.updatedRequest.status)
+            }
+            return true
+        }
+        return content.startsWith(LEGACY_LENDING_CHANNEL_ANNOUNCEMENT_PREFIX)
     }
 
     private fun startTokenGateRevalidationLoop(tokenGateService: com.bitchat.android.solana.TokenGateService) {
@@ -771,10 +1018,495 @@ class ChatViewModel(
         // Then switch to the channel
         switchToChannel(channelKey)
     }
+
+    fun openSidebarChannel(channelKey: String, onAllowed: () -> Unit) {
+        viewModelScope.launch {
+            val lendingChannel = lendingChannelServiceRef?.getChannelByChannelKey(channelKey)
+            if (lendingChannel != null) {
+                var membership = lendingChannelServiceRef
+                    ?.getMemberships(lendingChannel.lendingId)
+                    ?.firstOrNull { it.memberPeerId == meshService.myPeerID }
+                var canAccess = membership?.joinStatus == LendingMemberStatus.ACTIVE &&
+                    membership.depositStatus == EscrowTransferStatus.CONFIRMED
+                if (!canAccess) {
+                    lendingEscrowServiceRef?.let { escrowService ->
+                        runCatching { escrowService.reconcilePendingEscrowOperations() }
+                        runCatching { escrowService.repairMembershipState(lendingChannel.lendingId, meshService.myPeerID) }
+                        membership = lendingChannelServiceRef
+                            ?.getMemberships(lendingChannel.lendingId)
+                            ?.firstOrNull { it.memberPeerId == meshService.myPeerID }
+                        canAccess = membership?.joinStatus == LendingMemberStatus.ACTIVE &&
+                            membership.depositStatus == EscrowTransferStatus.CONFIRMED
+                    }
+                }
+                if (!canAccess) {
+                    val hasMembership = membership != null
+                    val isPending = membership?.depositStatus == EscrowTransferStatus.PENDING ||
+                        membership?.joinStatus == LendingMemberStatus.PENDING
+                    val isFailed = membership?.depositStatus == EscrowTransferStatus.FAILED
+                    if (!hasMembership || isFailed) {
+                        channelManager.leaveChannel(channelKey)
+                        messageManager.addSystemMessage(
+                            "access denied: join ${lendingChannel.displayName} with /lending join before opening it."
+                        )
+                    } else if (isPending) {
+                        messageManager.addSystemMessage(
+                            "stake pending for ${lendingChannel.displayName}. wait for confirmation before opening it."
+                        )
+                    } else {
+                        messageManager.addSystemMessage(
+                            "access denied: ${lendingChannel.displayName} membership is not active yet."
+                        )
+                    }
+                    return@launch
+                }
+            }
+
+            switchToChannelWithTimelineContext(channelKey)
+            onAllowed()
+        }
+    }
     
     fun leaveChannel(channel: String) {
-        channelManager.leaveChannel(channel)
-        meshService.sendMessage("left $channel")
+        viewModelScope.launch {
+            val lendingChannel = lendingChannelServiceRef?.getChannelByChannelKey(channel)
+            val lendingLoanService = lendingLoanServiceRef
+            val lendingService = lendingChannelServiceRef
+            if (lendingChannel != null && lendingLoanService != null && lendingService != null) {
+                val membership = runCatching {
+                    lendingService.getMemberships(lendingChannel.lendingId)
+                        .firstOrNull { it.memberPeerId == meshService.myPeerID }
+                }.getOrNull()
+                val escrowAccount = runCatching {
+                    lendingEscrowServiceRef?.getEscrowAccount(lendingChannel.lendingId)
+                }.getOrNull()
+                if (membership == null || escrowAccount == null) {
+                    messageManager.addSystemMessage("couldn't prepare refund for ${lendingChannel.displayName}.")
+                    return@launch
+                }
+                _pendingLendingLeaveApproval.value = com.bitchat.android.lending.LendingLeaveApprovalRequest(
+                    lendingId = lendingChannel.lendingId,
+                    memberPeerId = meshService.myPeerID,
+                    channelKey = lendingChannel.channelKey,
+                    channelDisplayName = lendingChannel.displayName,
+                    treasuryAddress = escrowAccount.vaultAddress,
+                    recipientAddress = membership.walletAddress,
+                    amountAtomic = membership.stakeAmount,
+                    decimals = lendingChannel.stakeTokenDecimals,
+                    symbol = lendingChannel.stakeTokenSymbol.ifBlank { lendingChannel.stakeTokenMint },
+                    assetDescriptor = if (com.bitchat.android.lending.isNativeSolStakeAsset(lendingChannel.stakeTokenMint, lendingChannel.stakeTokenSymbol)) {
+                        "Devnet SOL refund"
+                    } else {
+                        "${lendingChannel.stakeTokenSymbol.ifBlank { "Token" }} refund"
+                    }
+                )
+                return@launch
+            }
+
+            channelManager.leaveChannel(channel)
+            meshService.sendMessage("left $channel")
+        }
+    }
+
+    fun dismissLendingLeaveApproval() {
+        if (_isSubmittingLendingLeaveApproval.value == true) return
+        _pendingLendingLeaveApproval.value = null
+    }
+
+    fun confirmLendingLeaveApproval() {
+        val approval = _pendingLendingLeaveApproval.value ?: return
+        val lendingLoanService = lendingLoanServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending leave is not ready yet.")
+                return
+            }
+        val lendingService = lendingChannelServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending service is not ready yet.")
+                return
+            }
+        val escrowService = lendingEscrowServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending escrow is not ready yet.")
+                return
+            }
+        _isSubmittingLendingLeaveApproval.value = true
+        viewModelScope.launch {
+            val result = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    lendingLoanService.leaveChannel(
+                        com.bitchat.android.lending.LeaveLendingChannelRequest(
+                            identifier = approval.channelDisplayName,
+                            preferredChannelKey = approval.channelKey,
+                            memberPeerId = approval.memberPeerId
+                        )
+                    )
+                }
+            }
+            _isSubmittingLendingLeaveApproval.value = false
+            result.onSuccess { leaveResult ->
+                _pendingLendingLeaveApproval.value = null
+                channelManager.leaveChannel(approval.channelKey)
+                messageManager.addSystemMessage(
+                    "left lending channel ${approval.channelDisplayName}: refund submitted ${formatStakeAmount(approval.amountAtomic, approval.decimals)} ${approval.symbol}"
+                )
+            }.onFailure { error ->
+                messageManager.addSystemMessage("couldn't leave lending channel: ${error.message}")
+            }
+        }
+    }
+
+    fun requestLendingStakeApproval(lendingId: String, memberPeerId: String) {
+        val escrowService = lendingEscrowServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending escrow is not ready yet.")
+                return
+            }
+        viewModelScope.launch {
+            val prepared = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    escrowService.prepareStakeDeposit(lendingId, memberPeerId)
+                }
+            }
+            prepared.onSuccess { approval ->
+                _pendingLendingStakeApproval.value = approval
+            }.onFailure { error ->
+                messageManager.addSystemMessage("unable to prepare stake approval: ${error.message}")
+            }
+        }
+    }
+
+    fun dismissLendingStakeApproval() {
+        if (_isSubmittingLendingStakeApproval.value == true) return
+        _pendingLendingStakeApproval.value = null
+    }
+
+    fun updateLendingLoanRequestStatus(requestId: String, status: String) {
+        val current = _lendingLoanRequestStatuses.value.orEmpty().toMutableMap()
+        current[requestId] = status
+        _lendingLoanRequestStatuses.value = current
+    }
+
+    fun ensureLendingLoanRequestStatusLoaded(requestId: String) {
+        val loanService = lendingLoanServiceRef ?: return
+        viewModelScope.launch {
+            val reconciledStatus = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    loanService.reconcileLoanRequestState(requestId)?.status
+                }
+            }.getOrNull()
+
+            if (reconciledStatus == null) {
+                val importedStatus = ensureLendingLoanRequestImported(requestId)
+                importedStatus?.let { status ->
+                    updateLendingLoanRequestStatus(requestId, status)
+                    return@launch
+                }
+            }
+
+            reconciledStatus?.let { status ->
+                updateLendingLoanRequestStatus(requestId, status)
+            }
+        }
+    }
+
+    fun sendLendingVoteAction(requestId: String, approve: Boolean) {
+        viewModelScope.launch {
+            val loanService = lendingLoanServiceRef
+            if (loanService != null) {
+                val known = runCatching {
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        loanService.reconcileLoanRequestState(requestId)?.status
+                    }
+                }.getOrNull()
+                if (known == null) {
+                    ensureLendingLoanRequestImported(requestId)?.let { status ->
+                        updateLendingLoanRequestStatus(requestId, status)
+                    }
+                }
+            }
+            val command = if (approve) "approve" else "deny"
+            sendMessage("/lending vote $requestId $command")
+        }
+    }
+
+    private suspend fun ensureLendingLoanRequestImported(requestId: String): String? {
+        val loanService = lendingLoanServiceRef ?: return null
+        val lendingService = lendingChannelServiceRef ?: return null
+        val backingMessage = state.getChannelMessagesValue()
+            .values
+            .asSequence()
+            .flatten()
+            .firstOrNull { message ->
+                val decoded = com.bitchat.android.lending.LendingLoanRequestMessageCodec.decode(message.content)
+                decoded?.requestId == requestId
+            } ?: return null
+        val decoded = com.bitchat.android.lending.LendingLoanRequestMessageCodec.decode(backingMessage.content) ?: return null
+        val borrowerPeerId = decoded.borrowerPeerId
+        if (!borrowerPeerId.isNullOrBlank() && borrowerPeerId == backingMessage.senderPeerID) {
+            val channel = lendingService.getChannelByLendingId(decoded.lendingId)
+            if (channel != null) {
+                val hasMembership = lendingService.getMemberships(channel.lendingId)
+                    .any { it.memberPeerId == borrowerPeerId }
+                if (!hasMembership) {
+                    val role = channelManager.getChannelRole(channel.channelKey, borrowerPeerId)
+                    if (role in setOf(ChannelRoles.OWNER, ChannelRoles.ADMIN, ChannelRoles.ENDORSER, ChannelRoles.MEMBER)) {
+                        runCatching {
+                            lendingService.importMembershipUpdate(
+                                LendingMembershipMessage(
+                                    lendingId = channel.lendingId,
+                                    memberPeerId = borrowerPeerId,
+                                    walletAddress = decoded.borrowerWalletAddress.orEmpty(),
+                                    stakeAmount = channel.requiredStakeAmount,
+                                    depositStatus = EscrowTransferStatus.CONFIRMED,
+                                    joinStatus = LendingMemberStatus.ACTIVE
+                                ),
+                                borrowerPeerId
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return runCatching {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                loanService.importDiscoveredLoanRequest(decoded, backingMessage.senderPeerID)?.status
+                    ?: loanService.getLoanRequest(requestId)?.status
+            }
+        }.getOrNull()
+    }
+
+    fun sendLendingDisburseAction(requestId: String) {
+        sendMessage("/lending disburse $requestId")
+    }
+
+    fun sendLendingReviewAction(requestId: String) {
+        sendMessage("/lending review $requestId")
+    }
+
+    fun sendLendingAuthorizeAction(requestId: String) {
+        sendMessage("/lending authorize $requestId")
+    }
+
+    fun requestLendingTreasurySetup() {
+        val lendingService = lendingChannelServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending service is not ready yet.")
+                return
+            }
+        val escrowService = lendingEscrowServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending escrow is not ready yet.")
+                return
+            }
+        val currentChannelKey = state.getCurrentChannelValue()
+        if (currentChannelKey.isNullOrBlank() || !state.getCurrentChannelIsLendingValue()) {
+            messageManager.addSystemMessage("open a lending channel before setting up treasury.")
+            return
+        }
+        val currentChannel = availableLendingChannels.value
+            ?.firstOrNull { it.channelKey == currentChannelKey }
+        if (currentChannel == null) {
+            messageManager.addSystemMessage("couldn't find the lending channel for treasury setup.")
+            return
+        }
+        if (currentChannel.creatorPeerId != meshService.myPeerID) {
+            messageManager.addSystemMessage("only the lending channel owner can finish treasury setup.")
+            return
+        }
+        viewModelScope.launch {
+            val escrow = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    escrowService.getEscrowAccount(currentChannel.lendingId)
+                }
+            }.getOrNull()
+            val memberships = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    lendingService.getMemberships(currentChannel.lendingId)
+                }
+            }.getOrDefault(emptyList())
+            val nicknames = meshService.getPeerNicknames()
+            val ownerWalletAddress = meshService.solanaAddress.orEmpty()
+            val signerCandidates = buildList {
+                if (ownerWalletAddress.isNotBlank()) {
+                    add(
+                        com.bitchat.android.lending.LendingTreasurySignerCandidate(
+                            peerId = meshService.myPeerID,
+                            displayName = nicknames[meshService.myPeerID]
+                                ?: state.getNicknameValue()
+                                ?: "You",
+                            walletAddress = ownerWalletAddress,
+                            roleLabel = "Owner",
+                            recommended = true
+                        )
+                    )
+                }
+                memberships
+                    .filter { it.memberPeerId != meshService.myPeerID }
+                    .mapNotNull { membership ->
+                        val walletAddress = membership.walletAddress.takeIf { it.isNotBlank() }
+                            ?: meshService.getPeerInfo(membership.memberPeerId)?.solanaAddress
+                            ?: return@mapNotNull null
+                        val role = channelManager.getChannelRole(currentChannel.channelKey, membership.memberPeerId)
+                        val recommended = role in setOf(ChannelRoles.ADMIN, ChannelRoles.ENDORSER)
+                        com.bitchat.android.lending.LendingTreasurySignerCandidate(
+                            peerId = membership.memberPeerId,
+                            displayName = nicknames[membership.memberPeerId]
+                                ?: membership.memberPeerId.take(8),
+                            walletAddress = walletAddress,
+                            roleLabel = when (role) {
+                                ChannelRoles.ADMIN -> "Admin"
+                                ChannelRoles.ENDORSER -> "Approver"
+                                ChannelRoles.OWNER -> "Owner"
+                                else -> "Member"
+                            },
+                            recommended = recommended
+                        )
+                    }
+                    .sortedWith(
+                        compareByDescending<com.bitchat.android.lending.LendingTreasurySignerCandidate> { it.recommended }
+                            .thenBy { it.displayName.lowercase() }
+                    )
+                    .forEach { candidate ->
+                        if (none { it.peerId == candidate.peerId }) {
+                            add(candidate)
+                        }
+                    }
+            }
+            _pendingLendingTreasurySetup.value = com.bitchat.android.lending.LendingTreasurySetupRequest(
+                lendingId = currentChannel.lendingId,
+                channelKey = currentChannel.channelKey,
+                channelDisplayName = currentChannel.displayName,
+                approvalThreshold = com.bitchat.android.lending.REQUIRED_LOAN_APPROVAL_COUNT,
+                recommendedSignerCount = com.bitchat.android.lending.TARGET_LOAN_APPROVAL_MEMBER_COUNT,
+                cluster = com.bitchat.android.lending.DEFAULT_SQUADS_CLUSTER,
+                signerCandidates = signerCandidates,
+                existingMultisigAddress = currentChannel.escrowMultisigAddress,
+                existingVaultAddress = escrow?.vaultAddress.orEmpty()
+            )
+        }
+    }
+
+    fun dismissLendingTreasurySetup() {
+        if (_isSubmittingLendingTreasurySetup.value == true) return
+        _pendingLendingTreasurySetup.value = null
+    }
+
+    fun confirmLendingTreasurySetup(
+        multisigAddress: String,
+        vaultAddress: String?,
+        selectedSignerWalletAddresses: List<String>
+    ) {
+        val request = _pendingLendingTreasurySetup.value ?: return
+        val lendingService = lendingChannelServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending service is not ready yet.")
+                return
+            }
+        _isSubmittingLendingTreasurySetup.value = true
+        viewModelScope.launch {
+            val result = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    if (multisigAddress.isBlank()) {
+                        lendingService.createSquad(
+                            com.bitchat.android.lending.CreateLendingSquadRequest(
+                                identifier = request.channelKey,
+                                preferredChannelKey = request.channelKey,
+                                actorPeerId = meshService.myPeerID,
+                                memberWalletAddresses = selectedSignerWalletAddresses
+                            )
+                        )
+                    } else {
+                        lendingService.configureSquad(
+                            com.bitchat.android.lending.ConfigureLendingSquadRequest(
+                                identifier = request.channelKey,
+                                preferredChannelKey = request.channelKey,
+                                actorPeerId = meshService.myPeerID,
+                                multisigAddress = multisigAddress.trim(),
+                                vaultAddress = vaultAddress?.trim()?.takeIf { it.isNotBlank() }
+                            )
+                        )
+                    }
+                }
+            }
+            _isSubmittingLendingTreasurySetup.value = false
+            result.onSuccess {
+                _pendingLendingTreasurySetup.value = null
+                refreshCurrentLendingChannelContext()
+                messageManager.addSystemMessage(
+                    "community treasury connected for ${request.channelDisplayName}. Admin review and approver authorization are now available."
+                )
+            }.onFailure { error ->
+                _pendingLendingTreasurySetup.value = null
+                messageManager.addSystemMessage(
+                    "couldn't connect community treasury: ${friendlyLendingSquadSetupError(error)}"
+                )
+            }
+        }
+    }
+
+    fun sendLendingForwardAction(requestId: String, destinationIdentifier: String) {
+        sendMessage("/lending forward $requestId $destinationIdentifier")
+    }
+
+    fun sendLendingCancelAction(requestId: String) {
+        sendMessage("/lending cancel $requestId")
+    }
+
+    fun confirmLendingStakeApproval() {
+        val approval = _pendingLendingStakeApproval.value ?: return
+        val escrowService = lendingEscrowServiceRef
+            ?: run {
+                messageManager.addSystemMessage("lending escrow is not ready yet.")
+                return
+            }
+        _isSubmittingLendingStakeApproval.value = true
+        viewModelScope.launch {
+            val result = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    escrowService.submitStakeDeposit(approval.lendingId, approval.memberPeerId)
+                }
+            }
+            _isSubmittingLendingStakeApproval.value = false
+            result.onSuccess { membership ->
+                _pendingLendingStakeApproval.value = null
+                messageManager.addSystemMessage(
+                    "stake transaction queued for ${approval.channelDisplayName}: ${formatStakeAmount(approval.amountAtomic, approval.decimals)} ${approval.symbol} • deposit ${membership.depositStatus.lowercase()} • status ${membership.joinStatus.lowercase()}"
+                )
+                val lendingService = lendingChannelServiceRef
+                if (lendingService != null) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { lendingService.getChannelByLendingId(approval.lendingId) }
+                            .getOrNull()
+                            ?.let { channel ->
+                                val encoded = LendingMembershipMessageCodec.encode(
+                                    com.bitchat.android.lending.LendingMembershipMessage(
+                                        lendingId = channel.lendingId,
+                                        memberPeerId = approval.memberPeerId,
+                                        walletAddress = membership.walletAddress,
+                                        stakeAmount = membership.stakeAmount,
+                                        depositStatus = membership.depositStatus,
+                                        joinStatus = membership.joinStatus
+                                    )
+                                )
+                                meshService.sendMessage(
+                                    "${ChannelKeys.parseChannelName(channel.channelKey)} $encoded",
+                                    emptyList(),
+                                    channel.channelKey
+                                )
+                                channel.channelKey
+                            }
+                            ?.let { channelKey ->
+                                launch(Dispatchers.Main) {
+                                    switchToChannelWithTimelineContext(channelKey)
+                                }
+                            }
+                    }
+                }
+            }.onFailure { error ->
+                messageManager.addSystemMessage("stake transaction failed: ${error.message}")
+            }
+        }
     }
     
     // MARK: - Private Chat Management (delegated)
@@ -1815,7 +2547,144 @@ class ChatViewModel(
 
     fun canManageFeedPins(): Boolean {
         val channel = state.getCurrentChannelValue() ?: return false
-        return channelManager.isChannelAdmin(channel, meshService.myPeerID)
+        return channelManager.isChannelAdmin(channel, meshService.myPeerID) &&
+            currentLendingSharedCustodyReady.value == true
+    }
+
+    fun canOpenLendingSignerReview(): Boolean {
+        val channel = state.getCurrentChannelValue() ?: return false
+        return channelManager.isChannelAdmin(channel, meshService.myPeerID) &&
+            currentLendingSharedCustodyReady.value == true
+    }
+
+    fun canAuthorizeLendingPayout(): Boolean {
+        val channel = state.getCurrentChannelValue() ?: return false
+        return channelManager.getChannelRole(channel, meshService.myPeerID) in setOf(
+            ChannelRoles.OWNER,
+            ChannelRoles.ADMIN,
+            ChannelRoles.ENDORSER
+        ) && currentLendingSharedCustodyReady.value == true
+    }
+
+    fun canSetupLendingTreasury(): Boolean {
+        val currentChannelKey = state.getCurrentChannelValue() ?: return false
+        val channel = availableLendingChannels.value
+            ?.firstOrNull { it.channelKey == currentChannelKey }
+            ?: return false
+        return channel.creatorPeerId == meshService.myPeerID &&
+            currentLendingSharedCustodyReady.value != true
+    }
+
+    private suspend fun publishCanonicalRepaymentUpdates(
+        repayments: List<com.bitchat.android.data.local.entities.LoanRepaymentEntity>
+    ) {
+        val loanService = lendingLoanServiceRef ?: return
+        val lendingService = lendingChannelServiceRef ?: return
+        repayments
+            .filter {
+                it.txStatus == EscrowTransferStatus.CONFIRMED &&
+                    !it.txSignature.isNullOrBlank()
+            }
+            .forEach { repayment ->
+                val loan = loanService.getLoanRequest(repayment.requestId) ?: return@forEach
+                val channel = lendingService.getChannelByLendingId(repayment.lendingId) ?: return@forEach
+                val totalDue = loan.principalAmount + ((loan.principalAmount * loan.interestBps) / 10_000L)
+                val totalRepaid = loanService.getRepayments(loan.requestId)
+                    .filter { it.txStatus == EscrowTransferStatus.CONFIRMED }
+                    .distinctBy { it.txSignature ?: it.repaymentId }
+                    .sumOf { it.amount }
+                val encoded = LendingLoanRepaymentMessageCodec.encode(
+                    com.bitchat.android.lending.LendingLoanRepaymentMessage(
+                        repaymentId = repayment.repaymentId,
+                        requestId = loan.requestId,
+                        lendingId = loan.lendingId,
+                        payerPeerId = meshService.myPeerID,
+                        payerLabel = state.getNicknameValue(),
+                        amount = repayment.amount,
+                        txSignature = repayment.txSignature,
+                        txStatus = repayment.txStatus,
+                        totalRepaidAmount = totalRepaid,
+                        remainingBalance = kotlin.math.max(totalDue - totalRepaid, 0L),
+                        requestStatus = loan.status,
+                        paidAt = repayment.paidAt
+                    )
+                )
+                val wireContent = "${ChannelKeys.parseChannelName(channel.channelKey)} $encoded"
+                meshService.sendMessage(wireContent, emptyList(), channel.channelKey)
+            }
+    }
+
+    private fun restartLendingLoanReconciliation() {
+        lendingLoanReconciliationJob?.cancel()
+        val currentChannelKey = state.getCurrentChannelValue()
+        val lendingService = lendingChannelServiceRef ?: return
+        val loanService = lendingLoanServiceRef ?: return
+        if (currentChannelKey.isNullOrBlank() || !state.getCurrentChannelIsLendingValue()) return
+
+        lendingLoanReconciliationJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching {
+                    val channel = lendingService.getChannelByChannelKey(currentChannelKey) ?: return@runCatching
+                    val loans = loanService.getLoanRequests(channel.lendingId)
+                    loans
+                        .filter {
+                            it.status in setOf(
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.COMMUNITY_APPROVED,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.SIGNER_REVIEW,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.SIGNER_APPROVED,
+                                com.bitchat.android.data.local.entities.LoanRequestStatus.DISBURSED
+                            ) || !it.squadsProposalAddress.isNullOrBlank()
+                        }
+                        .forEach { loan ->
+                            val reconciled = loanService.reconcileLoanRequestState(loan.requestId)
+                            reconciled?.let { updateLendingLoanRequestStatus(it.requestId, it.status) }
+                        }
+                    // Detect overdue and defaulted loans across all channels
+                    val transitions = loanService.reconcileOverdueAndDefaultedLoans()
+                    transitions.forEach { transition ->
+                        updateLendingLoanRequestStatus(transition.requestId, transition.newStatus)
+                        val msg = when (transition.newStatus) {
+                            com.bitchat.android.data.local.entities.LoanRequestStatus.OVERDUE ->
+                                "loan ${transition.requestId} is overdue — borrower should repay to avoid default."
+                            com.bitchat.android.data.local.entities.LoanRequestStatus.DEFAULTED ->
+                                "loan ${transition.requestId} has defaulted. losses have been applied to backing voters."
+                            com.bitchat.android.data.local.entities.LoanRequestStatus.REPAID ->
+                                "loan ${transition.requestId} is fully repaid. interest has been distributed to voters."
+                            else -> null
+                        }
+                        if (msg != null) {
+                            messageManager.addSystemMessage(msg)
+                        }
+                        // Check if current user was suspended as a result of a default
+                        if (transition.newStatus == com.bitchat.android.data.local.entities.LoanRequestStatus.DEFAULTED) {
+                            val myMembership = lendingService.getMemberships(transition.lendingId)
+                                .firstOrNull { it.memberPeerId == meshService.myPeerID }
+                            if (myMembership?.joinStatus == LendingMemberStatus.SUSPENDED) {
+                                messageManager.addSystemMessage(
+                                    "your voting is now suspended in ${transition.channelDisplayName} due to stake loss. run /lending topup to restore your stake."
+                                )
+                            }
+                        }
+                    }
+                }.onFailure { error ->
+                    Log.d(TAG, "Lending reconciliation skipped: ${error.message}")
+                }
+                delay(LENDING_LOAN_RECONCILIATION_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun friendlyLendingSquadSetupError(error: Throwable): String {
+        return when (error.message) {
+            "lending_channel_not_found" -> "lending channel not found"
+            "owner_only_squad_configuration" -> "only the lending channel owner can finish treasury setup"
+            "squad_multisig_required" -> "enter the community wallet ID"
+            "squad_threshold_must_be_2" -> "the community treasury must require 2 approvals"
+            "squad_member_count_must_be_at_least_3" -> "the community treasury must include at least 3 trusted approvers"
+            "account_not_found" -> "the community wallet ID was not found on chain"
+            "wallet_not_initialized" -> "open your wallet in Bitchat before creating treasury access"
+            else -> error.message ?: "unknown error"
+        }
     }
 
     fun expandPost(postId: String?) {
@@ -1932,6 +2801,9 @@ class ChatViewModel(
     private fun observeTransactionStatus(entryPoint: SolanaEntryPoint) {
         val paymentManager = entryPoint.solanaPaymentManager()
         val myWalletAddress = entryPoint.solanaWalletService().getPublicKeyBase58()
+        val lendingEscrowService = entryPoint.lendingEscrowService()
+        val lendingChannelService = entryPoint.lendingChannelService()
+        val lendingLoanService = entryPoint.lendingLoanService()
         viewModelScope.launch {
             paymentManager.observeRecentTransactions()
                 .collect { transactions ->
@@ -1939,7 +2811,7 @@ class ChatViewModel(
                         val key = "${tx.id}:${tx.status}"
                         if (notifiedTransactionIds.contains(key)) continue
 
-                        val amountSol = paymentManager.lamportsToSolDisplay(tx.amountLamports)
+                        val amountLabel = paymentManager.formatDisplayAmount(tx)
                         val shortRecipient = if (tx.recipientPublicKey.length > 12) {
                             "${tx.recipientPublicKey.take(8)}...${tx.recipientPublicKey.takeLast(4)}"
                         } else tx.recipientPublicKey
@@ -1950,28 +2822,59 @@ class ChatViewModel(
                         val statusMessage = when (tx.status) {
                             com.bitchat.android.data.models.TransactionStatus.AWAITING_BLOCKHASH.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment preparing: $amountSol SOL to $shortRecipient (awaiting blockhash)"
+                                "payment preparing: $amountLabel to $shortRecipient (awaiting blockhash)"
                             }
                             com.bitchat.android.data.models.TransactionStatus.BROADCASTING.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment broadcasting: $amountSol SOL to $shortRecipient"
+                                "payment broadcasting: $amountLabel to $shortRecipient"
                             }
                             com.bitchat.android.data.models.TransactionStatus.CONFIRMED.value -> {
                                 notifiedTransactionIds.add(key)
+                                launch(Dispatchers.IO) {
+                                    runCatching {
+                                        lendingEscrowService.repairMembershipsForTransaction(tx.id, tx.txSignature)
+                                    }.getOrDefault(emptyList())
+                                    val repairedRepayments = runCatching {
+                                        lendingLoanService.repairRepaymentsForTransaction(
+                                            queuedTransactionId = tx.id,
+                                            transactionStatus = tx.status,
+                                            txSignature = tx.txSignature
+                                        )
+                                    }.getOrDefault(emptyList())
+                                    if (repairedRepayments.isNotEmpty()) {
+                                        publishCanonicalRepaymentUpdates(repairedRepayments)
+                                    }
+                                    runCatching { lendingEscrowService.reconcilePendingEscrowOperations() }
+                                        .getOrDefault(emptyList())
+                                }
                                 val isIncoming = myWalletAddress != null &&
                                     tx.recipientPublicKey == myWalletAddress &&
                                     tx.senderPublicKey != myWalletAddress
                                 if (isIncoming) {
-                                    "payment received: $amountSol SOL from $shortSender" +
+                                    "payment received: $amountLabel from $shortSender" +
                                         if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
                                 } else {
-                                    "payment confirmed: $amountSol SOL to $shortRecipient" +
+                                    "payment confirmed: $amountLabel to $shortRecipient" +
                                         if (!tx.txSignature.isNullOrEmpty()) " (tx: ${tx.txSignature!!.take(12)}...)" else ""
                                 }
                             }
                             com.bitchat.android.data.models.TransactionStatus.FAILED.value -> {
                                 notifiedTransactionIds.add(key)
-                                "payment failed: $amountSol SOL to $shortRecipient" +
+                                launch(Dispatchers.IO) {
+                                    runCatching {
+                                        lendingEscrowService.repairMembershipsForTransaction(tx.id, tx.txSignature)
+                                    }.getOrDefault(emptyList())
+                                    runCatching {
+                                        lendingLoanService.repairRepaymentsForTransaction(
+                                            queuedTransactionId = tx.id,
+                                            transactionStatus = tx.status,
+                                            txSignature = tx.txSignature
+                                        )
+                                    }.getOrDefault(emptyList())
+                                    runCatching { lendingEscrowService.reconcilePendingEscrowOperations() }
+                                        .getOrDefault(emptyList())
+                                }
+                                "payment failed: $amountLabel to $shortRecipient" +
                                     if (!tx.errorMessage.isNullOrEmpty()) " - ${tx.errorMessage}" else ""
                             }
                             else -> null
@@ -2034,6 +2937,18 @@ class ChatViewModel(
                 lastObservedWalletLamports = current
             }
         }
+    }
+
+    private fun formatStakeAmount(amountAtomic: Long, decimals: Int): String {
+        if (decimals <= 0) return amountAtomic.toString()
+        val divisor = Math.pow(10.0, decimals.toDouble())
+        val normalized = amountAtomic.toDouble() / divisor
+        val formatted = if (decimals >= 6) {
+            "%,.4f".format(normalized)
+        } else {
+            "%,.2f".format(normalized)
+        }
+        return formatted.trimEnd('0').trimEnd('.')
     }
 
     // MARK: - Navigation Management

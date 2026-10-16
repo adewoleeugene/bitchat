@@ -3,6 +3,7 @@ package com.bitchat.android.feed
 import android.content.Context
 import android.util.Log
 import com.bitchat.android.data.local.FeedDao
+import com.bitchat.android.lending.LendingTelemetryStore
 import com.bitchat.android.data.local.entities.FeedPostEntity
 import com.bitchat.android.data.local.entities.FeedReactionEntity
 import com.bitchat.android.data.local.entities.FeedReplyEntity
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 
 @Singleton
 class FeedService @Inject constructor(
-    private val feedDao: FeedDao
+    private val feedDao: FeedDao,
+    private val lendingTelemetryStore: LendingTelemetryStore
 ) {
     data class FeedReplyNotificationEvent(
         val parentPostId: String,
@@ -121,6 +123,7 @@ class FeedService @Inject constructor(
         )
         feedDao.insertPost(entity)
         markProcessed(postId)
+        lendingTelemetryStore.recordFeedPost(myPeerID, now)
 
         val payload = FeedPostPayload(
             postId = postId,
@@ -193,6 +196,7 @@ class FeedService @Inject constructor(
         )
         feedDao.insertPost(entity)
         markProcessed(payload.postId)
+        lendingTelemetryStore.recordFeedPost(senderPeerID, payload.timestamp)
         applyPendingAudioAttachmentIfAny(payload.postId, senderPeerID, context)
         onFeedUpdated?.invoke()
     }
@@ -246,6 +250,7 @@ class FeedService @Inject constructor(
             feedDao.insertReaction(
                 FeedReactionEntity(postId, myPeerID, myNickname, emoji, now, now)
             )
+            lendingTelemetryStore.recordFeedReaction(myPeerID, now)
         }
         updateCachedReactionCount(postId)
 
@@ -266,6 +271,7 @@ class FeedService @Inject constructor(
                     payload.emoji, payload.timestamp, System.currentTimeMillis()
                 )
             )
+            lendingTelemetryStore.recordFeedReaction(senderPeerID, payload.timestamp)
         }
         markProcessed(dedupKey)
         updateCachedReactionCount(payload.postId)
@@ -285,6 +291,7 @@ class FeedService @Inject constructor(
 
         val entity = FeedReplyEntity(replyId, parentPostId, myPeerID, myNickname, content, now, now)
         feedDao.insertReply(entity)
+        lendingTelemetryStore.recordFeedReply(myPeerID, now)
         updateCachedReplyCount(parentPostId)
 
         val payload = FeedReplyPayload(replyId, parentPostId, myNickname, now, content)
@@ -312,6 +319,7 @@ class FeedService @Inject constructor(
                 System.currentTimeMillis()
             )
         )
+        lendingTelemetryStore.recordFeedReply(senderPeerID, payload.timestamp)
         markProcessed(payload.replyId)
         updateCachedReplyCount(payload.parentPostId)
         onFeedUpdated?.invoke()

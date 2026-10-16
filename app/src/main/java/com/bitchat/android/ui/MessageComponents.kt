@@ -39,11 +39,16 @@ import androidx.compose.foundation.shape.CircleShape
 import com.bitchat.android.ui.media.FileMessageItem
 import com.bitchat.android.model.BitchatMessageType
 import com.bitchat.android.R
+import com.bitchat.android.data.local.entities.LendingChannelEntity
+import com.bitchat.android.data.local.entities.LoanRequestStatus
+import com.bitchat.android.lending.LendingLoanRequestMessageCodec
+import com.bitchat.android.lending.requestKindLabel
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.ui.theme.BitchatColors
 import com.bitchat.android.ui.theme.BitchatShapes
 import com.bitchat.android.ui.theme.SatoshiFamily
+import java.math.BigDecimal
 
 
 // VoiceNotePlayer moved to com.bitchat.android.ui.media.VoiceNotePlayer
@@ -58,13 +63,29 @@ fun MessagesList(
     messages: List<BitchatMessage>,
     currentUserNickname: String,
     meshService: BluetoothMeshService,
+    lendingLoanRequestStatuses: Map<String, String> = emptyMap(),
+    currentUserPeerId: String? = null,
+    lendingSharedCustodyReady: Boolean = false,
+    canReviewLoans: Boolean = false,
+    canAuthorizeLoans: Boolean = false,
+    canDisburseLoans: Boolean = false,
+    canSetupTreasury: Boolean = false,
     modifier: Modifier = Modifier,
     forceScrollToBottom: Boolean = false,
     onScrolledUpChanged: ((Boolean) -> Unit)? = null,
     onNicknameClick: ((String) -> Unit)? = null,
     onMessageLongPress: ((BitchatMessage) -> Unit)? = null,
     onCancelTransfer: ((BitchatMessage) -> Unit)? = null,
-    onImageClick: ((String, List<String>, Int) -> Unit)? = null
+    onImageClick: ((String, List<String>, Int) -> Unit)? = null,
+    onLoanVoteAction: ((String, Boolean) -> Unit)? = null,
+    onLoanCancelAction: ((String) -> Unit)? = null,
+    onLoanForwardAction: ((String, String) -> Unit)? = null,
+    onLoanReviewAction: ((String) -> Unit)? = null,
+    onLoanAuthorizeAction: ((String) -> Unit)? = null,
+    onLoanSetupTreasuryAction: (() -> Unit)? = null,
+    onLoanDisburseAction: ((String) -> Unit)? = null,
+    onEnsureLoanRequestStatus: ((String) -> Unit)? = null,
+    onLoanRepayPrefill: ((String, String) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
     
@@ -125,10 +146,24 @@ fun MessagesList(
                     messages = messages,
                     currentUserNickname = currentUserNickname,
                     meshService = meshService,
+                    lendingLoanRequestStatuses = lendingLoanRequestStatuses,
+                    lendingSharedCustodyReady = lendingSharedCustodyReady,
                     onNicknameClick = onNicknameClick,
                     onMessageLongPress = onMessageLongPress,
                     onCancelTransfer = onCancelTransfer,
-                    onImageClick = onImageClick
+                    onImageClick = onImageClick,
+                    onLoanVoteAction = onLoanVoteAction,
+                    onLoanCancelAction = onLoanCancelAction,
+                    onLoanForwardAction = onLoanForwardAction,
+                    onLoanReviewAction = onLoanReviewAction,
+                    onLoanAuthorizeAction = onLoanAuthorizeAction,
+                    onLoanDisburseAction = onLoanDisburseAction,
+                    onEnsureLoanRequestStatus = onEnsureLoanRequestStatus,
+                    currentUserPeerId = currentUserPeerId,
+                    canReviewLoans = canReviewLoans,
+                    canAuthorizeLoans = canAuthorizeLoans,
+                    canDisburseLoans = canDisburseLoans,
+                    onLoanRepayPrefill = onLoanRepayPrefill
                 )
         }
     }
@@ -140,14 +175,54 @@ fun MessageItem(
     message: BitchatMessage,
     currentUserNickname: String,
     meshService: BluetoothMeshService,
+    lendingLoanRequestStatuses: Map<String, String> = emptyMap(),
+    currentUserPeerId: String? = null,
+    lendingSharedCustodyReady: Boolean = false,
+    canReviewLoans: Boolean = false,
+    canAuthorizeLoans: Boolean = false,
+    canDisburseLoans: Boolean = false,
+    canSetupTreasury: Boolean = false,
     messages: List<BitchatMessage> = emptyList(),
     onNicknameClick: ((String) -> Unit)? = null,
     onMessageLongPress: ((BitchatMessage) -> Unit)? = null,
     onCancelTransfer: ((BitchatMessage) -> Unit)? = null,
-    onImageClick: ((String, List<String>, Int) -> Unit)? = null
+    onImageClick: ((String, List<String>, Int) -> Unit)? = null,
+    onLoanVoteAction: ((String, Boolean) -> Unit)? = null,
+    onLoanCancelAction: ((String) -> Unit)? = null,
+    onLoanForwardAction: ((String, String) -> Unit)? = null,
+    onLoanReviewAction: ((String) -> Unit)? = null,
+    onLoanAuthorizeAction: ((String) -> Unit)? = null,
+    onLoanSetupTreasuryAction: (() -> Unit)? = null,
+    onLoanDisburseAction: ((String) -> Unit)? = null,
+    onEnsureLoanRequestStatus: ((String) -> Unit)? = null,
+    onLoanRepayPrefill: ((String, String) -> Unit)? = null
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val loanRequest = remember(message.content) { LendingLoanRequestMessageCodec.decode(message.content) }
+
+    loanRequest?.let { request ->
+        LoanRequestMessageItem(
+            request = request,
+            lendingLoanRequestStatuses = lendingLoanRequestStatuses,
+            lendingSharedCustodyReady = lendingSharedCustodyReady,
+            onLoanVoteAction = onLoanVoteAction,
+            onLoanCancelAction = onLoanCancelAction,
+            onLoanForwardAction = onLoanForwardAction,
+            onLoanReviewAction = onLoanReviewAction,
+            onLoanAuthorizeAction = onLoanAuthorizeAction,
+            onLoanSetupTreasuryAction = onLoanSetupTreasuryAction,
+            onLoanDisburseAction = onLoanDisburseAction,
+            onEnsureLoanRequestStatus = onEnsureLoanRequestStatus,
+            onLoanRepayPrefill = onLoanRepayPrefill,
+            currentUserPeerId = currentUserPeerId,
+            canReviewLoans = canReviewLoans,
+            canAuthorizeLoans = canAuthorizeLoans,
+            canDisburseLoans = canDisburseLoans,
+            canSetupTreasury = canSetupTreasury
+        )
+        return
+    }
 
     val isSelf = message.senderPeerID == meshService.myPeerID ||
             message.sender == currentUserNickname ||
@@ -159,8 +234,12 @@ fun MessageItem(
         SystemMessageItem(
             message = message,
             timeFormatter = timeFormatter,
-            onMessageLongPress = onMessageLongPress
-        )
+                            onMessageLongPress = onMessageLongPress,
+                            lendingLoanRequestStatuses = lendingLoanRequestStatuses,
+                            onLoanVoteAction = onLoanVoteAction,
+                            onEnsureLoanRequestStatus = onEnsureLoanRequestStatus,
+                            onLoanRepayPrefill = onLoanRepayPrefill
+                        )
         return
     }
 
@@ -223,7 +302,11 @@ fun MessageItem(
 private fun SystemMessageItem(
     message: BitchatMessage,
     timeFormatter: SimpleDateFormat,
-    onMessageLongPress: ((BitchatMessage) -> Unit)?
+    onMessageLongPress: ((BitchatMessage) -> Unit)?,
+    lendingLoanRequestStatuses: Map<String, String>,
+    onLoanVoteAction: ((String, Boolean) -> Unit)?,
+    onEnsureLoanRequestStatus: ((String) -> Unit)?,
+    onLoanRepayPrefill: ((String, String) -> Unit)?
 ) {
     val haptic = LocalHapticFeedback.current
     val annotatedText = buildAnnotatedString {
@@ -260,6 +343,281 @@ private fun SystemMessageItem(
             }
         )
     }
+}
+
+@Composable
+private fun LoanRequestMessageItem(
+    request: com.bitchat.android.lending.LendingLoanRequestMessage,
+    lendingLoanRequestStatuses: Map<String, String>,
+    lendingSharedCustodyReady: Boolean,
+    onLoanVoteAction: ((String, Boolean) -> Unit)?,
+    onLoanCancelAction: ((String) -> Unit)?,
+    onLoanForwardAction: ((String, String) -> Unit)?,
+    onLoanReviewAction: ((String) -> Unit)?,
+    onLoanAuthorizeAction: ((String) -> Unit)?,
+    onLoanSetupTreasuryAction: (() -> Unit)?,
+    onLoanDisburseAction: ((String) -> Unit)?,
+    onEnsureLoanRequestStatus: ((String) -> Unit)?,
+    onLoanRepayPrefill: ((String, String) -> Unit)?,
+    currentUserPeerId: String?,
+    canReviewLoans: Boolean,
+    canAuthorizeLoans: Boolean,
+    canDisburseLoans: Boolean,
+    canSetupTreasury: Boolean
+) {
+    LaunchedEffect(request.requestId) {
+        onEnsureLoanRequestStatus?.invoke(request.requestId)
+    }
+    val status = lendingLoanRequestStatuses[request.requestId] ?: request.status
+    val statusLabel = when (status) {
+        LoanRequestStatus.PENDING -> "Community voting open"
+        LoanRequestStatus.COMMUNITY_APPROVED -> "Community approved"
+        LoanRequestStatus.COMMUNITY_REJECTED -> "Community rejected"
+        LoanRequestStatus.SIGNER_REVIEW -> "Waiting for admin and approver authorization"
+        LoanRequestStatus.SIGNER_APPROVED -> "Ready for admin disbursement"
+        LoanRequestStatus.SIGNER_REJECTED -> "Signer authorization declined"
+        LoanRequestStatus.DISBURSED -> "Funds disbursed"
+        LoanRequestStatus.PARTIALLY_REPAID -> "Partially repaid"
+        LoanRequestStatus.REPAID -> "Repaid"
+        LoanRequestStatus.OVERDUE -> "Overdue"
+        LoanRequestStatus.DEFAULTED -> "Defaulted"
+        LoanRequestStatus.CANCELLED -> "Cancelled"
+        LoanRequestStatus.FUNDED_ELSEWHERE -> "Funded by another channel"
+        else -> status.lowercase()
+    }
+    val canSeeTreasuryActions = canReviewLoans || canAuthorizeLoans || canDisburseLoans || canSetupTreasury
+    val stageHint = when (status) {
+        LoanRequestStatus.PENDING -> "Members can support this request. Treasury funds do not move at this stage."
+        LoanRequestStatus.COMMUNITY_APPROVED -> when {
+            lendingSharedCustodyReady -> "Community threshold met. Admin opens signer review next."
+            canSeeTreasuryActions -> "Treasury setup required before admin review can begin."
+            else -> "Community threshold met. Waiting for admin review."
+        }
+        LoanRequestStatus.SIGNER_REVIEW -> when {
+            lendingSharedCustodyReady && canSeeTreasuryActions -> "Only admins and approvers can authorize payout now."
+            lendingSharedCustodyReady -> "Admin and approver review is in progress."
+            canSeeTreasuryActions -> "Treasury setup required before admin and approver actions are available."
+            else -> "Waiting for treasury setup and admin review."
+        }
+        LoanRequestStatus.SIGNER_APPROVED -> when {
+            lendingSharedCustodyReady && canSeeTreasuryActions -> "Signer threshold met. Admin can disburse."
+            lendingSharedCustodyReady -> "Signer threshold met. Waiting for disbursement."
+            canSeeTreasuryActions -> "Treasury setup required before funds can be disbursed."
+            else -> "Waiting for treasury setup before funds can be disbursed."
+        }
+        else -> null
+    }
+    val treasurySetupRequired = canSetupTreasury && !lendingSharedCustodyReady &&
+        status in setOf(
+            LoanRequestStatus.COMMUNITY_APPROVED,
+            LoanRequestStatus.SIGNER_REVIEW,
+            LoanRequestStatus.SIGNER_APPROVED
+        )
+    val canApprove = status == LoanRequestStatus.PENDING && request.borrowerPeerId != currentUserPeerId
+    val canCancel = status in setOf(
+        LoanRequestStatus.PENDING,
+        LoanRequestStatus.COMMUNITY_APPROVED,
+        LoanRequestStatus.SIGNER_REVIEW,
+        LoanRequestStatus.SIGNER_APPROVED
+    ) &&
+        (request.borrowerPeerId == currentUserPeerId || canDisburseLoans)
+    val canForward = false
+    val canReview = status == LoanRequestStatus.COMMUNITY_APPROVED && canReviewLoans
+    val canAuthorize = status == LoanRequestStatus.SIGNER_REVIEW && canAuthorizeLoans
+    val canDisburse = status == LoanRequestStatus.SIGNER_APPROVED && canDisburseLoans
+    val canSetupTreasuryNow = treasurySetupRequired && canSetupTreasury
+    val canRepay = request.borrowerPeerId == currentUserPeerId &&
+        status == LoanRequestStatus.DISBURSED
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 360.dp)
+                .border(1.dp, BitchatColors.TextSecondary.copy(alpha = 0.2f), BitchatShapes.MessageBubble)
+                .background(BitchatColors.MessageBubbleSystem, BitchatShapes.MessageBubble)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "Loan Request ${request.requestId}",
+                color = BitchatColors.TextPrimary,
+                fontFamily = SatoshiFamily,
+                fontSize = BASE_FONT_SIZE.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (request.channelDisplayName.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = request.channelDisplayName,
+                    color = BitchatColors.TextTertiary,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${formatLoanRequestAmount(request.principalAmount, request.assetDecimals)} ${request.assetSymbol} • ${request.durationDays}d • ${(request.interestBps / 100.0)}%",
+                color = BitchatColors.TextSecondary,
+                fontFamily = SatoshiFamily,
+                fontSize = (BASE_FONT_SIZE - 1).sp
+            )
+            request.borrowerLabel?.takeIf { it.isNotBlank() }?.let { borrower ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Borrower: $borrower",
+                    color = BitchatColors.TextSecondary,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = request.purpose,
+                color = BitchatColors.TextPrimary,
+                fontFamily = SatoshiFamily,
+                fontSize = (BASE_FONT_SIZE - 1).sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            val lineageLabel = when {
+                status == LoanRequestStatus.FUNDED_ELSEWHERE -> "Funded by another channel"
+                request.requestKind == "FORWARDED_COPY" -> "${requestKindLabel(request.requestKind)} from ${request.originLendingId ?: request.lendingId}"
+                request.parentRequestId != null -> "Origin request"
+                else -> "Origin request"
+            }
+            Text(
+                text = lineageLabel,
+                color = BitchatColors.TextTertiary,
+                fontFamily = SatoshiFamily,
+                fontSize = (BASE_FONT_SIZE - 2).sp
+            )
+            if (!request.fundingLendingId.isNullOrBlank() && request.fundingLendingId != request.lendingId) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Funding channel: ${request.fundingLendingId}",
+                    color = BitchatColors.TextTertiary,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Status: $statusLabel",
+                color = BitchatColors.TextTertiary,
+                fontFamily = SatoshiFamily,
+                fontSize = (BASE_FONT_SIZE - 2).sp
+            )
+            // Aggregate backing info for voter-backed loans
+            if (request.backingModel == "VOTER_BACKED" && status in setOf(
+                    LoanRequestStatus.PENDING,
+                    LoanRequestStatus.COMMUNITY_APPROVED,
+                    LoanRequestStatus.SIGNER_REVIEW,
+                    LoanRequestStatus.SIGNER_APPROVED
+                )
+            ) {
+                Spacer(modifier = Modifier.height(2.dp))
+                val backingLabel = when (status) {
+                    LoanRequestStatus.COMMUNITY_APPROVED,
+                    LoanRequestStatus.SIGNER_REVIEW,
+                    LoanRequestStatus.SIGNER_APPROVED -> "Fully backed by voters"
+                    else -> "Voter-backed • votes open"
+                }
+                Text(
+                    text = backingLabel,
+                    color = BitchatColors.StatusInfo,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
+            if (treasurySetupRequired) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Treasury setup required",
+                    color = BitchatColors.TextPrimary,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            stageHint?.let { hint ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = hint,
+                    color = BitchatColors.TextTertiary,
+                    fontFamily = SatoshiFamily,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onLoanVoteAction?.invoke(request.requestId, true) },
+                    enabled = canApprove
+                ) {
+                    Text("Support", fontFamily = SatoshiFamily)
+                }
+                if (canCancel) {
+                    OutlinedButton(
+                        onClick = { onLoanCancelAction?.invoke(request.requestId) }
+                    ) {
+                        Text("Cancel", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canReview) {
+                    OutlinedButton(
+                        onClick = { onLoanReviewAction?.invoke(request.requestId) }
+                    ) {
+                        Text("Review", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canSetupTreasuryNow) {
+                    OutlinedButton(
+                        onClick = { onLoanSetupTreasuryAction?.invoke() }
+                    ) {
+                        Text("Set up treasury", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canAuthorize) {
+                    OutlinedButton(
+                        onClick = { onLoanAuthorizeAction?.invoke(request.requestId) }
+                    ) {
+                        Text("Authorize", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canDisburse) {
+                    OutlinedButton(
+                        onClick = { onLoanDisburseAction?.invoke(request.requestId) }
+                    ) {
+                        Text("Disburse", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canForward) {
+                    OutlinedButton(
+                        onClick = { onLoanForwardAction?.invoke(request.requestId, request.lendingId) }
+                    ) {
+                        Text("Forward", fontFamily = SatoshiFamily)
+                    }
+                }
+                if (canRepay) {
+                    OutlinedButton(
+                        onClick = { onLoanRepayPrefill?.invoke(request.requestId, request.assetSymbol) }
+                    ) {
+                        Text("Repay", fontFamily = SatoshiFamily)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatLoanRequestAmount(amountAtomic: Long, decimals: Int): String {
+    return BigDecimal.valueOf(amountAtomic)
+        .movePointLeft(decimals)
+        .stripTrailingZeros()
+        .toPlainString()
 }
 
 @Composable

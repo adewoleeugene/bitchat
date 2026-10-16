@@ -126,6 +126,24 @@ interface FeedDao {
     @Query("SELECT * FROM feed_replies ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentReplies(limit: Int = 200): List<FeedReplyEntity>
 
+    @Query("SELECT COUNT(*) FROM feed_posts WHERE authorPeerID = :peerId")
+    suspend fun countPostsByAuthor(peerId: String): Int
+
+    @Query("SELECT COUNT(*) FROM feed_replies WHERE authorPeerID = :peerId")
+    suspend fun countRepliesByAuthor(peerId: String): Int
+
+    @Query("SELECT COUNT(*) FROM feed_reactions WHERE reactorPeerID = :peerId")
+    suspend fun countReactionsByAuthor(peerId: String): Int
+
+    @Query("SELECT timestamp FROM feed_posts WHERE authorPeerID = :peerId AND timestamp >= :since ORDER BY timestamp ASC")
+    suspend fun getRecentPostTimestampsByAuthor(peerId: String, since: Long): List<Long>
+
+    @Query("SELECT timestamp FROM feed_replies WHERE authorPeerID = :peerId AND timestamp >= :since ORDER BY timestamp ASC")
+    suspend fun getRecentReplyTimestampsByAuthor(peerId: String, since: Long): List<Long>
+
+    @Query("SELECT timestamp FROM feed_reactions WHERE reactorPeerID = :peerId AND timestamp >= :since ORDER BY timestamp ASC")
+    suspend fun getRecentReactionTimestampsByAuthor(peerId: String, since: Long): List<Long>
+
     @Query("SELECT EXISTS(SELECT 1 FROM feed_replies WHERE replyId = :replyId)")
     suspend fun replyExists(replyId: String): Boolean
 
